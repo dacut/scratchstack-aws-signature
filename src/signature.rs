@@ -986,4 +986,27 @@ mod tests {
             )
             .expect("Failed to validate terminating chunk");
     }
+
+    #[test_log::test(tokio::test)]
+    async fn test_presigned_url() {
+        let mut get_signing_key_svc = service_for_signing_key_fn(get_signing_key);
+        let req = Request::builder()
+            .method(Method::GET)
+            .uri("https://example.com:1234/test-bucket/test-object?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA7N4QX2J9L6MZ8T3P%2F20150830%2Feu-central-1%2Fs3%2Faws4_request&X-Amz-Date=20150830T123602Z&X-Amz-Expires=86400&X-Amz-SignedHeaders=host&X-Amz-Signature=353ce66394a6cf278a1047c0158ab2c0d1050cae1138c51d47fd3b6bb2198492")
+            .header(http::header::HOST, "example.com:1234")
+            .body(Bytes::from("The body of pre-signed URL request should be ignored as it is unsigned".as_bytes()))
+            .unwrap();
+
+        assert!(sigv4_validate_request(
+            req,
+            "eu-central-1",
+            "s3",
+            &mut get_signing_key_svc,
+            *TEST_TIMESTAMP,
+            &NO_ADDITIONAL_SIGNED_HEADERS,
+            SignatureOptions::S3,
+        )
+        .await
+        .is_ok());
+    }
 }
