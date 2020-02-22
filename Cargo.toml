@@ -8,6 +8,7 @@ homepage = "https://github.com/dacut/rust-aws-sig"
 repository = "https://github.com/dacut/rust-aws-sig"
 license = "Apache-2.0"
 edition = "2018"
+exclude = ["tests/*"]
 
 [lib]
 name = "aws_sig_verify"
