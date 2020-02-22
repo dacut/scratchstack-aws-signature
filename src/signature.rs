@@ -93,6 +93,8 @@ lazy_static! {
     static ref MULTISPACE: Regex = Regex::new("  +").unwrap();
 }
 
+/// Error returned when an attempt at validating an AWS SigV4 signature
+/// fails.
 #[derive(Debug)]
 pub struct SignatureError {
     /// The kind of error encountered.
@@ -105,21 +107,66 @@ pub struct SignatureError {
     _bt: Backtrace,
 }
 
+/// The possible reasons for an AWS SigV4 signature validation to fail;
+/// returned as part of SignatureError.
 #[derive(Debug)]
 pub enum ErrorKind {
+    /// Validation failed due to an underlying I/O error.
     IO(io::Error),
+
+    /// The request body used an unsupported character set encoding. Currently
+    /// only UTF-8 is supported.
     InvalidBodyEncoding,
+
+    /// The request signature specified an invalid credential -- either the
+    /// access key was not specified, or the credential scope (in the form
+    /// <code>_date_/_region_/_service_/aws4_request</code>) did not match
+    /// the expected value for the server.
     InvalidCredential,
+
+    /// The signature passed in the request did not match the calculated
+    /// signature value.
     InvalidSignature,
+
+    /// The URI path includes invalid components. This can be a malformed
+    /// hex encoding (e.g. `%0J`), a non-absolute URI path (`foo/bar`), or a
+    /// URI path that attempts to navigate above the root (`/x/../../../y`).
     InvalidURIPath,
+
+    /// An HTTP header was malformed -- the value could not be decoded as
+    /// UTF-8, or the header was empty and this is not allowed (e.g. the
+    /// `content-type` header).
     MalformedHeader,
+
+    /// The AWS SigV4 signature was malformed in some way. This can include
+    /// invalid timestamp formats, missing authorization components, or
+    /// unparseable components.
     MalformedSignature,
+
+    /// A required HTTP header (and its equivalent in the query string) is
+    /// missing.
     MissingHeader,
+
+    /// A required query parameter is missing. This is used internally in the
+    /// library; external callers only see `MissingHeader`.
     MissingParameter,
+
+    /// An HTTP header that can be specified only once was specified multiple
+    /// times.
     MultipleHeaderValues,
+
+    /// A query parameter that can be specified only once was specified
+    /// multiple times.
     MultipleParameterValues,
+
+    /// The timestamp in the request is out of the allowed range.
     TimestampOutOfRange,
+
+    /// The access key specified in the request is unknown.
     UnknownAccessKey,
+
+    /// The signature algorithm requested by the caller is unknown. This library
+    /// only supports the `AWS4-HMAC-SHA256` algorithm.
     UnknownSignatureAlgorithm,
 }
 
@@ -482,7 +529,7 @@ pub trait AWSSigV4Algorithm {
             signed_headers.split(';').map(|s| s.to_string()).collect();
 
         // Make sure the signed headers list is canonicalized. For security
-        // reasons,, we consider it an error if it isn't.
+        // reasons, we consider it an error if it isn't.
         let mut canonicalized = parts.clone();
         canonicalized.sort_unstable_by(|a, b| {
             a.to_lowercase().partial_cmp(&b.to_lowercase()).unwrap()
@@ -500,7 +547,7 @@ pub trait AWSSigV4Algorithm {
             match req.headers.get(header) {
                 None => {
                     return Err(SignatureError::new(
-                        ErrorKind::MissingParameter,
+                        ErrorKind::MissingHeader,
                         header,
                     ))
                 }
@@ -521,10 +568,11 @@ pub trait AWSSigV4Algorithm {
     /// * The `X-Amz-Date` HTTP header.
     /// * The `Date` HTTP header.
     ///
-    /// The allowed formats for these are ISO 8601 timestamps in
-    /// YYYYMMDDTHHMM
-    /// is not found, it checks the HTTP headers for an X-Amz-Date header
-    /// value. If this is not
+    /// The timestamp _should_ be in ISO 8601 `YYYYMMDDTHHMMSSZ` format
+    /// without milliseconds (_must_ per  [AWS documentation](https://docs.aws.amazon.com/general/latest/gr/sigv4-date-handling.html)).
+    /// However, the AWS SigV4 test suite includes a variety of date formats,
+    /// including RFC 2822, RFC 3339, and ISO 8601. This routine allows all
+    /// of these formats.
     fn get_request_timestamp(
         &self,
         req: &Request,
@@ -579,6 +627,8 @@ pub trait AWSSigV4Algorithm {
 
     /// The scope of the credentials to use, as calculated by the service's
     /// region and name, but using the timestamp of the request.
+    ///
+    /// The result is a string in the form `YYYYMMDD/region/service/aws4_request`.
     fn get_credential_scope(
         &self,
         req: &Request,
@@ -630,7 +680,6 @@ pub trait AWSSigV4Algorithm {
 
         let access_key = parts[0];
         let request_scope = parts[1];
-
         let server_scope = self.get_credential_scope(req)?;
         if request_scope == server_scope {
             Ok(access_key.to_string())
@@ -699,16 +748,17 @@ pub trait AWSSigV4Algorithm {
         }
     }
 
-    /// The AWS SigV4 canonical request given parameters from the HTTP request.
-    /// The process is outlined here:
-    /// http://docs.aws.amazon.com/general/latest/gr/sigv4-create-canonical-request.html
+    /// The AWS SigV4 canonical request given parameters from the HTTP request,
+    /// as outlined in the [AWS documentation](http://docs.aws.amazon.com/general/latest/gr/sigv4-create-canonical-request.html).
     ///
     /// The canonical request is:
+    /// ```text
     ///     request_method + '\n' +
     ///     canonical_uri_path + '\n' +
     ///     canonical_query_string + '\n' +
     ///     signed_headers + '\n' +
     ///     sha256(body).hexdigest()
+    /// ```
     fn get_canonical_request(
         &self,
         req: &Request,
@@ -936,6 +986,9 @@ impl AWSSigV4 {
         Self {}
     }
 
+    /// Verify that the request timestamp is not beyond the allowed timestamp
+    /// mismatch and that the request signature matches our expected
+    /// signature.
     pub fn verify(
         &self,
         req: &Request,
@@ -963,14 +1016,15 @@ pub fn is_rfc3986_unreserved(c: u8) -> bool {
 
 /// Normalize the path component according to RFC 3986.  This performs the
 /// following operations:
-/// * Alpha, digit, and the symbols '-', '.', '_', and '~' (unreserved
+/// * Alpha, digit, and the symbols `-`, `.`, `_`, and `~` (unreserved
 ///   characters) are left alone.
 /// * Characters outside this range are percent-encoded.
-/// * Percent-encoded values are upper-cased ('%2a' becomes '%2A')
-/// * Percent-encoded values in the unreserved space (%41-%5A, %61-%7A,
-///   %30-%39, %2D, %2E, %5F, %7E) are converted to normal characters.
+/// * Percent-encoded values are upper-cased (`%2a` becomes `%2A`)
+/// * Percent-encoded values in the unreserved space (`%41`-`%5A`, `%61`-`%7A`,
+///   `%30`-`%39`, `%2D`, `%2E`, `%5F`, `%7E`) are converted to normal
+///   characters.
 ///
-/// If a percent encoding is incomplete, the percent is encoded as %25.
+/// If a percent encoding is incomplete, the percent is encoded as `%25`.
 pub fn normalize_uri_path_component(
     path_component: &str,
 ) -> Result<String, SignatureError> {
@@ -1099,6 +1153,12 @@ pub fn canonicalize_uri_path(
     }
 }
 
+/// Normalize the query parameters by normalizing the keys and values of each
+/// parameter and return a `HashMap` mapping each key to a *vector* of values
+/// (since it is valid for a query parameters to appear multiple times).
+///
+/// The order of the values matches the order that they appeared in the query
+/// string -- this is important for SigV4 validation.
 pub fn normalize_query_parameters(
     query_string: &str,
 ) -> Result<HashMap<String, Vec<String>>, SignatureError> {
@@ -1106,6 +1166,7 @@ pub fn normalize_query_parameters(
         return Ok(HashMap::new());
     }
 
+    // Split the query string into parameters on '&' boundaries.
     let components = query_string.split("&");
     let mut result = HashMap::<String, Vec<String>>::new();
 
@@ -1115,13 +1176,17 @@ pub fn normalize_query_parameters(
             continue;
         }
 
+        // Split the parameter into key and value portions on the '='
         let parts: Vec<&str> = component.splitn(2, "=").collect();
         let key = parts[0];
         let value = if parts.len() > 0 { parts[1] } else { "" };
 
+        // Normalize the key and value.
         let norm_key = normalize_uri_path_component(key)?;
         let norm_value = normalize_uri_path_component(value)?;
 
+        // If we already have a value for this key, append to it; otherwise,
+        // create a new vector containing the value.
         if let Some(result_value) = result.get_mut(&norm_key) {
             result_value.push(norm_value);
         } else {
