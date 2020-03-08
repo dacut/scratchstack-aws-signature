@@ -2,6 +2,7 @@
 ## Crate: [aws_sig_verify](https://crates.io/crates/aws_sig_verify)
 
 ![GitHub Actions](https://github.com/dacut/rust-aws-sig/workflows/Rust/badge.svg)
+[![Coverage Status](https://coveralls.io/repos/github/dacut/rust-aws-sig/badge.svg?branch=master)](https://coveralls.io/github/dacut/rust-aws-sig?branch=master)
 
 The `aws_sig_verify` crate provides AWS SigV4 _verification_ routines.
 This *is not* the library you want if you just want to call AWS services
