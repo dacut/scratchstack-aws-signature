@@ -1,11 +1,11 @@
 name: Rust
 
 on: [push]
+env:
+  RUSTFLAGS: "-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Zno-landing-pads"
+  CARGO_INCREMENTAL: 0
 
 jobs:
-  env:
-    RUSTFLAGS: "-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Zno-landing-pads"
-    CARGO_INCREMENTAL: 0
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 10
