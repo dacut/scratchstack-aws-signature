@@ -17,3 +17,7 @@ Cargo.lock
 /target
 #**/*.rs.bk
 #Cargo.lock
+
+lcov.info
+lcov-html/
+.vscode/
