@@ -3,9 +3,12 @@ name: Rust
 on: [push]
 
 jobs:
+  env:
+    RUSTFLAGS: "-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Zno-landing-pads"
+    CARGO_INCREMENTAL: 0
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
     - uses: actions/checkout@v2
     - name: Install Rust nightly
@@ -20,3 +23,10 @@ jobs:
       run: cargo test --verbose
     - name: Build documentation
       run: cargo doc --verbose
+    - name: Generate coverage report
+      uses: actions-rs/grcov@v0.1
+    - name: Upload coverage report to Coveralls
+      uses: coverallsapp/github-action@master
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        path-to-lcov: ./lcov.info

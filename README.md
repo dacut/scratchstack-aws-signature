@@ -19,3 +19,5 @@ authentication](https://docs.aws.amazon.com/apigateway/latest/developerguide/per
 On the other hand, if you have your own ecosystem of AWS-like credentials
 and are developing mock-AWS services or just really like AWS SigV4 but
 can't run within AWS, this library _might_ be for you.
+
+Documentation for this package is published automatically to [docs.rs](https://docs.rs/aws_sig_verify/).
