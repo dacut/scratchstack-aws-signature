@@ -10,6 +10,7 @@
 use std::backtrace::Backtrace;
 use std::collections::{BTreeMap, HashMap};
 use std::convert::From;
+use std::convert::TryInto;
 use std::error;
 use std::fmt;
 use std::io;
@@ -248,6 +249,47 @@ impl From<std::io::Error> for SignatureError {
         SignatureError::new(ErrorKind::IO(e), &msg)
     }
 }
+
+/// The types of signing key available.
+#[derive(Debug, PartialEq, Eq)]
+pub enum SigningKeyKind {
+    /// KSecret: secret key prepended with "AWS4". Avoid using.
+    KSecret,
+
+    /// KDate: HMAC(KSecret, requestDate)
+    KDate,
+
+    /// KRegion: HMAC(KDate, region)
+    KRegion,
+
+    /// KService: HMAC(KRegion, service)
+    KService,
+
+    /// KSigning: HMAC(KService, "aws4_request"). Preferred.
+    KSigning,
+}
+
+impl fmt::Display for SigningKeyKind {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            SigningKeyKind::KSecret => write!(f, "KSecret"),
+            SigningKeyKind::KDate => write!(f, "KDate"),
+            SigningKeyKind::KRegion => write!(f, "KRegion"),
+            SigningKeyKind::KService => write!(f, "KService"),
+            SigningKeyKind::KSigning => write!(f, "KSigning"),
+        }
+    }
+}
+
+/// The function that returns a signing key of a given type.
+pub type SigningKeyFn = dyn Fn(
+    &SigningKeyKind,
+    &str,           // access_key_id
+    Option<&str>,   // token
+    Option<&str>,   // request date
+    Option<&str>,   // request region
+    Option<&str>,   // service
+) -> Result<Vec<u8>, SignatureError>;
 
 /// A data structure containing the elements of the request
 /// (some client-supplied, some service-supplied) involved in the SigV4
@@ -859,11 +901,9 @@ pub trait AWSSigV4Algorithm {
     fn get_expected_signature(
         &self,
         req: &Request,
-        secret_key_fn: &dyn Fn(
-            &str,
-            Option<&str>,
-        ) -> Result<String, SignatureError>,
-    ) -> Result<String, SignatureError> {
+        signing_key_kind: &SigningKeyKind,
+        signing_key_fn: &SigningKeyFn) -> Result<String, SignatureError>
+    {
         let access_key = self.get_access_key(req)?;
         let session_token_result = self.get_session_token(req);
         let session_token = match session_token_result {
@@ -873,33 +913,21 @@ pub trait AWSSigV4Algorithm {
                 _ => return Err(e),
             },
         };
-        let secret_key = secret_key_fn(
-            &access_key,
-            session_token.as_ref().map(String::as_ref),
-        )?;
+
         let timestamp = self.get_request_timestamp(req)?;
         let req_date = format!("{}", timestamp.date().format("%Y%m%d"));
-        let string_to_sign = self.get_string_to_sign(req)?;
 
-        let mut k_secret = Vec::new();
-        k_secret.write(b"AWS4")?;
-        k_secret.write(secret_key.as_bytes())?;
-        let k_date = hmac::sign(
-            &hmac::Key::new(hmac::HMAC_SHA256, &k_secret),
-            req_date.as_bytes(),
-        );
-        let k_region = hmac::sign(
-            &hmac::Key::new(hmac::HMAC_SHA256, k_date.as_ref()),
-            req.region.as_bytes(),
-        );
-        let k_service = hmac::sign(
-            &hmac::Key::new(hmac::HMAC_SHA256, k_region.as_ref()),
-            req.service.as_bytes(),
-        );
-        let k_signing = hmac::sign(
-            &hmac::Key::new(hmac::HMAC_SHA256, k_service.as_ref()),
-            AWS4_REQUEST.as_bytes(),
-        );
+        let key = signing_key_fn(
+            &signing_key_kind,
+            &access_key,
+            session_token.as_ref().map(String::as_ref),
+            Some(&req_date),
+            Some(&req.region),
+            Some(&req.service),
+        )?;
+        let string_to_sign = self.get_string_to_sign(req)?;
+        
+        let k_signing = get_signing_key(signing_key_kind, &key, &req_date, &req.region, &req.service);
 
         Ok(hex::encode(
             hmac::sign(
@@ -919,10 +947,8 @@ pub trait AWSSigV4Algorithm {
     fn verify_at(
         &self,
         req: &Request,
-        secret_key_fn: &dyn Fn(
-            &str,
-            Option<&str>,
-        ) -> Result<String, SignatureError>,
+        signing_key_kind: &SigningKeyKind,
+        signing_key_fn: &SigningKeyFn,
         server_timestamp: &DateTime<Utc>,
         allowed_mismatch: Option<&Duration>,
     ) -> Result<(), SignatureError> {
@@ -946,7 +972,7 @@ pub trait AWSSigV4Algorithm {
             }
         }
 
-        let expected_sig = self.get_expected_signature(&req, secret_key_fn)?;
+        let expected_sig = self.get_expected_signature(&req, signing_key_kind, signing_key_fn)?;
         let request_sig = self.get_request_signature(&req)?;
 
         if expected_sig != request_sig {
@@ -968,13 +994,11 @@ pub trait AWSSigV4Algorithm {
     fn verify(
         &self,
         req: &Request,
-        secret_key_fn: &dyn Fn(
-            &str,
-            Option<&str>,
-        ) -> Result<String, SignatureError>,
+        signing_key_kind: &SigningKeyKind,
+        signing_key_fn: &SigningKeyFn,
         allowed_mismatch: Option<&Duration>,
     ) -> Result<(), SignatureError> {
-        self.verify_at(req, secret_key_fn, &Utc::now(), allowed_mismatch)
+        self.verify_at(req, &signing_key_kind, signing_key_fn, &Utc::now(), allowed_mismatch)
     }
 }
 
@@ -992,13 +1016,11 @@ impl AWSSigV4 {
     pub fn verify(
         &self,
         req: &Request,
-        secret_key_fn: &dyn Fn(
-            &str,
-            Option<&str>,
-        ) -> Result<String, SignatureError>,
+        signing_key_kind: &SigningKeyKind,
+        signing_key_fn: &SigningKeyFn,
         allowed_mismatch: Option<&Duration>,
     ) -> Result<(), SignatureError> {
-        AWSSigV4Algorithm::verify(self, req, secret_key_fn, allowed_mismatch)
+        AWSSigV4Algorithm::verify(self, req, &signing_key_kind, signing_key_fn, allowed_mismatch)
     }
 }
 
@@ -1195,4 +1217,75 @@ pub fn normalize_query_parameters(
     }
 
     Ok(result)
+}
+
+/// Return the signing key given a possibly non-final signing key.
+pub fn get_signing_key<'a>(
+    signing_key_kind: &'a SigningKeyKind,
+    key: &'a [u8],
+    req_date: &'a str,
+    region: &'a str,
+    service: &'a str
+) -> [u8; 32] {
+    match signing_key_kind {
+        SigningKeyKind::KSigning => key.try_into(),
+        _ => {
+            let k_service = get_kservice_key(&signing_key_kind, key, req_date, region, service);
+            hmac::sign(
+                &hmac::Key::new(hmac::HMAC_SHA256, k_service.as_ref()),
+                AWS4_REQUEST.as_bytes()).as_ref().try_into()
+        }
+    }.expect("Invalid HMAC-SHA256 length")
+}
+
+pub fn get_kservice_key<'a>(
+    signing_key_kind: &'a SigningKeyKind,
+    key: &'a [u8],
+    req_date: &'a str,
+    region: &'a str,
+    service: &'a str
+) -> [u8; 32] {
+    match signing_key_kind {
+        SigningKeyKind::KService => key.try_into(),
+        _ => {
+            let k_region = get_kregion_key(&signing_key_kind, key, req_date, region);
+            hmac::sign(
+                &hmac::Key::new(hmac::HMAC_SHA256, k_region.as_ref()),
+                service.as_bytes()).as_ref().try_into()
+        }
+    }.expect("Invalid HMAC-SHA256 length")
+}
+
+pub fn get_kregion_key<'a> (
+    signing_key_kind: &'a SigningKeyKind,
+    key: &'a [u8],
+    req_date: &'a str,
+    region: &'a str,
+) -> [u8; 32] {
+    match signing_key_kind {
+        SigningKeyKind::KRegion => key.try_into(),
+        _ => {
+            let k_date = get_kdate_key(&signing_key_kind, key, req_date);
+            hmac::sign(
+                &hmac::Key::new(hmac::HMAC_SHA256, k_date.as_ref()),
+                region.as_bytes()).as_ref().try_into()
+        }
+    }.expect("Invalid HMAC-SHA256 length")
+}
+
+pub fn get_kdate_key<'a>(
+    signing_key_kind: &'a SigningKeyKind,
+    key: &'a [u8],
+    req_date: &'a str,
+) -> [u8; 32] {
+    match signing_key_kind {
+        SigningKeyKind::KDate => key.try_into(),
+        _ => {
+            // key is KSecret == AWS4 + secret key.
+            // KDate = HMAC(KSecret + req_date)
+            hmac::sign(
+                &hmac::Key::new(hmac::HMAC_SHA256, &key),
+                req_date.as_bytes()).as_ref().try_into()
+        }
+    }.expect("Invalid HMAC-SHA256 length")
 }

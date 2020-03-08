@@ -8,8 +8,10 @@ use std::path::PathBuf;
 use std::str::from_utf8;
 
 extern crate aws_sig_verify;
-use aws_sig_verify::AWSSigV4Algorithm;
-use aws_sig_verify::{AWSSigV4, Request};
+use aws_sig_verify::{AWSSigV4Algorithm, AWSSigV4, ErrorKind, Request, SigningKeyKind, SignatureError};
+
+use ring::hmac;
+
 
 #[test]
 fn get_header_key_duplicate_get_header_key_duplicate() {
@@ -329,10 +331,97 @@ fn run(basename: &str) {
         sreq_path
     );
 
-    let secret_key_fn = |_: &str, _: Option<&str>| {
-        Ok("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_string())
-    };
+    sig.verify(&request, &SigningKeyKind::KSecret, &get_signing_key, None)
+        .expect(&format!("Signature verification failed: {:?}", sreq_path));
 
-    sig.verify(&request, &secret_key_fn, None)
+    sig.verify(&request, &SigningKeyKind::KDate, &get_signing_key, None)
+        .expect(&format!("Signature verification failed: {:?}", sreq_path));
+
+    sig.verify(&request, &SigningKeyKind::KRegion, &get_signing_key, None)
+        .expect(&format!("Signature verification failed: {:?}", sreq_path));
+
+    sig.verify(&request, &SigningKeyKind::KService, &get_signing_key, None)
+        .expect(&format!("Signature verification failed: {:?}", sreq_path));
+
+    sig.verify(&request, &SigningKeyKind::KSigning, &get_signing_key, None)
         .expect(&format!("Signature verification failed: {:?}", sreq_path));
 }
+
+
+fn get_signing_key(
+    kind: &SigningKeyKind,
+    _access_key_id: &str,
+    _session_token: Option<&str>,
+    req_date_opt: Option<&str>,
+    region_opt: Option<&str>,
+    service_opt: Option<&str>
+) -> Result<Vec<u8>, SignatureError> {
+    let k_secret = "AWS4wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".as_bytes();
+    match kind {
+        SigningKeyKind::KSecret => Ok(k_secret.to_vec()),
+        _ => get_signing_key_kdate(kind, k_secret, req_date_opt, region_opt, service_opt)
+    }
+}
+
+fn get_signing_key_kdate(
+    kind: &SigningKeyKind,
+    k_secret: &[u8],
+    req_date_opt: Option<&str>,
+    region_opt: Option<&str>,
+    service_opt: Option<&str>
+) -> Result<Vec<u8>, SignatureError> {
+    if let Some(req_date) = req_date_opt {
+        let k_date = hmac::sign(
+            &hmac::Key::new(hmac::HMAC_SHA256, k_secret.as_ref()),
+            req_date.as_bytes());
+        match kind {
+            SigningKeyKind::KDate => Ok(k_date.as_ref().to_vec()),
+            _ => get_signing_key_kregion(kind, k_date.as_ref(), region_opt, service_opt)
+        }
+    } else {
+        Err(SignatureError::new(ErrorKind::InvalidCredential, "Missing request date parameter"))
+    }
+}
+
+fn get_signing_key_kregion(
+    kind: &SigningKeyKind,
+    k_date: &[u8],
+    region_opt: Option<&str>,
+    service_opt: Option<&str>
+) -> Result<Vec<u8>, SignatureError> {
+    if let Some(region) = region_opt {
+        let k_region = hmac::sign(
+            &hmac::Key::new(hmac::HMAC_SHA256, k_date.as_ref()),
+            region.as_bytes());
+        match kind {
+            SigningKeyKind::KRegion => Ok(k_region.as_ref().to_vec()),
+            _ => get_signing_key_kservice(kind, k_region.as_ref(), service_opt)
+        }
+    } else {
+        Err(SignatureError::new(ErrorKind::InvalidCredential, "Missing request region parameter"))
+    }
+}
+
+fn get_signing_key_kservice(
+    kind: &SigningKeyKind,
+    k_region: &[u8],
+    service_opt: Option<&str>
+) -> Result<Vec<u8>, SignatureError> {
+    if let Some(service) = service_opt {
+        let k_service = hmac::sign(
+            &hmac::Key::new(hmac::HMAC_SHA256, k_region.as_ref()),
+            service.as_bytes());
+        match kind {
+            SigningKeyKind::KService => Ok(k_service.as_ref().to_vec()),
+            _ => {
+                let k_signing = hmac::sign(
+                    &hmac::Key::new(hmac::HMAC_SHA256, k_service.as_ref()),
+                    "aws4_request".as_bytes());
+                Ok(k_signing.as_ref().to_vec())
+            }
+        }
+    } else {
+        Err(SignatureError::new(ErrorKind::InvalidCredential, "Missing service parameter"))
+    }
+}
+

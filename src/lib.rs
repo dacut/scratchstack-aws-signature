@@ -25,7 +25,11 @@ extern crate ring;
 
 mod chronoutil;
 mod signature;
-pub use crate::signature::{AWSSigV4Algorithm, AWSSigV4, ErrorKind, Request, SignatureError, normalize_uri_path_component, canonicalize_uri_path, normalize_query_parameters};
+pub use crate::signature::{
+    AWSSigV4Algorithm, AWSSigV4, ErrorKind, Request, SignatureError, SigningKeyFn,
+    SigningKeyKind, normalize_uri_path_component, canonicalize_uri_path,
+    normalize_query_parameters
+};
 
 #[cfg(test)]
 mod unittest;
