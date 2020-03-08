@@ -1,8 +1,7 @@
 use std::str::FromStr;
 
 use chrono::format::{ParseError, ParseResult};
-use chrono::naive::{NaiveDate, NaiveDateTime, NaiveTime};
-use chrono::offset::FixedOffset;
+use chrono::offset::{FixedOffset, TimeZone};
 use chrono::DateTime;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -18,6 +17,7 @@ lazy_static! {
         (?P<hour>[01][0-9]|2[0-3]):?
         (?P<minute>[0-5][0-9]):?
         (?P<second>[0-5][0-9]|6[0-1])
+        (?:[.,](?P<frac>[0-9]+))?
         (?P<offset>[-+][01][0-9]:?[0-5][0-9]|Z)$").unwrap();
 
     static ref INVALID: ParseError = DateTime::<FixedOffset>::from_str("").unwrap_err();
@@ -42,8 +42,6 @@ impl ParseISO8601<DateTime<FixedOffset>> for DateTime<FixedOffset> {
             let day_str: &str = day_match.as_str();
             let day = u32::from_str(day_str).unwrap();
 
-            let naive_date = NaiveDate::from_ymd(year, month, day);
-
             let hour_match = cap.name("hour").unwrap();
             let hour_str: &str = hour_match.as_str();
             let hour = u32::from_str(hour_str).unwrap();
@@ -56,8 +54,19 @@ impl ParseISO8601<DateTime<FixedOffset>> for DateTime<FixedOffset> {
             let second_str: &str = second_match.as_str();
             let second = u32::from_str(second_str).unwrap();
 
-            let naive_time = NaiveTime::from_hms(hour, minute, second);
-            let naive_dt = NaiveDateTime::new(naive_date, naive_time);
+            let frac_match_result = cap.name("frac");
+            let nanos = match frac_match_result {
+                None => 0,
+                Some(frac_match) => {
+                    let mut frac_str = frac_match.as_str().to_string();
+                    while frac_str.len() < 9 {
+                        frac_str.push_str("0");
+                    }
+
+                    frac_str.truncate(9);
+                    u32::from_str(&frac_str).unwrap()
+                }
+            };
 
             let offset_match = cap.name("offset").unwrap();
             let offset_str: &str = offset_match.as_str();
@@ -78,8 +87,8 @@ impl ParseISO8601<DateTime<FixedOffset>> for DateTime<FixedOffset> {
                 sign * (hour * 3600 + min * 60)
             };
 
-            let offset = FixedOffset::east(offset_secs);
-            Ok(DateTime::from_utc(naive_dt, offset))
+            Ok(FixedOffset::east(offset_secs).ymd(year, month, day)
+                .and_hms_nano(hour, minute, second, nanos))
         } else {
             Err(*INVALID)
         }

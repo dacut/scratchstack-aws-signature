@@ -136,8 +136,15 @@ pub enum ErrorKind {
 
     /// An HTTP header was malformed -- the value could not be decoded as
     /// UTF-8, or the header was empty and this is not allowed (e.g. the
-    /// `content-type` header).
+    /// `content-type` header), or the header could not be parsed
+    /// (e.g., the `date` header is not a valid date).
     MalformedHeader,
+
+    /// A query parameter was malformed -- the value could not be decoded as
+    /// UTF-8, or the parameter was empty and this is not allowed (e.g. a
+    /// signature parameter), or the parameter could not be parsed
+    /// (e.g., the `X-Amz-Date` parameter is not a valid date).
+    MalformedParameter,
 
     /// The AWS SigV4 signature was malformed in some way. This can include
     /// invalid timestamp formats, missing authorization components, or
@@ -200,6 +207,9 @@ impl fmt::Display for SignatureError {
             ErrorKind::MalformedHeader => {
                 write!(f, "Malformed header: {}", self.detail)
             }
+            ErrorKind::MalformedParameter => {
+                write!(f, "Malformed query parameter: {}", self.detail)
+            }
             ErrorKind::MalformedSignature => {
                 write!(f, "Malformed signature: {}", self.detail)
             }
@@ -218,7 +228,7 @@ impl fmt::Display for SignatureError {
                 self.detail
             ),
             ErrorKind::TimestampOutOfRange => {
-                write!(f, "Request timestamp out of range{}", self.detail)
+                write!(f, "Request timestamp out of range: {}", self.detail)
             }
             ErrorKind::UnknownAccessKey => {
                 write!(f, "Unknown access key: {}", self.detail)
@@ -507,7 +517,7 @@ pub trait AWSSigV4Algorithm {
             if parts.len() != 2 {
                 return Err(SignatureError::new(
                     ErrorKind::MalformedSignature,
-                    "Invalid Authorization header: missing '='",
+                    "invalid Authorization header: missing '='",
                 ));
             }
 
@@ -518,7 +528,7 @@ pub trait AWSSigV4Algorithm {
                 return Err(SignatureError::new(
                     ErrorKind::MalformedSignature,
                     &format!(
-                        "Invalid Authorization header: duplicate \
+                        "invalid Authorization header: duplicate \
                          key {}",
                         key
                     ),
@@ -553,8 +563,9 @@ pub trait AWSSigV4Algorithm {
                             ah_signedheaders = ahp.get(SIGNEDHEADERS);
                             if let None = ah_signedheaders {
                                 return Err(SignatureError::new(
-                                    ErrorKind::MissingParameter,
-                                    "SignedHeaders",
+                                    ErrorKind::MalformedSignature,
+                                    "invalid Authorization header: \
+                                    missing SignedHeaders",
                                 ));
                             }
 
@@ -624,16 +635,21 @@ pub trait AWSSigV4Algorithm {
         let qp_date_result = req.get_query_param_one(X_AMZ_DATE);
         let h_amz_date_result;
         let h_reg_date_result;
+        let mut malformed_kind = ErrorKind::MalformedParameter;
+        let mut date_header = X_AMZ_DATE;
 
         date_str = match qp_date_result {
             Ok(dstr) => dstr,
             Err(e) => match e.kind {
                 ErrorKind::MissingParameter => {
+                    malformed_kind = ErrorKind::MalformedHeader;
+                    date_header = X_AMZ_DATE_LOWER;
                     h_amz_date_result = req.get_header_one(X_AMZ_DATE_LOWER);
                     match h_amz_date_result {
                         Ok(dstr) => dstr,
                         Err(e) => match e.kind {
                             ErrorKind::MissingHeader => {
+                                date_header = DATE;
                                 h_reg_date_result = req.get_header_one(DATE);
                                 h_reg_date_result?
                             }
@@ -659,9 +675,7 @@ pub trait AWSSigV4Algorithm {
             d
         } else {
             return Err(SignatureError::new(
-                ErrorKind::MalformedSignature,
-                &format!("Invalid date string {}", date_str),
-            ));
+                malformed_kind, date_header));
         };
 
         Ok(dt_fixed.with_timezone(&Utc))
@@ -702,7 +716,7 @@ pub trait AWSSigV4Algorithm {
                         None => {
                             return Err(SignatureError::new(
                                 ErrorKind::MalformedSignature,
-                                "Invalid Authorization header: missing \
+                                "invalid Authorization header: missing \
                                  Credential",
                             ))
                         }
@@ -780,7 +794,7 @@ pub trait AWSSigV4Algorithm {
                         Some(c) => Ok(c.to_string()),
                         None => Err(SignatureError::new(
                             ErrorKind::MalformedSignature,
-                            "Invalid Authorization header: missing \
+                            "invalid Authorization header: missing \
                              Signature",
                         )),
                     }
@@ -926,7 +940,7 @@ pub trait AWSSigV4Algorithm {
             Some(&req.service),
         )?;
         let string_to_sign = self.get_string_to_sign(req)?;
-        
+
         let k_signing = get_signing_key(signing_key_kind, &key, &req_date, &req.region, &req.service);
 
         Ok(hex::encode(
@@ -965,7 +979,7 @@ pub trait AWSSigV4Algorithm {
                 return Err(SignatureError::new(
                     ErrorKind::TimestampOutOfRange,
                     &format!(
-                        "minimum {}, maximum {}, receiverd {}",
+                        "minimum {}, maximum {}, received {}",
                         min_ts, max_ts, req_ts
                     ),
                 ));
@@ -1046,7 +1060,7 @@ pub fn is_rfc3986_unreserved(c: u8) -> bool {
 ///   `%30`-`%39`, `%2D`, `%2E`, `%5F`, `%7E`) are converted to normal
 ///   characters.
 ///
-/// If a percent encoding is incomplete, the percent is encoded as `%25`.
+/// If a percent encoding is incomplete, an error is returned.
 pub fn normalize_uri_path_component(
     path_component: &str,
 ) -> Result<String, SignatureError> {
@@ -1061,11 +1075,11 @@ pub fn normalize_uri_path_component(
             result.push(c);
             i += 1;
         } else if c == b'%' {
-            if i + 2 > path_component.len() {
-                // % encoding would go beyond end of string; ignore it.
-                result.write(b"%25")?;
-                i += 1;
-                continue;
+            if i + 2 >= path_component.len() {
+                // % encoding would go beyond end of string; return an error.
+                return Err(SignatureError::new(
+                    ErrorKind::InvalidURIPath,
+                    "Incomplete hex encoding"));
             }
 
             let hex_digits = &path_component[i + 1..i + 3];
