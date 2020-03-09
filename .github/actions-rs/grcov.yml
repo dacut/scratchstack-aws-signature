@@ -5,3 +5,4 @@ output-type: lcov
 output-file: ./lcov.info
 ignore:
   - "**/.cargo/registry/**/*"
+  - "/rustc/**/*"

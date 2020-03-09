@@ -4,5 +4,5 @@ export CARGO_INCREMENTAL=0
 cargo clean
 cargo build
 cargo test
-grcov ./target --ignore '**/.cargo/registry/**/*' --ignore '/rustc/**/*' -t lcov > lcov.info
+grcov ./target --branch --ignore '**/.cargo/registry/**/*' --ignore '/rustc/**/*' -t lcov > lcov.info
 genhtml -o lcov-html --show-details --highlight --ignore-errors=source --legend lcov.info
