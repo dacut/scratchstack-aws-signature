@@ -34,6 +34,9 @@ const APPLICATION_X_WWW_FORM_URLENCODED: &str =
 /// Algorithm for AWS SigV4
 const AWS4_HMAC_SHA256: &str = "AWS4-HMAC-SHA256";
 
+/// Algorithm for AWS SigV4 plus a following space
+const AWS4_HMAC_SHA256_SPACE: &str = "AWS4-HMAC-SHA256 ";
+
 /// String included at the end of the AWS SigV4 credential scope
 const AWS4_REQUEST: &str = "aws4_request";
 
@@ -492,53 +495,53 @@ pub trait AWSSigV4Algorithm {
         &self,
         req: &Request,
     ) -> Result<HashMap<String, String>, SignatureError> {
-        let auth = req.get_header_one(AUTHORIZATION)?;
-        let alg_parts: Vec<&str> = auth.splitn(2, " ").collect();
-        let alg = alg_parts[0];
+        let auth_headers_opt = req.headers.get(AUTHORIZATION);
+        let aws4_hmac_sha256_u8: &[u8] = AWS4_HMAC_SHA256.as_ref();
+        let aws4_hmac_sha256_v8: &Vec<u8> = &aws4_hmac_sha256_u8.to_vec();
+        let aws4_hmac_sha256_space_u8: &[u8] = AWS4_HMAC_SHA256_SPACE.as_ref();
+        let aws4_hmac_sha256_space_v8: &Vec<u8> = &aws4_hmac_sha256_space_u8.to_vec();
 
-        if alg != AWS4_HMAC_SHA256 {
-            return Err(SignatureError::new(
-                ErrorKind::UnknownSignatureAlgorithm,
-                alg,
-            ));
-        }
+        match auth_headers_opt {
+            None => Err(SignatureError::new(ErrorKind::MissingHeader, AUTHORIZATION)),
+            Some(auth_headers) => {
+                let mut parameters_opt: Option<&str> = None;
 
-        if alg_parts.len() != 2 {
-            return Err(SignatureError::new(
-                ErrorKind::MalformedSignature,
-                "Missing parameters",
-            ));
-        }
+                // Multiple Authorization headers may be present, but only one may be
+                // of type AWS4-HMAC-SHA256.
+                for auth_header in auth_headers {
+                    if auth_header != aws4_hmac_sha256_v8 && ! auth_header.starts_with(aws4_hmac_sha256_space_u8) {
+                        continue;
+                    }
 
-        let mut result = HashMap::<String, String>::new();
-        let parameters = alg_parts[1];
-        for parameter in parameters.split(',') {
-            let parts: Vec<&str> = parameter.splitn(2, '=').collect();
-            if parts.len() != 2 {
-                return Err(SignatureError::new(
-                    ErrorKind::MalformedSignature,
-                    "invalid Authorization header: missing '='",
-                ));
+                    if parameters_opt.is_some() {
+                        return Err(SignatureError::new(
+                            ErrorKind::MultipleHeaderValues,
+                            AUTHORIZATION));
+                    }
+
+                    if auth_header == aws4_hmac_sha256_v8 || auth_header == aws4_hmac_sha256_space_v8 {
+                        // No parameters -- fail fast here.
+                        return Err(SignatureError::new(
+                            ErrorKind::MalformedSignature,
+                            "invalid Authorization header: missing parameters"));
+                    }
+
+                    match from_utf8(&auth_header[AWS4_HMAC_SHA256_SPACE.len()..]) {
+                        Err(_) => return Err(SignatureError::new(
+                            ErrorKind::MalformedHeader,
+                            "Authorization header is not valid UTF-8")),
+                        Ok(ref p) => parameters_opt = Some(p),
+                    }
+                }
+
+                match parameters_opt {
+                    None => Err(SignatureError::new(
+                        ErrorKind::MissingHeader, AUTHORIZATION)),
+                    Some(parameters) => 
+                        split_authorization_header_parameters(&parameters),
+                }
             }
-
-            let key = parts[0].trim_start().to_string();
-            let value = parts[1].trim_end().to_string();
-
-            if result.contains_key(&key) {
-                return Err(SignatureError::new(
-                    ErrorKind::MalformedSignature,
-                    &format!(
-                        "invalid Authorization header: duplicate \
-                         key {}",
-                        key
-                    ),
-                ));
-            }
-
-            result.insert(key, value);
         }
-
-        Ok(result)
     }
 
     /// Returns a sorted dictionary containing the signed header names and
@@ -1232,6 +1235,41 @@ pub fn normalize_query_parameters(
 
     Ok(result)
 }
+
+/// Split Authorization header parameters from key=value parts into a HashMap.
+pub fn split_authorization_header_parameters(
+    parameters: &str
+) -> Result<HashMap<String, String>, SignatureError> {
+    let mut result = HashMap::<String, String>::new();
+    for parameter in parameters.split(',') {
+        let parts: Vec<&str> = parameter.splitn(2, '=').collect();
+        if parts.len() != 2 {
+            return Err(SignatureError::new(
+                ErrorKind::MalformedSignature,
+                "invalid Authorization header: missing '='",
+            ));
+        }
+
+        let key = parts[0].trim_start().to_string();
+        let value = parts[1].trim_end().to_string();
+
+        if result.contains_key(&key) {
+            return Err(SignatureError::new(
+                ErrorKind::MalformedSignature,
+                &format!(
+                    "invalid Authorization header: duplicate \
+                        key {}",
+                    key
+                ),
+            ));
+        }
+
+        result.insert(key, value);
+    }
+
+    Ok(result)
+}
+
 
 /// Return the signing key given a possibly non-final signing key.
 pub fn get_signing_key<'a>(

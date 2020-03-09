@@ -55,12 +55,12 @@ macro_rules! expect_err {
                 stringify!($expected),
                 e
             )),
-            Err(e) => match e.kind {
-                $expected => e,
+            Err(e) => match &e.kind {
+                $expected => format!("{}", &e),
                 _ => {
                     eprintln!(
                         "Expected {}; got ErrorKind::{:?}: {}",
-                        stringify!($expected), e.kind, e);
+                        stringify!($expected), &e.kind, &e);
                     ($test).unwrap(); // panic
                     panic!();
                 }
@@ -219,7 +219,24 @@ fn duplicate_headers() {
     assert_eq!(format!("{}", e), "Multiple values for header: authorization");
 }
 
-fn run_auth_test(auth_str: &str) -> String {
+macro_rules! run_auth_test_expect_kind {
+    ($auth_str:expr, $expected:pat) => {{
+        let e = run_auth_test_get_err($auth_str);
+        match &e.kind {
+            $expected => format!("{}", e),
+            _ => panic!("Expected {}; got ErrorKind::{:?}: {}",
+                        stringify!($expected), &e.kind, &e),
+        }
+    }}
+}
+
+macro_rules! run_auth_test {
+    ($auth_str:expr) => {
+        run_auth_test_expect_kind!($auth_str, ErrorKind::MalformedSignature)
+    }
+}
+
+fn run_auth_test_get_err(auth_str: &str) -> SignatureError {
     let mut headers: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
     headers.insert(
         "authorization".to_string(),
@@ -259,16 +276,19 @@ fn run_auth_test(auth_str: &str) -> String {
         }
     };
 
-    let e = expect_err!(
-        sig.verify(&request, &SigningKeyKind::KSecret, &get_signing_key, None),
-        ErrorKind::MalformedSignature);
+    sig.verify(&request, &SigningKeyKind::KSecret, &get_signing_key, None).unwrap_err()
+}
 
-    format!("{}", e)
+#[test]
+fn test_missing_auth_parameters() {
+    assert_eq!(
+        run_auth_test!("AWS4-HMAC-SHA256 "),
+        "Malformed signature: invalid Authorization header: missing parameters");
 }
 
 #[test]
 fn test_missing_auth_signed_headers() {
-    assert_eq!(run_auth_test("\
+    assert_eq!(run_auth_test!("\
 AWS4-HMAC-SHA256 \
 Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, \
 Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea"),
@@ -277,7 +297,7 @@ Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea"),
 
 #[test]
 fn test_missing_auth_credential() {
-    assert_eq!(run_auth_test("\
+    assert_eq!(run_auth_test!("\
 AWS4-HMAC-SHA256 \
 SignedHeaders=host;x-amz-date, \
 Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea"),
@@ -286,7 +306,7 @@ Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea"),
 
 #[test]
 fn test_duplicate_auth_credential() {
-    assert_eq!(run_auth_test("\
+    assert_eq!(run_auth_test!("\
 AWS4-HMAC-SHA256 \
 Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, \
 Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, \
@@ -297,7 +317,7 @@ Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea"),
 
 #[test]
 fn test_missing_auth_signature() {
-    assert_eq!(run_auth_test("\
+    assert_eq!(run_auth_test!("\
 AWS4-HMAC-SHA256 \
 Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, \
 SignedHeaders=host;x-amz-date"),
@@ -306,7 +326,7 @@ SignedHeaders=host;x-amz-date"),
 
 #[test]
 fn test_missing_auth_eq() {
-    assert_eq!(run_auth_test("\
+    assert_eq!(run_auth_test!("\
 AWS4-HMAC-SHA256 \
 Credential/AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, \
 SignedHeaders=host;x-amz-date, \
@@ -316,11 +336,43 @@ Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea"),
 
 #[test]
 fn test_noncanonical_signed_headers() {
-    assert_eq!(run_auth_test("AWS4-HMAC-SHA256 \
+    assert_eq!(run_auth_test!("AWS4-HMAC-SHA256 \
 Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, \
 SignedHeaders=x-amz-date;host, \
 Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea"),
         "Malformed signature: SignedHeaders is not canonicalized");
+}
+
+#[test]
+fn test_wrong_auth_algorithm() {
+    assert_eq!(
+        run_auth_test_expect_kind!("AWS3-ZZZ Credential=12345", ErrorKind::MissingHeader),
+        "Missing header: authorization");
+}
+
+#[test]
+fn test_multiple_algorithms() {
+    let mut headers: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
+    headers.insert(
+        "authorization".to_string(),
+        vec![b"Basic foobar".to_vec(),
+             b"AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678".to_vec()]);
+
+    let request = Request {
+        request_method: "GET".to_string(),
+        uri_path: "/".to_string(),
+        query_string: "".to_string(),
+        headers: headers,
+        body: &"".as_bytes().to_vec(),
+        region: "us-east-1".to_string(),
+        service: "service".to_string(),
+    };
+
+    let sig = AWSSigV4::new();
+    let params = sig.get_authorization_header_parameters(&request).unwrap();
+    assert_eq!(params.get("Credential").unwrap(), "1234");
+    assert_eq!(params.get("SignedHeaders").unwrap(), "date;host");
+    assert_eq!(params.get("Signature").unwrap(), "5678");
 }
 
 #[test]
@@ -351,7 +403,8 @@ fn non_utf8_header() {
     let mut headers: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
     headers.insert(
         "authorization".to_string(),
-        vec![vec![0x80, 0x80]]);
+        vec![vec![b'A', b'W', b'S', b'4', b'-', b'H', b'M', b'A', b'C', b'-',
+                  b'S', b'H', b'A', b'2', b'5', b'6', b' ', 0x80, 0x80]]);
 
     let request = Request {
         request_method: "GET".to_string(),
