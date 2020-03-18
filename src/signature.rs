@@ -23,9 +23,9 @@ use hex;
 use lazy_static::lazy_static;
 use regex::Regex;
 use ring::digest::{digest, SHA256};
-use ring::hmac;
 
 use crate::chronoutil::ParseISO8601;
+use crate::hmac::hmac_sha256;
 
 /// Content-Type string for HTML forms
 const APPLICATION_X_WWW_FORM_URLENCODED: &str =
@@ -947,12 +947,7 @@ pub trait AWSSigV4Algorithm {
         let k_signing = get_signing_key(signing_key_kind, &key, &req_date, &req.region, &req.service);
 
         Ok(hex::encode(
-            hmac::sign(
-                &hmac::Key::new(hmac::HMAC_SHA256, k_signing.as_ref()),
-                &string_to_sign,
-            )
-            .as_ref(),
-        ))
+            hmac_sha256(k_signing.as_ref(), &string_to_sign).as_ref()))
     }
 
     /// Verify that the request timestamp is not beyond the allowed timestamp
@@ -1283,9 +1278,7 @@ pub fn get_signing_key<'a>(
         SigningKeyKind::KSigning => key.try_into(),
         _ => {
             let k_service = get_kservice_key(&signing_key_kind, key, req_date, region, service);
-            hmac::sign(
-                &hmac::Key::new(hmac::HMAC_SHA256, k_service.as_ref()),
-                AWS4_REQUEST.as_bytes()).as_ref().try_into()
+            hmac_sha256(k_service.as_ref(), AWS4_REQUEST.as_bytes()).as_ref().try_into()
         }
     }.expect("Invalid HMAC-SHA256 length")
 }
@@ -1301,9 +1294,7 @@ pub fn get_kservice_key<'a>(
         SigningKeyKind::KService => key.try_into(),
         _ => {
             let k_region = get_kregion_key(&signing_key_kind, key, req_date, region);
-            hmac::sign(
-                &hmac::Key::new(hmac::HMAC_SHA256, k_region.as_ref()),
-                service.as_bytes()).as_ref().try_into()
+            hmac_sha256(k_region.as_ref(), service.as_bytes()).as_ref().try_into()
         }
     }.expect("Invalid HMAC-SHA256 length")
 }
@@ -1318,9 +1309,7 @@ pub fn get_kregion_key<'a> (
         SigningKeyKind::KRegion => key.try_into(),
         _ => {
             let k_date = get_kdate_key(&signing_key_kind, key, req_date);
-            hmac::sign(
-                &hmac::Key::new(hmac::HMAC_SHA256, k_date.as_ref()),
-                region.as_bytes()).as_ref().try_into()
+            hmac_sha256(k_date.as_ref(), region.as_bytes()).as_ref().try_into()
         }
     }.expect("Invalid HMAC-SHA256 length")
 }
@@ -1335,9 +1324,7 @@ pub fn get_kdate_key<'a>(
         _ => {
             // key is KSecret == AWS4 + secret key.
             // KDate = HMAC(KSecret + req_date)
-            hmac::sign(
-                &hmac::Key::new(hmac::HMAC_SHA256, &key),
-                req_date.as_bytes()).as_ref().try_into()
+            hmac_sha256(&key, req_date.as_bytes()).as_ref().try_into()
         }
     }.expect("Invalid HMAC-SHA256 length")
 }

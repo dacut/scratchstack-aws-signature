@@ -25,6 +25,7 @@ extern crate ring;
 
 mod chronoutil;
 mod signature;
+mod hmac;
 pub use crate::signature::{
     AWSSigV4Algorithm, AWSSigV4, ErrorKind, Request, SignatureError, SigningKeyFn,
     SigningKeyKind, normalize_uri_path_component, canonicalize_uri_path,
