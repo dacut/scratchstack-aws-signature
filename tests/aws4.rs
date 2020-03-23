@@ -237,9 +237,9 @@ fn run(basename: &str) {
         query = "".to_string()
     }
 
-    let mut headers: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
+    let mut headers: HashMap<Vec<u8>, Vec<Vec<u8>>> = HashMap::new();
     let mut line_full: String = String::new();
-    let mut last_key: Option<String> = None;
+    let mut last_key: Option<Vec<u8>> = None;
 
     while let Ok(n_read) = sreq_r.read_line(&mut line_full) {
         if n_read <= 0 {
@@ -251,7 +251,7 @@ fn run(basename: &str) {
             break;
         }
 
-        let key;
+        let key: Vec<u8>;
         let value;
 
         if line.starts_with(" ") || line.starts_with("\t") {
@@ -267,11 +267,11 @@ fn run(basename: &str) {
                 sreq_path
             );
 
-            key = parts[0].to_lowercase();
+            key = parts[0].to_lowercase().as_bytes().to_vec();
             value = parts[1].trim();
         }
 
-        last_key = Some((&key).to_string());
+        last_key = Some(key.clone());
 
         if let Some(ref mut existing) = headers.get_mut(&key) {
             existing.push(value.as_bytes().to_vec());
