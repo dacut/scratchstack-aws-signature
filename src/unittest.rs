@@ -206,7 +206,7 @@ fn duplicate_headers() {
         uri_path: "/".to_string(),
         query_string: "".to_string(),
         headers: headers,
-        body: &"".as_bytes().to_vec(),
+        body: "".as_bytes().to_vec(),
         region: "us-east-1".to_string(),
         service: "service".to_string(),
     };
@@ -253,7 +253,7 @@ fn run_auth_test_get_err(auth_str: &str) -> SignatureError {
         uri_path: "/".to_string(),
         query_string: "".to_string(),
         headers: headers,
-        body: &"".as_bytes().to_vec(),
+        body: "".as_bytes().to_vec(),
         region: "us-east-1".to_string(),
         service: "service".to_string(),
     };
@@ -261,7 +261,7 @@ fn run_auth_test_get_err(auth_str: &str) -> SignatureError {
     let sig = AWSSigV4::new();
 
     let get_signing_key = |
-        kind: &SigningKeyKind,
+        kind: SigningKeyKind,
         access_key_id: &str,
         _session_token: Option<&str>,
         _req_date_opt: Option<&str>,
@@ -276,7 +276,7 @@ fn run_auth_test_get_err(auth_str: &str) -> SignatureError {
         }
     };
 
-    sig.verify(&request, &SigningKeyKind::KSecret, &get_signing_key, None).unwrap_err()
+    sig.verify(&request, SigningKeyKind::KSecret, get_signing_key, None).unwrap_err()
 }
 
 #[test]
@@ -363,7 +363,7 @@ fn test_multiple_algorithms() {
         uri_path: "/".to_string(),
         query_string: "".to_string(),
         headers: headers,
-        body: &"".as_bytes().to_vec(),
+        body: "".as_bytes().to_vec(),
         region: "us-east-1".to_string(),
         service: "service".to_string(),
     };
@@ -384,7 +384,7 @@ fn duplicate_query_parameter() {
         uri_path: "/".to_string(),
         query_string: "X-Amz-Signature=1234&X-Amz-Signature=1234".to_string(),
         headers: headers,
-        body: &"".as_bytes().to_vec(),
+        body: "".as_bytes().to_vec(),
         region: "us-east-1".to_string(),
         service: "service".to_string(),
     };
@@ -411,7 +411,7 @@ fn non_utf8_header() {
         uri_path: "/".to_string(),
         query_string: "".to_string(),
         headers: headers,
-        body: &"".as_bytes().to_vec(),
+        body: "".as_bytes().to_vec(),
         region: "us-east-1".to_string(),
         service: "service".to_string(),
     };
@@ -435,7 +435,7 @@ fn missing_header() {
         uri_path: "/".to_string(),
         query_string: "".to_string(),
         headers: headers,
-        body: &"".as_bytes().to_vec(),
+        body: "".as_bytes().to_vec(),
         region: "us-east-1".to_string(),
         service: "service".to_string(),
     };
@@ -462,7 +462,7 @@ fn missing_date() {
         uri_path: "/".to_string(),
         query_string: "".to_string(),
         headers: headers,
-        body: &"".as_bytes().to_vec(),
+        body: "".as_bytes().to_vec(),
         region: "us-east-1".to_string(),
         service: "service".to_string(),
     };
@@ -490,7 +490,7 @@ fn invalid_date() {
         uri_path: "/".to_string(),
         query_string: "".to_string(),
         headers: headers1,
-        body: &"".as_bytes().to_vec(),
+        body: "".as_bytes().to_vec(),
         region: "us-east-1".to_string(),
         service: "service".to_string(),
     };
@@ -514,7 +514,7 @@ fn invalid_date() {
         uri_path: "/".to_string(),
         query_string: "".to_string(),
         headers: headers2,
-        body: &"".as_bytes().to_vec(),
+        body: "".as_bytes().to_vec(),
         region: "us-east-1".to_string(),
         service: "service".to_string(),
     };
@@ -530,7 +530,7 @@ fn invalid_date() {
         uri_path: "/".to_string(),
         query_string: "X-Amz-Date=zzzz".to_string(),
         headers: headers3,
-        body: &"".as_bytes().to_vec(),
+        body: "".as_bytes().to_vec(),
         region: "us-east-1".to_string(),
         service: "service".to_string(),
     };

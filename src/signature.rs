@@ -264,7 +264,7 @@ impl From<std::io::Error> for SignatureError {
 }
 
 /// The types of signing key available.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SigningKeyKind {
     /// KSecret: secret key prepended with "AWS4". Avoid using.
     KSecret,
@@ -295,8 +295,8 @@ impl fmt::Display for SigningKeyKind {
 }
 
 /// The function that returns a signing key of a given type.
-pub type SigningKeyFn = dyn Fn(
-    &SigningKeyKind,
+pub type SigningKeyFn = fn(
+    SigningKeyKind,
     &str,           // access_key_id
     Option<&str>,   // token
     Option<&str>,   // request date
@@ -307,7 +307,8 @@ pub type SigningKeyFn = dyn Fn(
 /// A data structure containing the elements of the request
 /// (some client-supplied, some service-supplied) involved in the SigV4
 /// verification process.
-pub struct Request<'a> {
+#[derive(Clone, Debug)]
+pub struct Request {
     /// The request method (GET, PUT, POST) (client).
     pub request_method: String,
 
@@ -321,7 +322,7 @@ pub struct Request<'a> {
     pub headers: HashMap<String, Vec<Vec<u8>>>,
 
     /// The request body (if any) (client).
-    pub body: &'a Vec<u8>,
+    pub body: Vec<u8>,
 
     /// The region the request was sent to (service).
     pub region: String,
@@ -330,7 +331,7 @@ pub struct Request<'a> {
     pub service: String,
 }
 
-impl Request<'_> {
+impl Request {
     /// Retrieve a header value, requiring exactly one value be present.
     fn get_header_one(&self, header: &str) -> Result<String, SignatureError> {
         match self.headers.get(header) {
@@ -466,7 +467,7 @@ pub trait AWSSigV4Algorithm {
 
                 // Parse the body as a URL string
                 let body_utf8 =
-                    match from_utf8(req.body) {
+                    match from_utf8(&req.body) {
                         Ok(s) => s,
                         Err(_) => return Err(SignatureError::new(
                             ErrorKind::InvalidBodyEncoding,
@@ -918,8 +919,8 @@ pub trait AWSSigV4Algorithm {
     fn get_expected_signature(
         &self,
         req: &Request,
-        signing_key_kind: &SigningKeyKind,
-        signing_key_fn: &SigningKeyFn) -> Result<String, SignatureError>
+        signing_key_kind: SigningKeyKind,
+        signing_key_fn: SigningKeyFn) -> Result<String, SignatureError>
     {
         let access_key = self.get_access_key(req)?;
         let session_token_result = self.get_session_token(req);
@@ -935,7 +936,7 @@ pub trait AWSSigV4Algorithm {
         let req_date = format!("{}", timestamp.date().format("%Y%m%d"));
 
         let key = signing_key_fn(
-            &signing_key_kind,
+            signing_key_kind,
             &access_key,
             session_token.as_ref().map(String::as_ref),
             Some(&req_date),
@@ -959,8 +960,8 @@ pub trait AWSSigV4Algorithm {
     fn verify_at(
         &self,
         req: &Request,
-        signing_key_kind: &SigningKeyKind,
-        signing_key_fn: &SigningKeyFn,
+        signing_key_kind: SigningKeyKind,
+        signing_key_fn: SigningKeyFn,
         server_timestamp: &DateTime<Utc>,
         allowed_mismatch: Option<&Duration>,
     ) -> Result<(), SignatureError> {
@@ -1006,15 +1007,16 @@ pub trait AWSSigV4Algorithm {
     fn verify(
         &self,
         req: &Request,
-        signing_key_kind: &SigningKeyKind,
-        signing_key_fn: &SigningKeyFn,
+        signing_key_kind: SigningKeyKind,
+        signing_key_fn: SigningKeyFn,
         allowed_mismatch: Option<&Duration>,
     ) -> Result<(), SignatureError> {
-        self.verify_at(req, &signing_key_kind, signing_key_fn, &Utc::now(), allowed_mismatch)
+        self.verify_at(req, signing_key_kind, signing_key_fn, &Utc::now(), allowed_mismatch)
     }
 }
 
 /// The implementation of the standard AWS SigV4 algorithm.
+#[derive(Clone, Copy, Debug)]
 pub struct AWSSigV4 {}
 
 impl AWSSigV4 {
@@ -1028,11 +1030,11 @@ impl AWSSigV4 {
     pub fn verify(
         &self,
         req: &Request,
-        signing_key_kind: &SigningKeyKind,
-        signing_key_fn: &SigningKeyFn,
+        signing_key_kind: SigningKeyKind,
+        signing_key_fn: SigningKeyFn,
         allowed_mismatch: Option<&Duration>,
     ) -> Result<(), SignatureError> {
-        AWSSigV4Algorithm::verify(self, req, &signing_key_kind, signing_key_fn, allowed_mismatch)
+        AWSSigV4Algorithm::verify(self, req, signing_key_kind, signing_key_fn, allowed_mismatch)
     }
 }
 
@@ -1268,7 +1270,7 @@ pub fn split_authorization_header_parameters(
 
 /// Return the signing key given a possibly non-final signing key.
 pub fn get_signing_key<'a>(
-    signing_key_kind: &'a SigningKeyKind,
+    signing_key_kind: SigningKeyKind,
     key: &'a [u8],
     req_date: &'a str,
     region: &'a str,
@@ -1277,14 +1279,14 @@ pub fn get_signing_key<'a>(
     match signing_key_kind {
         SigningKeyKind::KSigning => key.try_into(),
         _ => {
-            let k_service = get_kservice_key(&signing_key_kind, key, req_date, region, service);
+            let k_service = get_kservice_key(signing_key_kind, key, req_date, region, service);
             hmac_sha256(k_service.as_ref(), AWS4_REQUEST.as_bytes()).as_ref().try_into()
         }
     }.expect("Invalid HMAC-SHA256 length")
 }
 
 pub fn get_kservice_key<'a>(
-    signing_key_kind: &'a SigningKeyKind,
+    signing_key_kind: SigningKeyKind,
     key: &'a [u8],
     req_date: &'a str,
     region: &'a str,
@@ -1293,14 +1295,14 @@ pub fn get_kservice_key<'a>(
     match signing_key_kind {
         SigningKeyKind::KService => key.try_into(),
         _ => {
-            let k_region = get_kregion_key(&signing_key_kind, key, req_date, region);
+            let k_region = get_kregion_key(signing_key_kind, key, req_date, region);
             hmac_sha256(k_region.as_ref(), service.as_bytes()).as_ref().try_into()
         }
     }.expect("Invalid HMAC-SHA256 length")
 }
 
 pub fn get_kregion_key<'a> (
-    signing_key_kind: &'a SigningKeyKind,
+    signing_key_kind: SigningKeyKind,
     key: &'a [u8],
     req_date: &'a str,
     region: &'a str,
@@ -1308,14 +1310,14 @@ pub fn get_kregion_key<'a> (
     match signing_key_kind {
         SigningKeyKind::KRegion => key.try_into(),
         _ => {
-            let k_date = get_kdate_key(&signing_key_kind, key, req_date);
+            let k_date = get_kdate_key(signing_key_kind, key, req_date);
             hmac_sha256(k_date.as_ref(), region.as_bytes()).as_ref().try_into()
         }
     }.expect("Invalid HMAC-SHA256 length")
 }
 
 pub fn get_kdate_key<'a>(
-    signing_key_kind: &'a SigningKeyKind,
+    signing_key_kind: SigningKeyKind,
     key: &'a [u8],
     req_date: &'a str,
 ) -> [u8; 32] {

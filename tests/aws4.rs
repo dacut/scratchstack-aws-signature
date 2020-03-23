@@ -292,7 +292,7 @@ fn run(basename: &str) {
         uri_path: uri,
         query_string: query,
         headers: headers,
-        body: &body,
+        body: body,
         region: "us-east-1".to_string(),
         service: "service".to_string(),
     };
@@ -331,25 +331,25 @@ fn run(basename: &str) {
         sreq_path
     );
 
-    sig.verify(&request, &SigningKeyKind::KSecret, &get_signing_key, None)
+    sig.verify(&request, SigningKeyKind::KSecret, get_signing_key, None)
         .expect(&format!("Signature verification failed: {:?}", sreq_path));
 
-    sig.verify(&request, &SigningKeyKind::KDate, &get_signing_key, None)
+    sig.verify(&request, SigningKeyKind::KDate, get_signing_key, None)
         .expect(&format!("Signature verification failed: {:?}", sreq_path));
 
-    sig.verify(&request, &SigningKeyKind::KRegion, &get_signing_key, None)
+    sig.verify(&request, SigningKeyKind::KRegion, get_signing_key, None)
         .expect(&format!("Signature verification failed: {:?}", sreq_path));
 
-    sig.verify(&request, &SigningKeyKind::KService, &get_signing_key, None)
+    sig.verify(&request, SigningKeyKind::KService, get_signing_key, None)
         .expect(&format!("Signature verification failed: {:?}", sreq_path));
 
-    sig.verify(&request, &SigningKeyKind::KSigning, &get_signing_key, None)
+    sig.verify(&request, SigningKeyKind::KSigning, get_signing_key, None)
         .expect(&format!("Signature verification failed: {:?}", sreq_path));
 }
 
 
 fn get_signing_key(
-    kind: &SigningKeyKind,
+    kind: SigningKeyKind,
     _access_key_id: &str,
     _session_token: Option<&str>,
     req_date_opt: Option<&str>,
@@ -364,7 +364,7 @@ fn get_signing_key(
 }
 
 fn get_signing_key_kdate(
-    kind: &SigningKeyKind,
+    kind: SigningKeyKind,
     k_secret: &[u8],
     req_date_opt: Option<&str>,
     region_opt: Option<&str>,
@@ -384,7 +384,7 @@ fn get_signing_key_kdate(
 }
 
 fn get_signing_key_kregion(
-    kind: &SigningKeyKind,
+    kind: SigningKeyKind,
     k_date: &[u8],
     region_opt: Option<&str>,
     service_opt: Option<&str>
@@ -403,7 +403,7 @@ fn get_signing_key_kregion(
 }
 
 fn get_signing_key_kservice(
-    kind: &SigningKeyKind,
+    kind: SigningKeyKind,
     k_region: &[u8],
     service_opt: Option<&str>
 ) -> Result<Vec<u8>, SignatureError> {
