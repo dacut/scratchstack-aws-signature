@@ -193,12 +193,12 @@ Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea";
 
 #[test]
 fn duplicate_headers() {
-    let mut headers: HashMap<Vec<u8>, Vec<Vec<u8>>> = HashMap::new();
+    let mut headers: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
     headers.insert(
-        b"authorization".to_vec(),
+        "authorization".to_string(),
         vec![_AUTH_HEADER1.as_bytes().to_vec(), _AUTH_HEADER1.as_bytes().to_vec()]);
     headers.insert(
-        b"x-amz-date".to_vec(),
+        "x-amz-date".to_string(),
         vec!["20150830T123600Z".as_bytes().to_vec()]);
 
     let request = Request {
@@ -237,15 +237,15 @@ macro_rules! run_auth_test {
 }
 
 fn run_auth_test_get_err(auth_str: &str) -> SignatureError {
-    let mut headers: HashMap<Vec<u8>, Vec<Vec<u8>>> = HashMap::new();
+    let mut headers: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
     headers.insert(
-        b"authorization".to_vec(),
+        "authorization".to_string(),
         vec![auth_str.as_bytes().to_vec()]);
     headers.insert(
-        b"host".to_vec(),
+        "host".to_string(),
         vec!["example.amazonaws.com".as_bytes().to_vec()]);
     headers.insert(
-        b"x-amz-date".to_vec(),
+        "x-amz-date".to_string(),
         vec!["20150830T123600Z".as_bytes().to_vec()]);
 
     let request = Request {
@@ -352,9 +352,9 @@ fn test_wrong_auth_algorithm() {
 
 #[test]
 fn test_multiple_algorithms() {
-    let mut headers: HashMap<Vec<u8>, Vec<Vec<u8>>> = HashMap::new();
+    let mut headers: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
     headers.insert(
-        b"authorization".to_vec(),
+        "authorization".to_string(),
         vec![b"Basic foobar".to_vec(),
              b"AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678".to_vec()]);
 
@@ -377,7 +377,7 @@ fn test_multiple_algorithms() {
 
 #[test]
 fn duplicate_query_parameter() {
-    let headers: HashMap<Vec<u8>, Vec<Vec<u8>>> = HashMap::new();
+    let headers: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
 
     let request = Request {
         request_method: "GET".to_string(),
@@ -400,9 +400,9 @@ fn duplicate_query_parameter() {
 
 #[test]
 fn non_utf8_header() {
-    let mut headers: HashMap<Vec<u8>, Vec<Vec<u8>>> = HashMap::new();
+    let mut headers: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
     headers.insert(
-        b"authorization".to_vec(),
+        "authorization".to_string(),
         vec![vec![b'A', b'W', b'S', b'4', b'-', b'H', b'M', b'A', b'C', b'-',
                   b'S', b'H', b'A', b'2', b'5', b'6', b' ', 0x80, 0x80]]);
 
@@ -425,9 +425,9 @@ fn non_utf8_header() {
 
 #[test]
 fn missing_header() {
-    let mut headers: HashMap<Vec<u8>, Vec<Vec<u8>>> = HashMap::new();
+    let mut headers: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
     headers.insert(
-        b"authorization".to_vec(),
+        "authorization".to_string(),
         vec![]);
 
     let request = Request {
@@ -449,12 +449,12 @@ fn missing_header() {
 
 #[test]
 fn missing_date() {
-    let mut headers: HashMap<Vec<u8>, Vec<Vec<u8>>> = HashMap::new();
+    let mut headers: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
     headers.insert(
-        b"authorization".to_vec(),
+        "authorization".to_string(),
         vec![_AUTH_HEADER1.as_bytes().to_vec()]);
     headers.insert(
-        b"host".to_vec(),
+        "host".to_string(),
         vec!["localhost".as_bytes().to_vec()]);
 
     let request = Request {
@@ -477,12 +477,12 @@ fn missing_date() {
 
 #[test]
 fn invalid_date() {
-    let mut headers1: HashMap<Vec<u8>, Vec<Vec<u8>>> = HashMap::new();
+    let mut headers1: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
     headers1.insert(
-        b"authorization".to_vec(),
+        "authorization".to_string(),
         vec![_AUTH_HEADER1.as_bytes().to_vec()]);
     headers1.insert(
-        b"date".to_vec(),
+        "date".to_string(),
         vec!["zzzzzzzzz".as_bytes().to_vec()]);
 
     let request = Request {
@@ -501,12 +501,12 @@ fn invalid_date() {
         ErrorKind::MalformedHeader);
     assert_eq!(format!("{}", e), "Malformed header: date");
 
-    let mut headers2: HashMap<Vec<u8>, Vec<Vec<u8>>> = HashMap::new();
+    let mut headers2: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
     headers2.insert(
-        b"authorization".to_vec(),
+        "authorization".to_string(),
         vec![_AUTH_HEADER1.as_bytes().to_vec()]);
     headers2.insert(
-        b"date".to_vec(),
+        "date".to_string(),
         vec![]);
 
     let request = Request {
@@ -524,7 +524,7 @@ fn invalid_date() {
         sig.get_request_timestamp(&request),
         ErrorKind::MissingHeader);
 
-    let headers3: HashMap<Vec<u8>, Vec<Vec<u8>>> = HashMap::new();
+    let headers3: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
     let request = Request {
         request_method: "GET".to_string(),
         uri_path: "/".to_string(),

@@ -41,7 +41,7 @@ const AWS4_HMAC_SHA256_SPACE: &str = "AWS4-HMAC-SHA256 ";
 const AWS4_REQUEST: &str = "aws4_request";
 
 /// Header parameter for the authorization
-const AUTHORIZATION: &[u8] = b"authorization";
+const AUTHORIZATION: &str = "authorization";
 
 /// Content-Type parameter for specifying the character set
 const CHARSET: &str = "charset";
@@ -50,7 +50,7 @@ const CHARSET: &str = "charset";
 const CREDENTIAL: &str = "Credential";
 
 /// Header field for the content type
-const CONTENT_TYPE: &[u8] = b"content-type";
+const CONTENT_TYPE: &str = "content-type";
 
 /// Header parameter for the date
 const DATE: &str = "date";
@@ -81,7 +81,7 @@ const X_AMZ_DATE_LOWER: &str = "x-amz-date";
 const X_AMZ_SECURITY_TOKEN: &str = "X-Amz-Security-Token";
 
 /// Header for delivering the session token
-const X_AMZ_SECURITY_TOKEN_LOWER: &[u8] = b"x-amz-security-token";
+const X_AMZ_SECURITY_TOKEN_LOWER: &str = "x-amz-security-token";
 
 /// Query parameter for delivering the signature
 const X_AMZ_SIGNATURE: &str = "X-Amz-Signature";
@@ -319,7 +319,7 @@ pub struct Request {
     pub query_string: String,
 
     /// The HTTP headers sent with the request (client).
-    pub headers: HashMap<Vec<u8>, Vec<Vec<u8>>>,
+    pub headers: HashMap<String, Vec<Vec<u8>>>,
 
     /// The request body (if any) (client).
     pub body: Vec<u8>,
@@ -333,26 +333,23 @@ pub struct Request {
 
 impl Request {
     /// Retrieve a header value, requiring exactly one value be present.
-    fn get_header_one(&self, header: &[u8]) -> Result<String, SignatureError> {
+    fn get_header_one(&self, header: &str) -> Result<String, SignatureError> {
         match self.headers.get(header) {
-            None => Err(SignatureError::new(
-                ErrorKind::MissingHeader, &String::from_utf8_lossy(header))),
+            None => Err(SignatureError::new(ErrorKind::MissingHeader, header)),
             Some(ref values) => match values.len() {
                 0 => {
-                    Err(SignatureError::new(
-                        ErrorKind::MissingHeader,
-                        &String::from_utf8_lossy(header)))
+                    Err(SignatureError::new(ErrorKind::MissingHeader, header))
                 }
                 1 => match from_utf8(&values[0]) {
                     Ok(ref s) => Ok(s.to_string()),
                     Err(_) => Err(SignatureError::new(
                         ErrorKind::MalformedHeader,
-                        &String::from_utf8_lossy(header),
+                        header,
                     )),
                 },
                 _ => Err(SignatureError::new(
                     ErrorKind::MultipleHeaderValues,
-                    &String::from_utf8_lossy(header),
+                    header,
                 )),
             },
         }
@@ -506,9 +503,7 @@ pub trait AWSSigV4Algorithm {
         let aws4_hmac_sha256_space_v8: &Vec<u8> = &aws4_hmac_sha256_space_u8.to_vec();
 
         match auth_headers_opt {
-            None => Err(SignatureError::new(
-                ErrorKind::MissingHeader,
-                &String::from_utf8_lossy(AUTHORIZATION))),
+            None => Err(SignatureError::new(ErrorKind::MissingHeader, AUTHORIZATION)),
             Some(auth_headers) => {
                 let mut parameters_opt: Option<&str> = None;
 
@@ -522,7 +517,7 @@ pub trait AWSSigV4Algorithm {
                     if parameters_opt.is_some() {
                         return Err(SignatureError::new(
                             ErrorKind::MultipleHeaderValues,
-                            &String::from_utf8_lossy(AUTHORIZATION)));
+                            AUTHORIZATION));
                     }
 
                     if auth_header == aws4_hmac_sha256_v8 || auth_header == aws4_hmac_sha256_space_v8 {
@@ -542,8 +537,7 @@ pub trait AWSSigV4Algorithm {
 
                 match parameters_opt {
                     None => Err(SignatureError::new(
-                        ErrorKind::MissingHeader,
-                        &String::from_utf8_lossy(AUTHORIZATION))),
+                        ErrorKind::MissingHeader, AUTHORIZATION)),
                     Some(parameters) => 
                         split_authorization_header_parameters(&parameters),
                 }
@@ -607,7 +601,7 @@ pub trait AWSSigV4Algorithm {
 
         let mut result = BTreeMap::<String, Vec<Vec<u8>>>::new();
         for header in canonicalized.iter() {
-            match req.headers.get(header.as_bytes()) {
+            match req.headers.get(header) {
                 None => {
                     return Err(SignatureError::new(
                         ErrorKind::MissingHeader,
@@ -654,13 +648,13 @@ pub trait AWSSigV4Algorithm {
                 ErrorKind::MissingParameter => {
                     malformed_kind = ErrorKind::MalformedHeader;
                     date_header = X_AMZ_DATE_LOWER;
-                    h_amz_date_result = req.get_header_one(X_AMZ_DATE_LOWER.as_bytes());
+                    h_amz_date_result = req.get_header_one(X_AMZ_DATE_LOWER);
                     match h_amz_date_result {
                         Ok(dstr) => dstr,
                         Err(e) => match e.kind {
                             ErrorKind::MissingHeader => {
                                 date_header = DATE;
-                                h_reg_date_result = req.get_header_one(DATE.as_bytes());
+                                h_reg_date_result = req.get_header_one(DATE);
                                 h_reg_date_result?
                             }
                             _ => return Err(e),
