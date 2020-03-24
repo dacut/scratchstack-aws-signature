@@ -969,15 +969,15 @@ pub trait AWSSigV4Algorithm {
         signing_key_kind: SigningKeyKind,
         signing_key_fn: SigningKeyFn,
         server_timestamp: &DateTime<Utc>,
-        allowed_mismatch: Option<&Duration>,
+        allowed_mismatch: Option<Duration>,
     ) -> Result<(), SignatureError> {
         if let Some(mm) = allowed_mismatch {
             let req_ts = self.get_request_timestamp(req)?;
             let min_ts = server_timestamp
-                .checked_sub_signed(*mm)
+                .checked_sub_signed(mm)
                 .unwrap_or(*server_timestamp);
             let max_ts = server_timestamp
-                .checked_add_signed(*mm)
+                .checked_add_signed(mm)
                 .unwrap_or(*server_timestamp);
 
             if req_ts < min_ts || req_ts > max_ts {
@@ -1015,7 +1015,7 @@ pub trait AWSSigV4Algorithm {
         req: &Request,
         signing_key_kind: SigningKeyKind,
         signing_key_fn: SigningKeyFn,
-        allowed_mismatch: Option<&Duration>,
+        allowed_mismatch: Option<Duration>,
     ) -> Result<(), SignatureError> {
         self.verify_at(req, signing_key_kind, signing_key_fn, &Utc::now(), allowed_mismatch)
     }
@@ -1038,7 +1038,7 @@ impl AWSSigV4 {
         req: &Request,
         signing_key_kind: SigningKeyKind,
         signing_key_fn: SigningKeyFn,
-        allowed_mismatch: Option<&Duration>,
+        allowed_mismatch: Option<Duration>,
     ) -> Result<(), SignatureError> {
         AWSSigV4Algorithm::verify(self, req, signing_key_kind, signing_key_fn, allowed_mismatch)
     }
