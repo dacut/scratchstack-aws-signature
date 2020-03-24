@@ -1,6 +1,6 @@
 [package]
 name = "aws_sig_verify"
-version = "0.3.2"
+version = "0.4.0"
 authors = ["David Cuthbert <dacut@kanga.org>"]
 description = "AWS SigV4 signature verification"
 keywords = ["AWS", "Amazon"]
