@@ -8,7 +8,9 @@ use std::path::PathBuf;
 use std::str::from_utf8;
 
 extern crate aws_sig_verify;
-use aws_sig_verify::{AWSSigV4Algorithm, AWSSigV4, ErrorKind, Request, SigningKeyKind, SignatureError};
+use aws_sig_verify::{
+    AWSSigV4Algorithm, AWSSigV4, ErrorKind, Principal, Request, SigningKeyKind,
+    SignatureError};
 
 use ring::hmac;
 
@@ -355,12 +357,18 @@ fn get_signing_key(
     req_date_opt: Option<&str>,
     region_opt: Option<&str>,
     service_opt: Option<&str>
-) -> Result<Vec<u8>, SignatureError> {
+) -> Result<(Principal, Vec<u8>), SignatureError> {
     let k_secret = "AWS4wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".as_bytes();
-    match kind {
-        SigningKeyKind::KSecret => Ok(k_secret.to_vec()),
-        _ => get_signing_key_kdate(kind, k_secret, req_date_opt, region_opt, service_opt)
-    }
+    let principal = Principal::create_user(
+        "aws".to_string(), "123456789012".to_string(), "/".to_string(),
+        "test".to_string(), "AIDAIAAAAAAAAAAAAAAAA".to_string());
+
+    let signing_key = match kind {
+        SigningKeyKind::KSecret => k_secret.to_vec(),
+        _ => get_signing_key_kdate(kind, k_secret, req_date_opt, region_opt, service_opt)?,
+    };
+
+    Ok((principal, signing_key))
 }
 
 fn get_signing_key_kdate(

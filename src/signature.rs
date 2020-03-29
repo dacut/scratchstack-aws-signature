@@ -294,6 +294,181 @@ impl fmt::Display for SigningKeyKind {
     }
 }
 
+/// Principal for a given access key
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Principal {
+    /// The partition this principal exists in.
+    pub partition: String,
+
+    /// Principal type -- role, assumed role, service, etc.
+    pub principal_type: PrincipalType,
+}
+
+impl Principal {
+    pub fn create_assumed_role(
+        partition: String, account_id: String, path: String, name: String,
+        session_name: String) -> Self
+    {
+        Self {
+            partition: partition,
+            principal_type: PrincipalType::AssumedRole(IAMAssumedRoleDetails {
+                account_id: account_id,
+                path: path,
+                name: name,
+                session_name: session_name,
+            })
+        }
+    }
+
+    pub fn create_group(
+        partition: String, account_id: String, path: String, name: String,
+        group_id: String) -> Self
+    {
+        Self {
+            partition: partition,
+            principal_type: PrincipalType::Group(IAMGroupDetails {
+                account_id: account_id,
+                path: path,
+                name: name,
+                group_id: group_id,
+            })
+        }
+    }
+
+    pub fn create_role(
+        partition: String, account_id: String, path: String, name: String,
+        role_id: String) -> Self
+    {
+        Self {
+            partition: partition,
+            principal_type: PrincipalType::Role(IAMRoleDetails {
+                account_id: account_id,
+                path: path,
+                name: name,
+                role_id: role_id,
+            })
+        }
+    }
+
+    pub fn create_user(
+        partition: String, account_id: String, path: String, name: String,
+        user_id: String) -> Self
+    {
+        Self {
+            partition: partition,
+            principal_type: PrincipalType::User(IAMUserDetails {
+                account_id: account_id,
+                path: path,
+                name: name,
+                user_id: user_id,
+            })
+        }
+    }
+}
+
+impl fmt::Display for Principal {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match &self.principal_type {
+            PrincipalType::Service(s) => write!(f, "{}", s),
+            _ => write!(f, "arn:{}:iam::{}", self.partition, self.principal_type),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IAMAssumedRoleDetails {
+    /// The account id (12 digits for AWS).
+    pub account_id: String,
+
+    /// Path, starting with a "/".
+    pub path: String,
+
+    /// Name of the pricnipal, case-insensitive.
+    pub name: String,
+
+    /// Session name for the assumed role.
+    pub session_name: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IAMGroupDetails {
+    /// The account id (12 digits for AWS).
+    pub account_id: String,
+
+    /// Path, starting with a "/".
+    pub path: String,
+
+    /// Name of the pricnipal, case-insensitive.
+    pub name: String,
+
+    /// Unique group id -- will change if principal name is reissued.
+    pub group_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IAMRoleDetails {
+    /// The account id (12 digits for AWS).
+    pub account_id: String,
+
+    /// Path, starting with a "/".
+    pub path: String,
+
+    /// Name of the pricnipal, case-insensitive.
+    pub name: String,
+
+    /// Unique role id -- will change if principal name is reissued.
+    pub role_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IAMUserDetails {
+    /// The account id (12 digits for AWS).
+    pub account_id: String,
+
+    /// Path, starting with a "/".
+    pub path: String,
+
+    /// Name of the pricnipal, case-insensitive.
+    pub name: String,
+
+    /// Unique user id -- will change if principal name is reissued.
+    pub user_id: String,
+}
+
+
+/// Principal type
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PrincipalType {
+    AssumedRole(IAMAssumedRoleDetails),
+    Role(IAMRoleDetails),
+    Group(IAMGroupDetails),
+    User(IAMUserDetails),
+    Service(String),
+}
+
+impl fmt::Display for PrincipalType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            PrincipalType::AssumedRole(ref d) => {
+                write!(f, "{}:assumed-role{}{}/{}", d.account_id,
+                       d.path, d.name, d.session_name)
+            }
+            PrincipalType::Group(ref d) => {
+                write!(f, "{}:group{}{}", d.account_id, d.path, d.name)
+            }
+            PrincipalType::Role(ref d) => {
+                write!(f, "{}:role{}{}", d.account_id, d.path, d.name)
+            }
+            PrincipalType::User(ref d) => {
+                write!(f, "{}:user{}{}", d.account_id, d.path, d.name)
+            }
+            PrincipalType::Service(ref service_name) => {
+                write!(f, "{}", service_name)
+            }
+        }
+    }
+}
+
 /// The function that returns a signing key of a given type.
 pub type SigningKeyFn = fn(
     SigningKeyKind,
@@ -302,7 +477,7 @@ pub type SigningKeyFn = fn(
     Option<&str>,   // request date
     Option<&str>,   // request region
     Option<&str>,   // service
-) -> Result<Vec<u8>, SignatureError>;
+) -> Result<(Principal, Vec<u8>), SignatureError>;
 
 /// A data structure containing the elements of the request
 /// (some client-supplied, some service-supplied) involved in the SigV4
@@ -915,12 +1090,12 @@ pub trait AWSSigV4Algorithm {
         Ok(result)
     }
 
-    /// The expected signature for the request.
+    /// The principal and expected signature for the request.
     fn get_expected_signature(
         &self,
         req: &Request,
         signing_key_kind: SigningKeyKind,
-        signing_key_fn: SigningKeyFn) -> Result<String, SignatureError>
+        signing_key_fn: SigningKeyFn) -> Result<(Principal, String), SignatureError>
     {
         let access_key = self.get_access_key(req)?;
         let session_token_result = self.get_session_token(req);
@@ -935,7 +1110,7 @@ pub trait AWSSigV4Algorithm {
         let timestamp = self.get_request_timestamp(req)?;
         let req_date = format!("{}", timestamp.date().format("%Y%m%d"));
 
-        let key = signing_key_fn(
+        let (principal, key) = signing_key_fn(
             signing_key_kind,
             &access_key,
             session_token.as_ref().map(String::as_ref),
@@ -947,8 +1122,8 @@ pub trait AWSSigV4Algorithm {
 
         let k_signing = get_signing_key(signing_key_kind, &key, &req_date, &req.region, &req.service);
 
-        Ok(hex::encode(
-            hmac_sha256(k_signing.as_ref(), &string_to_sign).as_ref()))
+        Ok((principal, hex::encode(
+                hmac_sha256(k_signing.as_ref(), &string_to_sign).as_ref())))
     }
 
     /// Verify that the request timestamp is not beyond the allowed timestamp
@@ -964,7 +1139,7 @@ pub trait AWSSigV4Algorithm {
         signing_key_fn: SigningKeyFn,
         server_timestamp: &DateTime<Utc>,
         allowed_mismatch: Option<Duration>,
-    ) -> Result<(), SignatureError> {
+    ) -> Result<Principal, SignatureError> {
         if let Some(mm) = allowed_mismatch {
             let req_ts = self.get_request_timestamp(req)?;
             let min_ts = server_timestamp
@@ -985,7 +1160,8 @@ pub trait AWSSigV4Algorithm {
             }
         }
 
-        let expected_sig = self.get_expected_signature(&req, signing_key_kind, signing_key_fn)?;
+        let (principal, expected_sig) = self.get_expected_signature(
+            &req, signing_key_kind, signing_key_fn)?;
         let request_sig = self.get_request_signature(&req)?;
 
         if expected_sig != request_sig {
@@ -997,7 +1173,7 @@ pub trait AWSSigV4Algorithm {
                 ),
             ))
         } else {
-            Ok(())
+            Ok(principal)
         }
     }
 
@@ -1010,8 +1186,9 @@ pub trait AWSSigV4Algorithm {
         signing_key_kind: SigningKeyKind,
         signing_key_fn: SigningKeyFn,
         allowed_mismatch: Option<Duration>,
-    ) -> Result<(), SignatureError> {
-        self.verify_at(req, signing_key_kind, signing_key_fn, &Utc::now(), allowed_mismatch)
+    ) -> Result<Principal, SignatureError> {
+        self.verify_at(
+            req, signing_key_kind, signing_key_fn, &Utc::now(), allowed_mismatch)
     }
 }
 
@@ -1033,8 +1210,9 @@ impl AWSSigV4 {
         signing_key_kind: SigningKeyKind,
         signing_key_fn: SigningKeyFn,
         allowed_mismatch: Option<Duration>,
-    ) -> Result<(), SignatureError> {
-        AWSSigV4Algorithm::verify(self, req, signing_key_kind, signing_key_fn, allowed_mismatch)
+    ) -> Result<Principal, SignatureError> {
+        AWSSigV4Algorithm::verify(
+            self, req, signing_key_kind, signing_key_fn, allowed_mismatch)
     }
 }
 

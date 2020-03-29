@@ -1,5 +1,5 @@
 use super::signature::{
-    AWSSigV4, AWSSigV4Algorithm, ErrorKind, Request, SigningKeyKind,
+    AWSSigV4, AWSSigV4Algorithm, ErrorKind, Principal, Request, SigningKeyKind,
     SignatureError, canonicalize_uri_path, normalize_query_parameters,
     normalize_uri_path_component,
 };
@@ -7,6 +7,7 @@ use super::signature::{
 use chrono::{DateTime, Datelike, Timelike};
 use super::chronoutil::ParseISO8601;
 use std::collections::HashMap;
+use std::fmt::Write;
 
 #[test]
 fn check_iso8601_error_handling() {
@@ -19,6 +20,44 @@ fn check_iso8601_error_handling() {
         Ok(_) => panic!("Expected a ParseError"),
         Err(_) => 1,
     };
+}
+
+#[test]
+fn check_principal_formats() {
+    let principal = Principal::create_user(
+        "aws".to_string(), "123456789012".to_string(), "/".to_string(),
+        "test".to_string(), "AIDAIAAAAAAAAAAAAAAAA".to_string());
+    let mut s = String::new();
+    write!(s, "{}", principal).expect("must succeed");
+    assert_eq!(s, "arn:aws:iam::123456789012:user/test");
+
+    let principal = Principal::create_user(
+        "aws".to_string(), "123456789012".to_string(), "/path/".to_string(),
+        "test".to_string(), "AIDAIAAAAAAAAAAAAAAAA".to_string());
+    let mut s = String::new();
+    write!(s, "{}", principal).expect("must succeed");
+    assert_eq!(s, "arn:aws:iam::123456789012:user/path/test");
+
+    let principal = Principal::create_group(
+        "aws".to_string(), "123456789012".to_string(), "/path/".to_string(),
+        "test".to_string(), "AIGAIAAAAAAAAAAAAAAAA".to_string());
+    let mut s = String::new();
+    write!(s, "{}", principal).expect("must succeed");
+    assert_eq!(s, "arn:aws:iam::123456789012:group/path/test");
+
+    let principal = Principal::create_role(
+        "aws".to_string(), "123456789012".to_string(), "/path/".to_string(),
+        "test".to_string(), "AIGAIAAAAAAAAAAAAAAAA".to_string());
+    let mut s = String::new();
+    write!(s, "{}", principal).expect("must succeed");
+    assert_eq!(s, "arn:aws:iam::123456789012:role/path/test");
+
+    let principal = Principal::create_assumed_role(
+        "aws".to_string(), "123456789012".to_string(), "/path/".to_string(),
+        "test".to_string(), "MyTestSession".to_string());
+    let mut s = String::new();
+    write!(s, "{}", principal).expect("must succeed");
+    assert_eq!(s, "arn:aws:iam::123456789012:assumed-role/path/test/MyTestSession");
 }
 
 #[test]
@@ -269,8 +308,12 @@ fn run_auth_test_get_err(auth_str: &str) -> SignatureError {
         _service_opt: Option<&str>
     | {
         let k_secret = "AWS4wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".as_bytes();
+        let principal = Principal::create_user(
+            "aws".to_string(), "123456789012".to_string(), "/".to_string(),
+            "test".to_string(), "AIDAIAAAAAAAAAAAAAAAA".to_string());
+    
         match kind {
-            SigningKeyKind::KSecret => Ok(k_secret.to_vec()),
+            SigningKeyKind::KSecret => Ok((principal, k_secret.to_vec())),
             _ => Err(SignatureError::new(
                 ErrorKind::UnknownAccessKey, access_key_id))
         }
