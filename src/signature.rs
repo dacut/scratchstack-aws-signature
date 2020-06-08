@@ -7,7 +7,6 @@
 //! and [SigV4S3](https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-authenticating-requests.html)
 //! algorithms.
 //!
-use std::backtrace::Backtrace;
 use std::collections::{BTreeMap, HashMap};
 use std::convert::From;
 use std::convert::TryInto;
@@ -106,9 +105,6 @@ pub struct SignatureError {
 
     /// Details about the error.
     pub detail: String,
-
-    /// Captured backtrace.
-    _bt: Backtrace,
 }
 
 /// The possible reasons for an AWS SigV4 signature validation to fail;
@@ -184,9 +180,8 @@ pub enum ErrorKind {
 impl SignatureError {
     pub fn new(kind: ErrorKind, detail: &str) -> Self {
         Self {
-            kind: kind,
+            kind,
             detail: detail.to_string(),
-            _bt: Backtrace::capture(),
         }
     }
 }
@@ -249,10 +244,6 @@ impl error::Error for SignatureError {
             ErrorKind::IO(ref e) => Some(e),
             _ => None,
         }
-    }
-
-    fn backtrace(&self) -> Option<&Backtrace> {
-        Some(&self._bt)
     }
 }
 
