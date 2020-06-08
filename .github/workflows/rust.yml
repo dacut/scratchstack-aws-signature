@@ -2,7 +2,7 @@ name: Rust
 
 on: [push]
 env:
-  RUSTFLAGS: "-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Zno-landing-pads"
+  RUSTFLAGS: "-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off"
   CARGO_INCREMENTAL: 0
 
 jobs:
