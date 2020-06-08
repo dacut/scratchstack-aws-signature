@@ -22,3 +22,10 @@ and are developing mock-AWS services or just really like AWS SigV4 but
 can't run within AWS, this library _might_ be for you.
 
 Documentation for this package is published automatically to [docs.rs](https://docs.rs/aws_sig_verify/).
+
+## Version information
+
+Version 0.5 supports [ring 0.14](https://github.com/briansmith/ring), needed
+for [Gotham 0.4](https://gotham.rs).
+
+Version 0.6 supports ring 0.16, needed for Gotham 0.5.
