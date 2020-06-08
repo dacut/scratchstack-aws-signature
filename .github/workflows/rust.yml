@@ -2,8 +2,9 @@ name: Rust
 
 on: [push]
 env:
-  RUSTFLAGS: "-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off"
-  CARGO_INCREMENTAL: 0
+  CARGO_INCREMENTAL: '0'
+  RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
+  RUSTDOCFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
 
 jobs:
   build:
@@ -24,9 +25,10 @@ jobs:
     - name: Build documentation
       run: cargo doc --verbose
     - name: Generate coverage report
+      id: coverage
       uses: actions-rs/grcov@v0.1
     - name: Upload coverage report to Coveralls
       uses: coverallsapp/github-action@master
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
-        path-to-lcov: ./lcov.info
+        path-to-lcov: ${{ steps.coverage.outputs.report }}
