@@ -106,63 +106,49 @@ pub struct SignatureError {
     pub detail: String,
 }
 
-/// The possible reasons for an AWS SigV4 signature validation to fail;
-/// returned as part of SignatureError.
+/// The possible reasons for an AWS SigV4 signature validation to fail; returned as part of SignatureError.
 #[derive(Debug)]
 pub enum ErrorKind {
     /// Validation failed due to an underlying I/O error.
     IO(io::Error),
 
-    /// The request body used an unsupported character set encoding. Currently
-    /// only UTF-8 is supported.
+    /// The request body used an unsupported character set encoding. Currently only UTF-8 is supported.
     InvalidBodyEncoding,
 
-    /// The request signature specified an invalid credential -- either the
-    /// access key was not specified, or the credential scope (in the form
-    /// <code>_date_/_region_/_service_/aws4_request</code>) did not match
-    /// the expected value for the server.
+    /// The request signature specified an invalid credential -- either the access key was not specified, or the credential scope
+    /// (in the form <code>_date_/_region_/_service_/aws4_request</code>) did not match the expected value for the server.
     InvalidCredential,
 
-    /// The signature passed in the request did not match the calculated
-    /// signature value.
+    /// The signature passed in the request did not match the calculated signature value.
     InvalidSignature,
 
-    /// The URI path includes invalid components. This can be a malformed
-    /// hex encoding (e.g. `%0J`), a non-absolute URI path (`foo/bar`), or a
-    /// URI path that attempts to navigate above the root (`/x/../../../y`).
+    /// The URI path includes invalid components. This can be a malformed hex encoding (e.g. `%0J`), a non-absolute URI path
+    /// (`foo/bar`), or a URI path that attempts to navigate above the root (`/x/../../../y`).
     InvalidURIPath,
 
-    /// An HTTP header was malformed -- the value could not be decoded as
-    /// UTF-8, or the header was empty and this is not allowed (e.g. the
-    /// `content-type` header), or the header could not be parsed
-    /// (e.g., the `date` header is not a valid date).
+    /// An HTTP header was malformed -- the value could not be decoded a UTF-8, or the header was empty and this is not allowed
+    /// (e.g. the `content-type` header), or the header could not be parsed (e.g., the `date` header is not a valid date).
     MalformedHeader,
 
-    /// A query parameter was malformed -- the value could not be decoded as
-    /// UTF-8, or the parameter was empty and this is not allowed (e.g. a
-    /// signature parameter), or the parameter could not be parsed
-    /// (e.g., the `X-Amz-Date` parameter is not a valid date).
+    /// A query parameter was malformed -- the value could not be decoded as UTF-8, or the parameter was empty and this is not
+    /// allowed (e.g. a signature parameter), or the parameter could not be parsed (e.g., the `X-Amz-Date` parameter is not a valid
+    /// date).
     MalformedParameter,
 
-    /// The AWS SigV4 signature was malformed in some way. This can include
-    /// invalid timestamp formats, missing authorization components, or
-    /// unparseable components.
+    /// The AWS SigV4 signature was malformed in some way. This can include invalid timestamp formats, missing authorization
+    /// components, or unparseable components.
     MalformedSignature,
 
-    /// A required HTTP header (and its equivalent in the query string) is
-    /// missing.
+    /// A required HTTP header (and its equivalent in the query string) is missing.
     MissingHeader,
 
-    /// A required query parameter is missing. This is used internally in the
-    /// library; external callers only see `MissingHeader`.
+    /// A required query parameter is missing. This is used internally in the library; external callers only see `MissingHeader`.
     MissingParameter,
 
-    /// An HTTP header that can be specified only once was specified multiple
-    /// times.
+    /// An HTTP header that can be specified only once was specified multiple times.
     MultipleHeaderValues,
 
-    /// A query parameter that can be specified only once was specified
-    /// multiple times.
+    /// A query parameter that can be specified only once was specified multiple times.
     MultipleParameterValues,
 
     /// The timestamp in the request is out of the allowed range.
@@ -171,8 +157,7 @@ pub enum ErrorKind {
     /// The access key specified in the request is unknown.
     UnknownAccessKey,
 
-    /// The signature algorithm requested by the caller is unknown. This library
-    /// only supports the `AWS4-HMAC-SHA256` algorithm.
+    /// The signature algorithm requested by the caller is unknown. This library only supports the `AWS4-HMAC-SHA256` algorithm.
     UnknownSignatureAlgorithm,
 }
 
@@ -189,50 +174,20 @@ impl fmt::Display for SignatureError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.kind {
             ErrorKind::IO(ref e) => e.fmt(f),
-            ErrorKind::InvalidBodyEncoding => {
-                write!(f, "Invalid body encoding: {}", self.detail)
-            }
-            ErrorKind::InvalidCredential => {
-                write!(f, "Invalid credential: {}", self.detail)
-            }
-            ErrorKind::InvalidSignature => {
-                write!(f, "Invalid request signature: {}", self.detail)
-            }
-            ErrorKind::InvalidURIPath => {
-                write!(f, "Invalid URI path: {}", self.detail)
-            }
-            ErrorKind::MalformedHeader => {
-                write!(f, "Malformed header: {}", self.detail)
-            }
-            ErrorKind::MalformedParameter => {
-                write!(f, "Malformed query parameter: {}", self.detail)
-            }
-            ErrorKind::MalformedSignature => {
-                write!(f, "Malformed signature: {}", self.detail)
-            }
-            ErrorKind::MissingHeader => {
-                write!(f, "Missing header: {}", self.detail)
-            }
-            ErrorKind::MissingParameter => {
-                write!(f, "Missing query parameter: {}", self.detail)
-            }
-            ErrorKind::MultipleHeaderValues => {
-                write!(f, "Multiple values for header: {}", self.detail)
-            }
-            ErrorKind::MultipleParameterValues => write!(
-                f,
-                "Multiple values for query parameter: {}",
-                self.detail
-            ),
-            ErrorKind::TimestampOutOfRange => {
-                write!(f, "Request timestamp out of range: {}", self.detail)
-            }
-            ErrorKind::UnknownAccessKey => {
-                write!(f, "Unknown access key: {}", self.detail)
-            }
-            ErrorKind::UnknownSignatureAlgorithm => {
-                write!(f, "Unknown signature algorithm: {}", self.detail)
-            }
+            ErrorKind::InvalidBodyEncoding => write!(f, "Invalid body encoding: {}", self.detail),
+            ErrorKind::InvalidCredential => write!(f, "Invalid credential: {}", self.detail),
+            ErrorKind::InvalidSignature => write!(f, "Invalid request signature: {}", self.detail),
+            ErrorKind::InvalidURIPath => write!(f, "Invalid URI path: {}", self.detail),
+            ErrorKind::MalformedHeader => write!(f, "Malformed header: {}", self.detail),
+            ErrorKind::MalformedParameter => write!(f, "Malformed query parameter: {}", self.detail),
+            ErrorKind::MalformedSignature => write!(f, "Malformed signature: {}", self.detail),
+            ErrorKind::MissingHeader => write!(f, "Missing header: {}", self.detail),
+            ErrorKind::MissingParameter => write!(f, "Missing query parameter: {}", self.detail),
+            ErrorKind::MultipleHeaderValues => write!(f, "Multiple values for header: {}", self.detail),
+            ErrorKind::MultipleParameterValues => write!(f, "Multiple values for query parameter: {}", self.detail),
+            ErrorKind::TimestampOutOfRange => write!(f, "Request timestamp out of range: {}", self.detail),
+            ErrorKind::UnknownAccessKey => write!(f, "Unknown access key: {}", self.detail),
+            ErrorKind::UnknownSignatureAlgorithm => write!(f, "Unknown signature algorithm: {}", self.detail),
         }
     }
 }
@@ -435,38 +390,30 @@ pub enum PrincipalType {
 impl fmt::Display for PrincipalType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            PrincipalType::AssumedRole(ref d) => {
-                write!(f, "{}:assumed-role{}{}/{}", d.account_id,
-                       d.path, d.name, d.session_name)
-            }
-            PrincipalType::Group(ref d) => {
-                write!(f, "{}:group{}{}", d.account_id, d.path, d.name)
-            }
-            PrincipalType::Role(ref d) => {
-                write!(f, "{}:role{}{}", d.account_id, d.path, d.name)
-            }
-            PrincipalType::User(ref d) => {
-                write!(f, "{}:user{}{}", d.account_id, d.path, d.name)
-            }
-            PrincipalType::Service(ref service_name) => {
-                write!(f, "{}", service_name)
-            }
+            PrincipalType::AssumedRole(ref d) => write!(f, "{}:assumed-role{}{}/{}", d.account_id, d.path, d.name, d.session_name),
+            PrincipalType::Group(ref d) => write!(f, "{}:group{}{}", d.account_id, d.path, d.name),
+            PrincipalType::Role(ref d) => write!(f, "{}:role{}{}", d.account_id, d.path, d.name),
+            PrincipalType::User(ref d) => write!(f, "{}:user{}{}", d.account_id, d.path, d.name),
+            PrincipalType::Service(ref service_name) => write!(f, "{}", service_name),
         }
     }
 }
 
-/// The function that returns a signing key of a given type.
-pub type SigningKeyFn = fn(
-    SigningKeyKind,
-    &str,           // access_key_id
-    Option<&str>,   // token
-    Option<&str>,   // request date
-    Option<&str>,   // request region
-    Option<&str>,   // service
-) -> Result<(Principal, Vec<u8>), SignatureError>;
+/// A user-implemented function that returns a signing key of a given type.
+/// 
+/// This function should have the signature:
+/// 
+/// ```ignore
+/// fn get_signing_key(signing_key_kind: SigningKeyKind, access_key_id: &str, token: Option<&str>,
+///     request_date: &str, region: &str, service: &str) -> Result<(Principal, Vec<u8>), SignatureError>
+/// ```
+/// 
+/// The return value on success is a tuple containing the principal owning the access key and the secret key derived into the
+/// form specified by signing_key_kind. The helper function `derive_key_from_secret_key` can be used to return this derived
+/// key.
+pub type SigningKeyFn = fn(SigningKeyKind, &str, Option<&str>, &str, &str, &str) -> Result<(Principal, Vec<u8>), SignatureError>;
 
-/// A data structure containing the elements of the request
-/// (some client-supplied, some service-supplied) involved in the SigV4
+/// A data structure containing the elements of the request (some client-supplied, some service-supplied) involved in the SigV4
 /// verification process.
 #[derive(Clone, Debug)]
 pub struct Request {
@@ -503,65 +450,38 @@ impl Request {
                 }
                 1 => match from_utf8(&values[0]) {
                     Ok(ref s) => Ok(s.to_string()),
-                    Err(_) => Err(SignatureError::new(
-                        ErrorKind::MalformedHeader,
-                        header,
-                    )),
+                    Err(_) => Err(SignatureError::new(ErrorKind::MalformedHeader, header)),
                 },
-                _ => Err(SignatureError::new(
-                    ErrorKind::MultipleHeaderValues,
-                    header,
-                )),
+                _ => Err(SignatureError::new(ErrorKind::MultipleHeaderValues, header)),
             },
         }
     }
 
     /// The query parameters from the request, normalized, in a mapping format.
-    fn get_query_parameters(
-        &self,
-    ) -> Result<HashMap<String, Vec<String>>, SignatureError> {
+    fn get_query_parameters(&self) -> Result<HashMap<String, Vec<String>>, SignatureError> {
         normalize_query_parameters(&self.query_string)
     }
 
     /// Retrieve a query parameter, requiring exactly one value be present.
-    fn get_query_param_one(
-        &self,
-        parameter: &str,
-    ) -> Result<String, SignatureError> {
+    fn get_query_param_one(&self, parameter: &str) -> Result<String, SignatureError> {
         match self.get_query_parameters()?.get(parameter) {
-            None => Err(SignatureError::new(
-                ErrorKind::MissingParameter,
-                parameter,
-            )),
+            None => Err(SignatureError::new(ErrorKind::MissingParameter, parameter)),
             Some(ref values) => match values.len() {
-                0 => Err(SignatureError::new(
-                    ErrorKind::MissingParameter,
-                    parameter,
-                )),
+                0 => Err(SignatureError::new(ErrorKind::MissingParameter, parameter)),
                 1 => Ok(values[0].to_string()),
-                _ => Err(SignatureError::new(
-                    ErrorKind::MultipleParameterValues,
-                    parameter,
-                )),
+                _ => Err(SignatureError::new(ErrorKind::MultipleParameterValues, parameter)),
             },
         }
     }
 
     /// Get the content type and character set used in the body
-    fn get_content_type_and_charset(
-        &self,
-    ) -> Result<(String, String), SignatureError> {
+    fn get_content_type_and_charset(&self) -> Result<(String, String), SignatureError> {
         let content_type_opts = self.get_header_one(CONTENT_TYPE)?;
 
         let mut parts = content_type_opts.split(";");
         let content_type = match parts.next() {
             Some(ref s) => s.trim(),
-            None => {
-                return Err(SignatureError::new(
-                    ErrorKind::MalformedHeader,
-                    "content-type header is empty",
-                ))
-            }
+            None => return Err(SignatureError::new(ErrorKind::MalformedHeader, "content-type header is empty")),
         };
 
         for option in parts {
@@ -569,10 +489,7 @@ impl Request {
             let opt_parts: Vec<&str> = opt_trim.splitn(2, "=").collect();
 
             if opt_parts.len() == 2 && opt_parts[0] == CHARSET {
-                return Ok((
-                    content_type.to_string(),
-                    opt_parts[1].trim().to_lowercase(),
-                ));
+                return Ok((content_type.to_string(), opt_parts[1].trim().to_lowercase()));
             }
         }
 
@@ -580,26 +497,18 @@ impl Request {
     }
 }
 
-/// Trait for calculating various attributes of a SigV4 signature according
-/// to variants of the SigV4 algorithm.
+/// Trait for calculating various attributes of a SigV4 signature according to variants of the SigV4 algorithm.
 pub trait AWSSigV4Algorithm {
     /// The canonicalized URI path for a request.
-    fn get_canonical_uri_path(
-        &self,
-        req: &Request,
-    ) -> Result<String, SignatureError> {
+    fn get_canonical_uri_path(&self, req: &Request) -> Result<String, SignatureError> {
         canonicalize_uri_path(&req.uri_path)
     }
 
     /// The canonical query string from the query parameters.
     ///
-    /// This takes the query_string from the request, merges it with the body
-    /// if the request has a body of type `application/x-www-form-urlencoded`,
-    /// and orders the parameters.
-    fn get_canonical_query_string(
-        &self,
-        req: &Request,
-    ) -> Result<String, SignatureError> {
+    /// This takes the query_string from the request, merges it with the body if the request has a body of type
+    /// `application/x-www-form-urlencoded`, and orders the parameters.
+    fn get_canonical_query_string(&self, req: &Request) -> Result<String, SignatureError> {
         let query_parameters = req.get_query_parameters()?;
         let mut results = Vec::new();
 
@@ -618,12 +527,7 @@ pub trait AWSSigV4Algorithm {
                 if charset != "utf-8" && charset != "utf8" {
                     return Err(SignatureError::new(
                         ErrorKind::InvalidBodyEncoding,
-                        &format!(
-                            "application/x-www-form-urlencoded body \
-                             uses unsupported charset {}",
-                            charset
-                        ),
-                    ));
+                        &format!("application/x-www-form-urlencoded body uses unsupported charset {}", charset)));
                 }
 
                 // Parse the body as a URL string
@@ -632,9 +536,7 @@ pub trait AWSSigV4Algorithm {
                         Ok(s) => s,
                         Err(_) => return Err(SignatureError::new(
                             ErrorKind::InvalidBodyEncoding,
-                            "application/x-www-form-urlencoded body contains \
-                             invalid UTF-8 characters",
-                        )),
+                            "application/x-www-form-urlencoded body contains invalid UTF-8 characters")),
                     };
 
                 let body_normalized = normalize_query_parameters(body_utf8)?;
@@ -650,13 +552,9 @@ pub trait AWSSigV4Algorithm {
         Ok(results.join("&").to_string())
     }
 
-    /// The parameters from the Authorization header (only -- not the query
-    /// parameter). If the Authorization header is not present or is not an
-    /// AWS SigV4 header, an Err(SignatureError) is returned.
-    fn get_authorization_header_parameters(
-        &self,
-        req: &Request,
-    ) -> Result<HashMap<String, String>, SignatureError> {
+    /// The parameters from the Authorization header (only -- not the query parameter). If the Authorization header is not present
+    /// or is not an AWS SigV4 header, an Err(SignatureError) is returned.
+    fn get_authorization_header_parameters(&self, req: &Request) -> Result<HashMap<String, String>, SignatureError> {
         let auth_headers_opt = req.headers.get(AUTHORIZATION);
         let aws4_hmac_sha256_u8: &[u8] = AWS4_HMAC_SHA256.as_ref();
         let aws4_hmac_sha256_v8: &Vec<u8> = &aws4_hmac_sha256_u8.to_vec();
@@ -668,50 +566,39 @@ pub trait AWSSigV4Algorithm {
             Some(auth_headers) => {
                 let mut parameters_opt: Option<&str> = None;
 
-                // Multiple Authorization headers may be present, but only one may be
-                // of type AWS4-HMAC-SHA256.
+                // Multiple Authorization headers may be present, but only one may be of type AWS4-HMAC-SHA256.
                 for auth_header in auth_headers {
                     if auth_header != aws4_hmac_sha256_v8 && ! auth_header.starts_with(aws4_hmac_sha256_space_u8) {
                         continue;
                     }
 
                     if parameters_opt.is_some() {
-                        return Err(SignatureError::new(
-                            ErrorKind::MultipleHeaderValues,
-                            AUTHORIZATION));
+                        return Err(SignatureError::new(ErrorKind::MultipleHeaderValues, AUTHORIZATION));
                     }
 
                     if auth_header == aws4_hmac_sha256_v8 || auth_header == aws4_hmac_sha256_space_v8 {
                         // No parameters -- fail fast here.
                         return Err(SignatureError::new(
-                            ErrorKind::MalformedSignature,
-                            "invalid Authorization header: missing parameters"));
+                            ErrorKind::MalformedSignature, "invalid Authorization header: missing parameters"));
                     }
 
                     match from_utf8(&auth_header[AWS4_HMAC_SHA256_SPACE.len()..]) {
                         Err(_) => return Err(SignatureError::new(
-                            ErrorKind::MalformedHeader,
-                            "Authorization header is not valid UTF-8")),
+                            ErrorKind::MalformedHeader, "Authorization header is not valid UTF-8")),
                         Ok(ref p) => parameters_opt = Some(p),
                     }
                 }
 
                 match parameters_opt {
-                    None => Err(SignatureError::new(
-                        ErrorKind::MissingHeader, AUTHORIZATION)),
-                    Some(parameters) => 
-                        split_authorization_header_parameters(&parameters),
+                    None => Err(SignatureError::new(ErrorKind::MissingHeader, AUTHORIZATION)),
+                    Some(parameters) => split_authorization_header_parameters(&parameters),
                 }
             }
         }
     }
 
-    /// Returns a sorted dictionary containing the signed header names and
-    /// their values.
-    fn get_signed_headers(
-        &self,
-        req: &Request,
-    ) -> Result<BTreeMap<String, Vec<Vec<u8>>>, SignatureError> {
+    /// Returns a sorted dictionary containing the signed header names and their values.
+    fn get_signed_headers(&self, req: &Request) -> Result<BTreeMap<String, Vec<Vec<u8>>>, SignatureError> {
         // See if the signed headers are listed in the query string.
         let qp_result = req.get_query_param_one(X_AMZ_SIGNEDHEADERS);
         let ah_result;
@@ -728,10 +615,7 @@ pub trait AWSSigV4Algorithm {
                             ah_signedheaders = ahp.get(SIGNEDHEADERS);
                             if let None = ah_signedheaders {
                                 return Err(SignatureError::new(
-                                    ErrorKind::MalformedSignature,
-                                    "invalid Authorization header: \
-                                    missing SignedHeaders",
-                                ));
+                                    ErrorKind::MalformedSignature, "invalid Authorization header: missing SignedHeaders"));
                             }
 
                             ah_signedheaders.unwrap()
@@ -743,35 +627,23 @@ pub trait AWSSigV4Algorithm {
         };
 
         // Header names are separated by semicolons.
-        let parts: Vec<String> =
-            signed_headers.split(';').map(|s| s.to_string()).collect();
+        let parts: Vec<String> = signed_headers.split(';').map(|s| s.to_string()).collect();
 
-        // Make sure the signed headers list is canonicalized. For security
-        // reasons, we consider it an error if it isn't.
+        // Make sure the signed headers list is canonicalized. For security reasons, we consider it an error if it isn't.
         let mut canonicalized = parts.clone();
         canonicalized.sort_unstable_by(|a, b| {
             a.to_lowercase().partial_cmp(&b.to_lowercase()).unwrap()
         });
 
         if parts != canonicalized {
-            return Err(SignatureError::new(
-                ErrorKind::MalformedSignature,
-                "SignedHeaders is not canonicalized",
-            ));
+            return Err(SignatureError::new(ErrorKind::MalformedSignature, "SignedHeaders is not canonicalized"));
         }
 
         let mut result = BTreeMap::<String, Vec<Vec<u8>>>::new();
         for header in canonicalized.iter() {
             match req.headers.get(header) {
-                None => {
-                    return Err(SignatureError::new(
-                        ErrorKind::MissingHeader,
-                        header,
-                    ))
-                }
-                Some(ref value) => {
-                    result.insert(header.to_string(), value.to_vec());
-                }
+                None => { return Err(SignatureError::new(ErrorKind::MissingHeader, header)) }
+                Some(ref value) => { result.insert(header.to_string(), value.to_vec()); }
             }
         }
 
@@ -786,11 +658,10 @@ pub trait AWSSigV4Algorithm {
     /// * The `X-Amz-Date` HTTP header.
     /// * The `Date` HTTP header.
     ///
-    /// The timestamp _should_ be in ISO 8601 `YYYYMMDDTHHMMSSZ` format
-    /// without milliseconds (_must_ per  [AWS documentation](https://docs.aws.amazon.com/general/latest/gr/sigv4-date-handling.html)).
-    /// However, the AWS SigV4 test suite includes a variety of date formats,
-    /// including RFC 2822, RFC 3339, and ISO 8601. This routine allows all
-    /// of these formats.
+    /// The timestamp _should_ be in ISO 8601 `YYYYMMDDTHHMMSSZ` format without milliseconds (_must_ per
+    /// [AWS documentation](https://docs.aws.amazon.com/general/latest/gr/sigv4-date-handling.html)). However, the AWS SigV4 test
+    /// suite includes a variety of date formats, including RFC 2822, RFC 3339, and ISO 8601. This routine allows all of these
+    /// formats.
     fn get_request_timestamp(
         &self,
         req: &Request,
@@ -839,33 +710,24 @@ pub trait AWSSigV4Algorithm {
         } else if let Ok(ref d) = dt_iso8601_result {
             d
         } else {
-            return Err(SignatureError::new(
-                malformed_kind, date_header));
+            return Err(SignatureError::new(malformed_kind, date_header));
         };
 
         Ok(dt_fixed.with_timezone(&Utc))
     }
 
-    /// The scope of the credentials to use, as calculated by the service's
-    /// region and name, but using the timestamp of the request.
+    /// The scope of the credentials to use, as calculated by the service's region and name, but using the timestamp of the request.
     ///
     /// The result is a string in the form `YYYYMMDD/region/service/aws4_request`.
-    fn get_credential_scope(
-        &self,
-        req: &Request,
-    ) -> Result<String, SignatureError> {
+    fn get_credential_scope(&self, req: &Request) -> Result<String, SignatureError> {
         let ts = self.get_request_timestamp(req)?;
         let date = ts.date().format("%Y%m%d");
-        Ok(format!(
-            "{}/{}/{}/{}",
-            date, req.region, req.service, AWS4_REQUEST
-        ))
+        Ok(format!("{}/{}/{}/{}", date, req.region, req.service, AWS4_REQUEST))
     }
 
     /// The access key used to sign the request.
     ///
-    /// If the credential scope does not match our expected credential scope,
-    /// a SignatureError is returned.
+    /// If the credential scope does not match our expected credential scope, a SignatureError is returned.
     fn get_access_key(&self, req: &Request) -> Result<String, SignatureError> {
         let qp_result = req.get_query_param_one(X_AMZ_CREDENTIAL);
         let auth_headers;
@@ -874,17 +736,11 @@ pub trait AWSSigV4Algorithm {
             Ok(ref c) => c,
             Err(e) => match e.kind {
                 ErrorKind::MissingParameter => {
-                    auth_headers =
-                        self.get_authorization_header_parameters(req)?;
+                    auth_headers = self.get_authorization_header_parameters(req)?;
                     match auth_headers.get(CREDENTIAL) {
                         Some(c) => c,
-                        None => {
-                            return Err(SignatureError::new(
-                                ErrorKind::MalformedSignature,
-                                "invalid Authorization header: missing \
-                                 Credential",
-                            ))
-                        }
+                        None => return Err(SignatureError::new(
+                            ErrorKind::MalformedSignature, "invalid Authorization header: missing Credential")),
                     }
                 }
                 _ => return Err(e),
@@ -893,10 +749,7 @@ pub trait AWSSigV4Algorithm {
 
         let parts: Vec<&str> = credential.splitn(2, '/').collect();
         if parts.len() != 2 {
-            return Err(SignatureError::new(
-                ErrorKind::InvalidCredential,
-                "Malformed credential",
-            ));
+            return Err(SignatureError::new(ErrorKind::InvalidCredential, "Malformed credential"));
         }
 
         let access_key = parts[0];
@@ -905,24 +758,15 @@ pub trait AWSSigV4Algorithm {
         if request_scope == server_scope {
             Ok(access_key.to_string())
         } else {
-            Err(SignatureError::new(
-                ErrorKind::InvalidCredential,
-                &format!(
-                    "Invalid credential scope: Expected {} instead of {}",
-                    server_scope, request_scope
-                ),
-            ))
+            Err(SignatureError::new(ErrorKind::InvalidCredential, &format!(
+                "Invalid credential scope: Expected {} instead of {}", server_scope, request_scope)))
         }
     }
 
     /// The session token sent with the access key.
     ///
-    /// Session tokens are used only for temporary credentials. If a long-term
-    /// credential was used, the result is `Ok(None)`.
-    fn get_session_token(
-        &self,
-        req: &Request,
-    ) -> Result<Option<String>, SignatureError> {
+    /// Session tokens are used only for temporary credentials. If a long-term credential was used, the result is `Ok(None)`.
+    fn get_session_token(&self, req: &Request) -> Result<Option<String>, SignatureError> {
         let qp_result = req.get_query_param_one(X_AMZ_SECURITY_TOKEN);
         let h_result;
 
@@ -945,10 +789,7 @@ pub trait AWSSigV4Algorithm {
     }
 
     /// The signature passed into the request.
-    fn get_request_signature(
-        &self,
-        req: &Request,
-    ) -> Result<String, SignatureError> {
+    fn get_request_signature(&self, req: &Request) -> Result<String, SignatureError> {
         match req.get_query_param_one(X_AMZ_SIGNATURE) {
             Ok(sig) => Ok(sig),
             Err(e) => match e.kind {
@@ -958,10 +799,7 @@ pub trait AWSSigV4Algorithm {
                     match ah.get(SIGNATURE) {
                         Some(c) => Ok(c.to_string()),
                         None => Err(SignatureError::new(
-                            ErrorKind::MalformedSignature,
-                            "invalid Authorization header: missing \
-                             Signature",
-                        )),
+                            ErrorKind::MalformedSignature, "invalid Authorization header: missing Signature")),
                     }
                 }
                 _ => Err(e),
@@ -969,8 +807,8 @@ pub trait AWSSigV4Algorithm {
         }
     }
 
-    /// The AWS SigV4 canonical request given parameters from the HTTP request,
-    /// as outlined in the [AWS documentation](http://docs.aws.amazon.com/general/latest/gr/sigv4-create-canonical-request.html).
+    /// The AWS SigV4 canonical request given parameters from the HTTP request, as outlined in the
+    /// [AWS documentation](http://docs.aws.amazon.com/general/latest/gr/sigv4-create-canonical-request.html).
     ///
     /// The canonical request is:
     /// ```text
@@ -980,10 +818,7 @@ pub trait AWSSigV4Algorithm {
     ///     signed_headers + '\n' +
     ///     sha256(body).hexdigest()
     /// ```
-    fn get_canonical_request(
-        &self,
-        req: &Request,
-    ) -> Result<Vec<u8>, SignatureError> {
+    fn get_canonical_request(&self, req: &Request) -> Result<Vec<u8>, SignatureError> {
         let mut result = Vec::<u8>::new();
         let mut header_keys = Vec::<u8>::new();
         let canonical_uri_path = self.get_canonical_uri_path(req)?;
@@ -1013,8 +848,7 @@ pub trait AWSSigV4Algorithm {
                     result.push(b',');
                 }
 
-                let value_collapsed_space =
-                    MULTISPACE.replace_all(from_utf8(value).unwrap(), " ");
+                let value_collapsed_space = MULTISPACE.replace_all(from_utf8(value).unwrap(), " ");
                 result.write(value_collapsed_space.as_bytes())?;
             }
             result.push(b'\n');
@@ -1033,11 +867,7 @@ pub trait AWSSigV4Algorithm {
         result.push(b'\n');
 
         match req.get_content_type_and_charset() {
-            Ok((content_type, _))
-                if content_type == APPLICATION_X_WWW_FORM_URLENCODED =>
-            {
-                result.write(SHA256_EMPTY.as_bytes())?
-            }
+            Ok((content_type, _)) if content_type == APPLICATION_X_WWW_FORM_URLENCODED => result.write(SHA256_EMPTY.as_bytes())?,
             _ => result.write(body_hex_digest.as_bytes())?,
         };
 
@@ -1045,18 +875,12 @@ pub trait AWSSigV4Algorithm {
     }
 
     /// The SHA-256 hex digest of the body.
-    fn get_body_digest(
-        &self,
-        req: &Request,
-    ) -> Result<String, SignatureError> {
+    fn get_body_digest(&self, req: &Request) -> Result<String, SignatureError> {
         Ok(hex::encode(digest(&SHA256, &req.body).as_ref()))
     }
 
     /// The string to sign for the request.
-    fn get_string_to_sign(
-        &self,
-        req: &Request,
-    ) -> Result<Vec<u8>, SignatureError> {
+    fn get_string_to_sign(&self, req: &Request) -> Result<Vec<u8>, SignatureError> {
         let mut result = Vec::new();
         let timestamp = self.get_request_timestamp(req)?;
         let credential_scope = self.get_credential_scope(req)?;
@@ -1068,21 +892,13 @@ pub trait AWSSigV4Algorithm {
         result.push(b'\n');
         result.write(credential_scope.as_bytes())?;
         result.push(b'\n');
-        result.write(
-            hex::encode(digest(&SHA256, &canonical_request).as_ref())
-                .as_bytes(),
-        )?;
+        result.write(hex::encode(digest(&SHA256, &canonical_request).as_ref()).as_bytes())?;
 
         Ok(result)
     }
 
     /// The principal and expected signature for the request.
-    fn get_expected_signature(
-        &self,
-        req: &Request,
-        signing_key_kind: SigningKeyKind,
-        signing_key_fn: SigningKeyFn) -> Result<(Principal, String), SignatureError>
-    {
+    fn get_expected_signature(&self, req: &Request, signing_key_kind: SigningKeyKind, signing_key_fn: SigningKeyFn) -> Result<(Principal, String), SignatureError> {
         let access_key = self.get_access_key(req)?;
         let session_token_result = self.get_session_token(req);
         let session_token = match session_token_result {
@@ -1095,54 +911,26 @@ pub trait AWSSigV4Algorithm {
 
         let timestamp = self.get_request_timestamp(req)?;
         let req_date = format!("{}", timestamp.date().format("%Y%m%d"));
-
         let (principal, key) = signing_key_fn(
-            signing_key_kind,
-            &access_key,
-            session_token.as_ref().map(String::as_ref),
-            Some(&req_date),
-            Some(&req.region),
-            Some(&req.service),
-        )?;
+            signing_key_kind, &access_key, session_token.as_ref().map(String::as_ref), &req_date, &req.region, &req.service)?;
         let string_to_sign = self.get_string_to_sign(req)?;
-
         let k_signing = get_signing_key(signing_key_kind, key, &req_date, &req.region, &req.service);
-
-        Ok((principal, hex::encode(
-                hmac_sha256(k_signing.as_ref(), &string_to_sign).as_ref())))
+        Ok((principal, hex::encode(hmac_sha256(k_signing.as_ref(), &string_to_sign).as_ref())))
     }
 
-    /// Verify that the request timestamp is not beyond the allowed timestamp
-    /// mismatch and that the request signature matches our expected
-    /// signature.
+    /// Verify that the request timestamp is not beyond the allowed timestamp mismatch and that the request signature matches our
+    /// expected signature.
     ///
-    /// This version allows you to specify the server timestamp for testing.
-    /// For normal use, use `verify()`.
-    fn verify_at(
-        &self,
-        req: &Request,
-        signing_key_kind: SigningKeyKind,
-        signing_key_fn: SigningKeyFn,
-        server_timestamp: &DateTime<Utc>,
-        allowed_mismatch: Option<Duration>,
-    ) -> Result<Principal, SignatureError> {
+    /// This version allows you to specify the server timestamp for testing. For normal use, use `verify()`.
+    fn verify_at(&self, req: &Request, signing_key_kind: SigningKeyKind, signing_key_fn: SigningKeyFn, server_timestamp: &DateTime<Utc>, allowed_mismatch: Option<Duration>) -> Result<Principal, SignatureError> {
         if let Some(mm) = allowed_mismatch {
             let req_ts = self.get_request_timestamp(req)?;
-            let min_ts = server_timestamp
-                .checked_sub_signed(mm)
-                .unwrap_or(*server_timestamp);
-            let max_ts = server_timestamp
-                .checked_add_signed(mm)
-                .unwrap_or(*server_timestamp);
+            let min_ts = server_timestamp.checked_sub_signed(mm).unwrap_or(*server_timestamp);
+            let max_ts = server_timestamp.checked_add_signed(mm).unwrap_or(*server_timestamp);
 
             if req_ts < min_ts || req_ts > max_ts {
                 return Err(SignatureError::new(
-                    ErrorKind::TimestampOutOfRange,
-                    &format!(
-                        "minimum {}, maximum {}, received {}",
-                        min_ts, max_ts, req_ts
-                    ),
-                ));
+                    ErrorKind::TimestampOutOfRange, &format!("minimum {}, maximum {}, received {}", min_ts, max_ts, req_ts)));
             }
         }
 
@@ -1151,28 +939,15 @@ pub trait AWSSigV4Algorithm {
         let request_sig = self.get_request_signature(&req)?;
 
         if expected_sig != request_sig {
-            Err(SignatureError::new(
-                ErrorKind::InvalidSignature,
-                &format!(
-                    "Expected {} instead of {}",
-                    expected_sig, request_sig
-                ),
-            ))
+            Err(SignatureError::new(ErrorKind::InvalidSignature, &format!("Expected {} instead of {}", expected_sig, request_sig)))
         } else {
             Ok(principal)
         }
     }
 
-    /// Verify that the request timestamp is not beyond the allowed timestamp
-    /// mismatch and that the request signature matches our expected
-    /// signature.
-    fn verify(
-        &self,
-        req: &Request,
-        signing_key_kind: SigningKeyKind,
-        signing_key_fn: SigningKeyFn,
-        allowed_mismatch: Option<Duration>,
-    ) -> Result<Principal, SignatureError> {
+    /// Verify that the request timestamp is not beyond the allowed timestamp mismatch and that the request signature matches our
+    /// expected signature.
+    fn verify(&self, req: &Request, signing_key_kind: SigningKeyKind, signing_key_fn: SigningKeyFn, allowed_mismatch: Option<Duration>) -> Result<Principal, SignatureError> {
         self.verify_at(
             req, signing_key_kind, signing_key_fn, &Utc::now(), allowed_mismatch)
     }
@@ -1187,16 +962,9 @@ impl AWSSigV4 {
         Self {}
     }
 
-    /// Verify that the request timestamp is not beyond the allowed timestamp
-    /// mismatch and that the request signature matches our expected
-    /// signature.
-    pub fn verify(
-        &self,
-        req: &Request,
-        signing_key_kind: SigningKeyKind,
-        signing_key_fn: SigningKeyFn,
-        allowed_mismatch: Option<Duration>,
-    ) -> Result<Principal, SignatureError> {
+    /// Verify that the request timestamp is not beyond the allowed timestamp mismatch and that the request signature matches our
+    /// expected signature.
+    pub fn verify(&self, req: &Request, signing_key_kind: SigningKeyKind, signing_key_fn: SigningKeyFn, allowed_mismatch: Option<Duration>) -> Result<Principal, SignatureError> {
         AWSSigV4Algorithm::verify(
             self, req, signing_key_kind, signing_key_fn, allowed_mismatch)
     }
@@ -1204,8 +972,7 @@ impl AWSSigV4 {
 
 impl AWSSigV4Algorithm for AWSSigV4 {}
 
-/// Indicates whether the specified byte is RFC3986 unreserved -- i.e., can
-/// be represented without being percent-encoded, e.g. '?' -> '%3F'.
+/// Indicates whether the specified byte is RFC3986 unreserved -- i.e., can be represented without being percent-encoded, e.g. '?' -> '%3F'.
 pub fn is_rfc3986_unreserved(c: u8) -> bool {
     c.is_ascii_alphanumeric()
         || c == b'-'
@@ -1214,20 +981,15 @@ pub fn is_rfc3986_unreserved(c: u8) -> bool {
         || c == b'~'
 }
 
-/// Normalize the path component according to RFC 3986.  This performs the
-/// following operations:
-/// * Alpha, digit, and the symbols `-`, `.`, `_`, and `~` (unreserved
-///   characters) are left alone.
+/// Normalize the path component according to RFC 3986.  This performs the following operations:
+/// * Alpha, digit, and the symbols `-`, `.`, `_`, and `~` (unreserved characters) are left alone.
 /// * Characters outside this range are percent-encoded.
 /// * Percent-encoded values are upper-cased (`%2a` becomes `%2A`)
-/// * Percent-encoded values in the unreserved space (`%41`-`%5A`, `%61`-`%7A`,
-///   `%30`-`%39`, `%2D`, `%2E`, `%5F`, `%7E`) are converted to normal
-///   characters.
+/// * Percent-encoded values in the unreserved space (`%41`-`%5A`, `%61`-`%7A`, `%30`-`%39`, `%2D`, `%2E`, `%5F`, `%7E`) are
+///   converted to normal characters.
 ///
 /// If a percent encoding is incomplete, an error is returned.
-pub fn normalize_uri_path_component(
-    path_component: &str,
-) -> Result<String, SignatureError> {
+pub fn normalize_uri_path_component(path_component: &str) -> Result<String, SignatureError> {
     let path_component = path_component.as_bytes();
     let mut i = 0;
     let ref mut result = Vec::<u8>::new();
@@ -1241,9 +1003,7 @@ pub fn normalize_uri_path_component(
         } else if c == b'%' {
             if i + 2 >= path_component.len() {
                 // % encoding would go beyond end of string; return an error.
-                return Err(SignatureError::new(
-                    ErrorKind::InvalidURIPath,
-                    "Incomplete hex encoding"));
+                return Err(SignatureError::new(ErrorKind::InvalidURIPath, "Incomplete hex encoding"));
             }
 
             let hex_digits = &path_component[i + 1..i + 3];
@@ -1260,12 +1020,7 @@ pub fn normalize_uri_path_component(
                     }
                     i += 3;
                 }
-                Err(_) => {
-                    return Err(SignatureError::new(
-                        ErrorKind::InvalidURIPath,
-                        &format!("Invalid hex encoding: {:?}", hex_digits),
-                    ))
-                }
+                Err(_) => return Err(SignatureError::new(ErrorKind::InvalidURIPath, &format!("Invalid hex encoding: {:?}", hex_digits))),
             }
         } else if c == b'+' {
             // Plus-encoded space. Convert this to %20.
@@ -1281,27 +1036,19 @@ pub fn normalize_uri_path_component(
     Ok(from_utf8(result.as_slice()).unwrap().to_string())
 }
 
-/// Normalizes the specified URI path, removing redundant slashes and relative
-/// path components.
-pub fn canonicalize_uri_path(
-    uri_path: &str,
-) -> Result<String, SignatureError> {
-    // Special case: empty path is converted to '/'; also short-circuit the
-    // usual '/' path here.
+/// Normalizes the specified URI path, removing redundant slashes and relative path components.
+pub fn canonicalize_uri_path(uri_path: &str) -> Result<String, SignatureError> {
+    // Special case: empty path is converted to '/'; also short-circuit the usual '/' path here.
     if uri_path == "" || uri_path == "/" {
         return Ok("/".to_string());
     }
 
     // All other paths must be abolute.
     if !uri_path.starts_with("/") {
-        return Err(SignatureError::new(
-            ErrorKind::InvalidURIPath,
-            &format!("Path is not absolute: {}", uri_path),
-        ));
+        return Err(SignatureError::new(ErrorKind::InvalidURIPath, &format!("Path is not absolute: {}", uri_path)));
     }
 
-    // Replace double slashes; this makes it easier to handle slashes at the
-    // end.
+    // Replace double slashes; this makes it easier to handle slashes at the end.
     let uri_path = MULTISLASH.replace_all(uri_path, "/");
 
     // Examine each path component for relative directories.
@@ -1315,11 +1062,9 @@ pub fn canonicalize_uri_path(
             // Relative path: current directory; remove this.
             components.remove(i);
 
-        // Don't increment i; with the deletion, we're now pointing to
-        // the next element in the path.
+            // Don't increment i; with the deletion, we're now pointing to the next element in the path.
         } else if component == ".." {
-            // Relative path: parent directory.  Remove this and the previous
-            // component.
+            // Relative path: parent directory.  Remove this and the previous component.
 
             if i <= 1 {
                 // This isn't allowed at the beginning!
@@ -1336,8 +1081,7 @@ pub fn canonicalize_uri_path(
             components.remove(i - 1);
             components.remove(i - 1);
 
-            // Since we've deleted two components, we need to back up one to
-            // examine what's now the next component.
+            // Since we've deleted two components, we need to back up one to examine what's now the next component.
             i -= 1;
         } else {
             // Leave it alone; proceed to the next component.
@@ -1353,15 +1097,11 @@ pub fn canonicalize_uri_path(
     }
 }
 
-/// Normalize the query parameters by normalizing the keys and values of each
-/// parameter and return a `HashMap` mapping each key to a *vector* of values
-/// (since it is valid for a query parameters to appear multiple times).
+/// Normalize the query parameters by normalizing the keys and values of each parameter and return a `HashMap` mapping each key to
+/// a *vector* of values (since it is valid for a query parameters to appear multiple times).
 ///
-/// The order of the values matches the order that they appeared in the query
-/// string -- this is important for SigV4 validation.
-pub fn normalize_query_parameters(
-    query_string: &str,
-) -> Result<HashMap<String, Vec<String>>, SignatureError> {
+/// The order of the values matches the order that they appeared in the query string -- this is important for SigV4 validation.
+pub fn normalize_query_parameters(query_string: &str) -> Result<HashMap<String, Vec<String>>, SignatureError> {
     if query_string.len() == 0 {
         return Ok(HashMap::new());
     }
@@ -1385,8 +1125,7 @@ pub fn normalize_query_parameters(
         let norm_key = normalize_uri_path_component(key)?;
         let norm_value = normalize_uri_path_component(value)?;
 
-        // If we already have a value for this key, append to it; otherwise,
-        // create a new vector containing the value.
+        // If we already have a value for this key, append to it; otherwise, create a new vector containing the value.
         if let Some(result_value) = result.get_mut(&norm_key) {
             result_value.push(norm_value);
         } else {
@@ -1398,17 +1137,12 @@ pub fn normalize_query_parameters(
 }
 
 /// Split Authorization header parameters from key=value parts into a HashMap.
-pub fn split_authorization_header_parameters(
-    parameters: &str
-) -> Result<HashMap<String, String>, SignatureError> {
+pub fn split_authorization_header_parameters(parameters: &str) -> Result<HashMap<String, String>, SignatureError> {
     let mut result = HashMap::<String, String>::new();
     for parameter in parameters.split(',') {
         let parts: Vec<&str> = parameter.splitn(2, '=').collect();
         if parts.len() != 2 {
-            return Err(SignatureError::new(
-                ErrorKind::MalformedSignature,
-                "invalid Authorization header: missing '='",
-            ));
+            return Err(SignatureError::new(ErrorKind::MalformedSignature, "invalid Authorization header: missing '='"));
         }
 
         let key = parts[0].trim_start().to_string();
@@ -1416,13 +1150,7 @@ pub fn split_authorization_header_parameters(
 
         if result.contains_key(&key) {
             return Err(SignatureError::new(
-                ErrorKind::MalformedSignature,
-                &format!(
-                    "invalid Authorization header: duplicate \
-                        key {}",
-                    key
-                ),
-            ));
+                ErrorKind::MalformedSignature, &format!("invalid Authorization header: duplicate key {}", key)));
         }
 
         result.insert(key, value);
@@ -1433,13 +1161,7 @@ pub fn split_authorization_header_parameters(
 
 
 /// Convert a secret key into the specified kind of signing key.
-pub fn derive_key_from_secret_key(
-    secret_key: &[u8],
-    derived_key_type: SigningKeyKind,
-    req_date: &str,
-    region: &str,
-    service: &str
-) -> Vec<u8> {
+pub fn derive_key_from_secret_key(secret_key: &[u8], derived_key_type: SigningKeyKind, req_date: &str, region: &str, service: &str) -> Vec<u8> {
     let mut k_secret = Vec::<u8>::with_capacity(secret_key.len() + 4);
     k_secret.extend("AWS4".bytes());
     k_secret.extend_from_slice(secret_key);
