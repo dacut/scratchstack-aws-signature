@@ -1437,6 +1437,28 @@ pub fn split_authorization_header_parameters(
 }
 
 
+/// Convert a secret key into the specified kind of signing key.
+pub fn derive_key_from_secret_key(
+    secret_key: &[u8],
+    derived_key_type: SigningKeyKind,
+    req_date: &str,
+    region: &str,
+    service: &str
+) -> Vec<u8> {
+    let mut k_secret = Vec::<u8>::with_capacity(secret_key.len() + 4);
+    k_secret.extend("AWS4".bytes());
+    k_secret.extend_from_slice(secret_key);
+
+    match derived_key_type {
+        SigningKeyKind::KSecret => k_secret,
+        SigningKeyKind::KDate => get_kdate_key(SigningKeyKind::KSecret, k_secret.as_slice(), req_date).to_vec(),
+        SigningKeyKind::KRegion => get_kregion_key(SigningKeyKind::KSecret, k_secret.as_slice(), req_date, region).to_vec(),
+        SigningKeyKind::KService => get_kservice_key(SigningKeyKind::KSecret, k_secret.as_slice(), req_date, region, service).to_vec(),
+        SigningKeyKind::KSigning => get_signing_key(SigningKeyKind::KSecret, k_secret.as_slice(), req_date, region, service).to_vec(),
+    }
+}
+
+
 /// Return the signing key given a possibly non-final signing key.
 pub fn get_signing_key<'a>(
     signing_key_kind: SigningKeyKind,

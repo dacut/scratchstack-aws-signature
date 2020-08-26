@@ -25,11 +25,9 @@ mod chronoutil;
 mod signature;
 mod hmac;
 pub use crate::signature::{
-    AWSSigV4Algorithm, AWSSigV4, ErrorKind, IAMAssumedRoleDetails,
-    IAMGroupDetails, IAMRoleDetails, IAMUserDetails, Principal, PrincipalType,
-    Request, SignatureError, SigningKeyFn, SigningKeyKind,
-    normalize_uri_path_component, canonicalize_uri_path,
-    normalize_query_parameters
+    AWSSigV4Algorithm, AWSSigV4, ErrorKind, IAMAssumedRoleDetails, IAMGroupDetails, IAMRoleDetails, IAMUserDetails, Principal,
+    PrincipalType, Request, SignatureError, SigningKeyFn, SigningKeyKind, canonicalize_uri_path, derive_key_from_secret_key,
+    normalize_uri_path_component, normalize_query_parameters
 };
 
 #[cfg(test)]
