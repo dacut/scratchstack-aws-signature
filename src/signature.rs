@@ -8,8 +8,7 @@
 //! algorithms.
 //!
 use std::collections::{BTreeMap, HashMap};
-use std::convert::From;
-use std::convert::TryInto;
+use std::convert::{From, Into};
 use std::error;
 use std::fmt;
 use std::io;
@@ -178,10 +177,10 @@ pub enum ErrorKind {
 }
 
 impl SignatureError {
-    pub fn new(kind: ErrorKind, detail: &str) -> Self {
+    pub fn new<S: Into<String>>(kind: ErrorKind, detail: S) -> Self {
         Self {
             kind,
-            detail: detail.to_string(),
+            detail: detail.into(),
         }
     }
 }
@@ -296,62 +295,58 @@ pub struct Principal {
 }
 
 impl Principal {
-    pub fn create_assumed_role(
-        partition: String, account_id: String, path: String, name: String,
-        session_name: String) -> Self
+    pub fn create_assumed_role<S1, S2, S3, S4, S5>(partition: S1, account_id: S2, path: S3, name: S4, session_name: S5) -> Self
+    where S1: Into<String>, S2: Into<String>, S3: Into<String>, S4: Into<String>, S5: Into<String>,
     {
         Self {
-            partition: partition,
+            partition: partition.into(),
             principal_type: PrincipalType::AssumedRole(IAMAssumedRoleDetails {
-                account_id: account_id,
-                path: path,
-                name: name,
-                session_name: session_name,
+                account_id: account_id.into(),
+                path: path.into(),
+                name: name.into(),
+                session_name: session_name.into(),
             })
         }
     }
 
-    pub fn create_group(
-        partition: String, account_id: String, path: String, name: String,
-        group_id: String) -> Self
+    pub fn create_group<S1, S2, S3, S4, S5>(partition: S1, account_id: S2, path: S3, name: S4, group_id: S5) -> Self
+    where S1: Into<String>, S2: Into<String>, S3: Into<String>, S4: Into<String>, S5: Into<String>,
     {
         Self {
-            partition: partition,
+            partition: partition.into(),
             principal_type: PrincipalType::Group(IAMGroupDetails {
-                account_id: account_id,
-                path: path,
-                name: name,
-                group_id: group_id,
+                account_id: account_id.into(),
+                path: path.into(),
+                name: name.into(),
+                group_id: group_id.into(),
             })
         }
     }
 
-    pub fn create_role(
-        partition: String, account_id: String, path: String, name: String,
-        role_id: String) -> Self
+    pub fn create_role<S1, S2, S3, S4, S5>(partition: S1, account_id: S2, path: S3, name: S4, role_id: S5) -> Self
+    where S1: Into<String>, S2: Into<String>, S3: Into<String>, S4: Into<String>, S5: Into<String>,
     {
         Self {
-            partition: partition,
+            partition: partition.into(),
             principal_type: PrincipalType::Role(IAMRoleDetails {
-                account_id: account_id,
-                path: path,
-                name: name,
-                role_id: role_id,
+                account_id: account_id.into(),
+                path: path.into(),
+                name: name.into(),
+                role_id: role_id.into(),
             })
         }
     }
 
-    pub fn create_user(
-        partition: String, account_id: String, path: String, name: String,
-        user_id: String) -> Self
+    pub fn create_user<S1, S2, S3, S4, S5>(partition: S1, account_id: S2, path: S3, name: S4, user_id: S5) -> Self
+    where S1: Into<String>, S2: Into<String>, S3: Into<String>, S4: Into<String>, S5: Into<String>,
     {
         Self {
-            partition: partition,
+            partition: partition.into(),
             principal_type: PrincipalType::User(IAMUserDetails {
-                account_id: account_id,
-                path: path,
-                name: name,
-                user_id: user_id,
+                account_id: account_id.into(),
+                path: path.into(),
+                name: name.into(),
+                user_id: user_id.into(),
             })
         }
     }
@@ -1111,7 +1106,7 @@ pub trait AWSSigV4Algorithm {
         )?;
         let string_to_sign = self.get_string_to_sign(req)?;
 
-        let k_signing = get_signing_key(signing_key_kind, &key, &req_date, &req.region, &req.service);
+        let k_signing = get_signing_key(signing_key_kind, key, &req_date, &req.region, &req.service);
 
         Ok((principal, hex::encode(
                 hmac_sha256(k_signing.as_ref(), &string_to_sign).as_ref())))
@@ -1460,64 +1455,42 @@ pub fn derive_key_from_secret_key(
 
 
 /// Return the signing key given a possibly non-final signing key.
-pub fn get_signing_key<'a>(
-    signing_key_kind: SigningKeyKind,
-    key: &'a [u8],
-    req_date: &'a str,
-    region: &'a str,
-    service: &'a str
-) -> [u8; 32] {
+pub fn get_signing_key<K: Into<Vec<u8>>>(signing_key_kind: SigningKeyKind, key: K, req_date: &str, region: &str, service: &str) -> Vec<u8> {
     match signing_key_kind {
-        SigningKeyKind::KSigning => key.try_into(),
+        SigningKeyKind::KSigning => key.into(),
         _ => {
             let k_service = get_kservice_key(signing_key_kind, key, req_date, region, service);
-            hmac_sha256(k_service.as_ref(), AWS4_REQUEST.as_bytes()).as_ref().try_into()
+            hmac_sha256(k_service.as_ref(), AWS4_REQUEST.as_bytes()).as_ref().to_vec()
         }
-    }.expect("Invalid HMAC-SHA256 length")
+    }
 }
 
-pub fn get_kservice_key<'a>(
-    signing_key_kind: SigningKeyKind,
-    key: &'a [u8],
-    req_date: &'a str,
-    region: &'a str,
-    service: &'a str
-) -> [u8; 32] {
+pub fn get_kservice_key<K: Into<Vec<u8>>>(signing_key_kind: SigningKeyKind, key: K, req_date: &str, region: &str, service: &str) -> Vec<u8> {
     match signing_key_kind {
-        SigningKeyKind::KService => key.try_into(),
+        SigningKeyKind::KService => key.into(),
         _ => {
             let k_region = get_kregion_key(signing_key_kind, key, req_date, region);
-            hmac_sha256(k_region.as_ref(), service.as_bytes()).as_ref().try_into()
+            hmac_sha256(k_region.as_ref(), service.as_bytes()).as_ref().to_vec()
         }
-    }.expect("Invalid HMAC-SHA256 length")
+    }
 }
 
-pub fn get_kregion_key<'a> (
-    signing_key_kind: SigningKeyKind,
-    key: &'a [u8],
-    req_date: &'a str,
-    region: &'a str,
-) -> [u8; 32] {
+pub fn get_kregion_key<K: Into<Vec<u8>>>(signing_key_kind: SigningKeyKind, key: K, req_date: &str, region: &str) -> Vec<u8> {
     match signing_key_kind {
-        SigningKeyKind::KRegion => key.try_into(),
+        SigningKeyKind::KRegion => key.into(),
         _ => {
             let k_date = get_kdate_key(signing_key_kind, key, req_date);
-            hmac_sha256(k_date.as_ref(), region.as_bytes()).as_ref().try_into()
+            hmac_sha256(k_date.as_ref(), region.as_bytes()).as_ref().to_vec()
         }
-    }.expect("Invalid HMAC-SHA256 length")
+    }
 }
 
-pub fn get_kdate_key<'a>(
-    signing_key_kind: SigningKeyKind,
-    key: &'a [u8],
-    req_date: &'a str,
-) -> [u8; 32] {
+pub fn get_kdate_key<K: Into<Vec<u8>>>(signing_key_kind: SigningKeyKind, key: K, req_date: &str) -> Vec<u8> {
     match signing_key_kind {
-        SigningKeyKind::KDate => key.try_into(),
-        _ => {
-            // key is KSecret == AWS4 + secret key.
-            // KDate = HMAC(KSecret + req_date)
-            hmac_sha256(&key, req_date.as_bytes()).as_ref().try_into()
-        }
-    }.expect("Invalid HMAC-SHA256 length")
+        SigningKeyKind::KDate => key.into(),
+
+        // key is KSecret == AWS4 + secret key.
+        // KDate = HMAC(KSecret + req_date)    
+        _ => hmac_sha256(key.into().as_slice(), req_date.as_bytes()).as_ref().to_vec(),
+    }
 }
