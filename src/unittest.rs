@@ -108,7 +108,7 @@ fn check_iso8601_tz_formats() {
 macro_rules! expect_err {
     ($test:expr, $expected:pat) => {
         match $test {
-            Ok(e) => panic!(format!("Expected Err({}); got Ok({:?})", stringify!($expected), e)),
+            Ok(e) => panic!("Expected Err({}); got Ok({:?})", stringify!($expected), e),
             Err(e) => match &e.kind {
                 $expected => format!("{}", &e),
                 _ => {
