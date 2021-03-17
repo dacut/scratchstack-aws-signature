@@ -1,7 +1,7 @@
 //! The `aws_sig_verify` crate provides AWS SigV4 _verification_ routines.
 //! This *is not* the library you want if you just want to call AWS services
 //! or other services that use AWS SigV4 signatures.
-//! [Rusoto](https://github.com/rusoto/rusoto) already has a library, 
+//! [Rusoto](https://github.com/rusoto/rusoto) already has a library,
 //! [rusoto_signature](https://docs.rs/rusoto_signature/), that provides this
 //! functionality.
 //!
@@ -22,14 +22,12 @@ extern crate regex;
 extern crate ring;
 
 mod chronoutil;
-mod signature;
 mod hmac;
+mod signature;
 pub use crate::signature::{
-    AWSSigV4Algorithm, AWSSigV4, ErrorKind, IAMAssumedRoleDetails,
-    IAMGroupDetails, IAMRoleDetails, IAMUserDetails, Principal, PrincipalType,
+    canonicalize_uri_path, normalize_query_parameters, normalize_uri_path_component, AWSSigV4, AWSSigV4Algorithm,
+    ErrorKind, IAMAssumedRoleDetails, IAMGroupDetails, IAMRoleDetails, IAMUserDetails, Principal, PrincipalType,
     Request, SignatureError, SigningKeyFn, SigningKeyKind,
-    normalize_uri_path_component, canonicalize_uri_path,
-    normalize_query_parameters
 };
 
 #[cfg(test)]

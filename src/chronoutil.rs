@@ -80,15 +80,18 @@ impl ParseISO8601<DateTime<FixedOffset>> for DateTime<FixedOffset> {
                 let (sign_str, hm) = offset_condensed.split_at(1);
                 let (hour_off_str, minute_off_str) = hm.split_at(2);
 
-                let sign = if sign_str == "-" { -1 } else { 1 };
+                let sign = if sign_str == "-" {
+                    -1
+                } else {
+                    1
+                };
 
                 let hour = i32::from_str(hour_off_str).unwrap();
                 let min = i32::from_str(minute_off_str).unwrap();
                 sign * (hour * 3600 + min * 60)
             };
 
-            Ok(FixedOffset::east(offset_secs).ymd(year, month, day)
-                .and_hms_nano(hour, minute, second, nanos))
+            Ok(FixedOffset::east(offset_secs).ymd(year, month, day).and_hms_nano(hour, minute, second, nanos))
         } else {
             Err(*INVALID)
         }

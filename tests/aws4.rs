@@ -6,12 +6,9 @@ use std::path::PathBuf;
 use std::str::from_utf8;
 
 extern crate aws_sig_verify;
-use aws_sig_verify::{
-    AWSSigV4Algorithm, AWSSigV4, ErrorKind, Principal, Request, SigningKeyKind,
-    SignatureError};
+use aws_sig_verify::{AWSSigV4, AWSSigV4Algorithm, ErrorKind, Principal, Request, SignatureError, SigningKeyKind};
 
 use ring::hmac;
-
 
 #[test]
 fn get_header_key_duplicate_get_header_key_duplicate() {
@@ -159,8 +156,7 @@ fn post_vanilla_post_vanilla() {
 }
 
 #[test]
-fn post_x_www_form_urlencoded_parameters_post_x_www_form_urlencoded_parameters(
-) {
+fn post_x_www_form_urlencoded_parameters_post_x_www_form_urlencoded_parameters() {
     run("post-x-www-form-urlencoded-parameters/post-x-www-form-urlencoded-parameters");
 }
 
@@ -194,23 +190,14 @@ fn run(basename: &str) {
     sts_path.push(&req_path);
     sts_path.set_extension("sts");
 
-    let sreq = File::open(&sreq_path)
-        .expect(&format!("Failed to open {:?}", sreq_path));
+    let sreq = File::open(&sreq_path).expect(&format!("Failed to open {:?}", sreq_path));
     let mut sreq_r = BufReader::new(sreq);
 
     let mut method_line_full: String = String::new();
-    sreq_r
-        .read_line(&mut method_line_full)
-        .expect(&format!("No method line in {:?}", sreq_path));
+    sreq_r.read_line(&mut method_line_full).expect(&format!("No method line in {:?}", sreq_path));
     let method_line = method_line_full.trim_end();
     let muq_and_ver: Vec<&str> = method_line.rsplitn(2, " ").collect();
-    assert_eq!(
-        muq_and_ver.len(),
-        2,
-        "muq_and_ver.len() != 2, method_line={}, {:?}",
-        method_line,
-        sreq_path
-    );
+    assert_eq!(muq_and_ver.len(), 2, "muq_and_ver.len() != 2, method_line={}, {:?}", method_line, sreq_path);
 
     let muq_parts: Vec<&str> = muq_and_ver[1].splitn(2, " ").collect();
     assert_eq!(
@@ -259,13 +246,7 @@ fn run(basename: &str) {
             value = line.trim_start();
         } else {
             let parts: Vec<&str> = line.splitn(2, ":").collect();
-            assert_eq!(
-                parts.len(),
-                2,
-                "Malformed header line: {} in {:?}",
-                line,
-                sreq_path
-            );
+            assert_eq!(parts.len(), 2, "Malformed header line: {} in {:?}", line, sreq_path);
 
             key = parts[0].to_lowercase();
             value = parts[1].trim();
@@ -297,39 +278,25 @@ fn run(basename: &str) {
         service: "service".to_string(),
     };
 
-    let mut creq = File::open(&creq_path)
-        .expect(&format!("Failed to open {:?}", creq_path));
+    let mut creq = File::open(&creq_path).expect(&format!("Failed to open {:?}", creq_path));
     let mut expected_canonical_request = Vec::new();
     creq.read_to_end(&mut expected_canonical_request).unwrap();
     expected_canonical_request.retain(|c| *c != b'\r');
 
-    let mut sts = File::open(&sts_path)
-        .expect(&format!("Failed to open {:?}", sts_path));
+    let mut sts = File::open(&sts_path).expect(&format!("Failed to open {:?}", sts_path));
     let mut expected_string_to_sign = Vec::new();
     sts.read_to_end(&mut expected_string_to_sign).unwrap();
     expected_string_to_sign.retain(|c| *c != b'\r');
 
     let sig = AWSSigV4::new();
 
-    let canonical_request = sig
-        .get_canonical_request(&request)
-        .expect(&format!("Failed to get canonical request: {:?}", sreq_path));
-    let string_to_sign = sig
-        .get_string_to_sign(&request)
-        .expect(&format!("Failed to get string to sign: {:?}", sreq_path));
+    let canonical_request =
+        sig.get_canonical_request(&request).expect(&format!("Failed to get canonical request: {:?}", sreq_path));
+    let string_to_sign =
+        sig.get_string_to_sign(&request).expect(&format!("Failed to get string to sign: {:?}", sreq_path));
 
-    assert_eq!(
-        from_utf8(&canonical_request),
-        from_utf8(&expected_canonical_request),
-        "Failed on {:?}",
-        sreq_path
-    );
-    assert_eq!(
-        from_utf8(&string_to_sign),
-        from_utf8(&expected_string_to_sign),
-        "Failed on {:?}",
-        sreq_path
-    );
+    assert_eq!(from_utf8(&canonical_request), from_utf8(&expected_canonical_request), "Failed on {:?}", sreq_path);
+    assert_eq!(from_utf8(&string_to_sign), from_utf8(&expected_string_to_sign), "Failed on {:?}", sreq_path);
 
     sig.verify(&request, SigningKeyKind::KSecret, get_signing_key, None)
         .expect(&format!("Signature verification failed: {:?}", sreq_path));
@@ -347,19 +314,22 @@ fn run(basename: &str) {
         .expect(&format!("Signature verification failed: {:?}", sreq_path));
 }
 
-
 fn get_signing_key(
     kind: SigningKeyKind,
     _access_key_id: &str,
     _session_token: Option<&str>,
     req_date_opt: Option<&str>,
     region_opt: Option<&str>,
-    service_opt: Option<&str>
+    service_opt: Option<&str>,
 ) -> Result<(Principal, Vec<u8>), SignatureError> {
     let k_secret = "AWS4wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".as_bytes();
     let principal = Principal::create_user(
-        "aws".to_string(), "123456789012".to_string(), "/".to_string(),
-        "test".to_string(), "AIDAIAAAAAAAAAAAAAAAA".to_string());
+        "aws".to_string(),
+        "123456789012".to_string(),
+        "/".to_string(),
+        "test".to_string(),
+        "AIDAIAAAAAAAAAAAAAAAA".to_string(),
+    );
 
     let signing_key = match kind {
         SigningKeyKind::KSecret => k_secret.to_vec(),
@@ -374,15 +344,13 @@ fn get_signing_key_kdate(
     k_secret: &[u8],
     req_date_opt: Option<&str>,
     region_opt: Option<&str>,
-    service_opt: Option<&str>
+    service_opt: Option<&str>,
 ) -> Result<Vec<u8>, SignatureError> {
     if let Some(req_date) = req_date_opt {
-        let k_date = hmac::sign(
-            &hmac::Key::new(hmac::HMAC_SHA256, k_secret.as_ref()),
-            req_date.as_bytes());
+        let k_date = hmac::sign(&hmac::Key::new(hmac::HMAC_SHA256, k_secret.as_ref()), req_date.as_bytes());
         match kind {
             SigningKeyKind::KDate => Ok(k_date.as_ref().to_vec()),
-            _ => get_signing_key_kregion(kind, k_date.as_ref(), region_opt, service_opt)
+            _ => get_signing_key_kregion(kind, k_date.as_ref(), region_opt, service_opt),
         }
     } else {
         Err(SignatureError::new(ErrorKind::InvalidCredential, "Missing request date parameter"))
@@ -393,15 +361,13 @@ fn get_signing_key_kregion(
     kind: SigningKeyKind,
     k_date: &[u8],
     region_opt: Option<&str>,
-    service_opt: Option<&str>
+    service_opt: Option<&str>,
 ) -> Result<Vec<u8>, SignatureError> {
     if let Some(region) = region_opt {
-        let k_region = hmac::sign(
-            &hmac::Key::new(hmac::HMAC_SHA256, k_date.as_ref()),
-            region.as_bytes());
+        let k_region = hmac::sign(&hmac::Key::new(hmac::HMAC_SHA256, k_date.as_ref()), region.as_bytes());
         match kind {
             SigningKeyKind::KRegion => Ok(k_region.as_ref().to_vec()),
-            _ => get_signing_key_kservice(kind, k_region.as_ref(), service_opt)
+            _ => get_signing_key_kservice(kind, k_region.as_ref(), service_opt),
         }
     } else {
         Err(SignatureError::new(ErrorKind::InvalidCredential, "Missing request region parameter"))
@@ -411,18 +377,15 @@ fn get_signing_key_kregion(
 fn get_signing_key_kservice(
     kind: SigningKeyKind,
     k_region: &[u8],
-    service_opt: Option<&str>
+    service_opt: Option<&str>,
 ) -> Result<Vec<u8>, SignatureError> {
     if let Some(service) = service_opt {
-        let k_service = hmac::sign(
-            &hmac::Key::new(hmac::HMAC_SHA256, k_region.as_ref()),
-            service.as_bytes());
+        let k_service = hmac::sign(&hmac::Key::new(hmac::HMAC_SHA256, k_region.as_ref()), service.as_bytes());
         match kind {
             SigningKeyKind::KService => Ok(k_service.as_ref().to_vec()),
             _ => {
-                let k_signing = hmac::sign(
-                    &hmac::Key::new(hmac::HMAC_SHA256, k_service.as_ref()),
-                    "aws4_request".as_bytes());
+                let k_signing =
+                    hmac::sign(&hmac::Key::new(hmac::HMAC_SHA256, k_service.as_ref()), "aws4_request".as_bytes());
                 Ok(k_signing.as_ref().to_vec())
             }
         }
@@ -430,4 +393,3 @@ fn get_signing_key_kservice(
         Err(SignatureError::new(ErrorKind::InvalidCredential, "Missing service parameter"))
     }
 }
-
