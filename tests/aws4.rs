@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::str::from_utf8;
 
 extern crate aws_sig_verify;
-use aws_sig_verify::{AWSSigV4, AWSSigV4Algorithm, ErrorKind, Principal, Request, SignatureError, SigningKeyKind};
+use aws_sig_verify::{AWSSigV4, AWSSigV4Algorithm, Principal, Request, SignatureError, SigningKeyKind};
 
 use ring::hmac;
 
@@ -353,7 +353,9 @@ fn get_signing_key_kdate(
             _ => get_signing_key_kregion(kind, k_date.as_ref(), region_opt, service_opt),
         }
     } else {
-        Err(SignatureError::new(ErrorKind::InvalidCredential, "Missing request date parameter"))
+        Err(SignatureError::InvalidCredential {
+            message: "Missing request date parameter".to_string(),
+        })
     }
 }
 
@@ -370,7 +372,9 @@ fn get_signing_key_kregion(
             _ => get_signing_key_kservice(kind, k_region.as_ref(), service_opt),
         }
     } else {
-        Err(SignatureError::new(ErrorKind::InvalidCredential, "Missing request region parameter"))
+        Err(SignatureError::InvalidCredential {
+            message: "Missing request region parameter".to_string(),
+        })
     }
 }
 
@@ -390,6 +394,8 @@ fn get_signing_key_kservice(
             }
         }
     } else {
-        Err(SignatureError::new(ErrorKind::InvalidCredential, "Missing service parameter"))
+        Err(SignatureError::InvalidCredential {
+            message: "Missing service parameter".to_string(),
+        })
     }
 }

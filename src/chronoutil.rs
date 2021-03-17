@@ -1,8 +1,8 @@
-use std::str::FromStr;
+use std::{error::Error, str::FromStr};
 
 use chrono::format::{ParseError, ParseResult};
 use chrono::offset::{FixedOffset, TimeZone};
-use chrono::DateTime;
+use chrono::{DateTime, Utc};
 use lazy_static::lazy_static;
 use regex::Regex;
 
@@ -95,5 +95,20 @@ impl ParseISO8601<DateTime<FixedOffset>> for DateTime<FixedOffset> {
         } else {
             Err(*INVALID)
         }
+    }
+}
+
+pub(crate) fn parse_date_str<E>(date_str: &str, e: E) -> Result<DateTime<Utc>, E>
+where
+    E: Error + 'static,
+{
+    if let Ok(ref d) = DateTime::parse_from_rfc2822(&date_str) {
+        Ok(d.with_timezone(&Utc))
+    } else if let Ok(ref d) = DateTime::parse_from_rfc3339(&date_str) {
+        Ok(d.with_timezone(&Utc))
+    } else if let Ok(ref d) = DateTime::parse_from_iso8601(&date_str) {
+        Ok(d.with_timezone(&Utc))
+    } else {
+        Err(e)
     }
 }

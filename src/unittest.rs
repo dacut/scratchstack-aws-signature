@@ -1,6 +1,6 @@
 use super::signature::{
     canonicalize_uri_path, normalize_query_parameters, normalize_uri_path_component, AWSSigV4, AWSSigV4Algorithm,
-    ErrorKind, Principal, Request, SignatureError, SigningKeyKind,
+    Principal, Request, SignatureError, SigningKeyKind,
 };
 
 use super::chronoutil::ParseISO8601;
@@ -106,13 +106,15 @@ fn check_iso8601_tz_formats() {
 }
 
 macro_rules! expect_err {
-    ($test:expr, $expected:pat) => {
+    ($test:expr, $expected:ident) => {
         match $test {
             Ok(e) => panic!("Expected Err({}); got Ok({:?})", stringify!($expected), e),
-            Err(e) => match &e.kind {
-                $expected => format!("{}", &e),
+            Err(e) => match e {
+                SignatureError::$expected {
+                    ..
+                } => format!("{}", &e),
                 _ => {
-                    eprintln!("Expected {}; got ErrorKind::{:?}: {}", stringify!($expected), &e.kind, &e);
+                    eprintln!("Expected {}; got {:?}: {}", stringify!($expected), &e, &e);
                     ($test).unwrap(); // panic
                     panic!();
                 }
@@ -141,10 +143,10 @@ fn canonicalize_valid() {
 
 #[test]
 fn canonicalize_invalid() {
-    let e = expect_err!(canonicalize_uri_path(&"hello/world"), ErrorKind::InvalidURIPath);
+    let e = expect_err!(canonicalize_uri_path(&"hello/world"), InvalidURIPath);
     assert!(format!("{}", e).starts_with("Invalid URI path:"));
 
-    expect_err!(canonicalize_uri_path(&"/hello/../../world"), ErrorKind::InvalidURIPath);
+    expect_err!(canonicalize_uri_path(&"/hello/../../world"), InvalidURIPath);
 }
 
 #[test]
@@ -183,14 +185,14 @@ fn normalize_empty() {
 
 #[test]
 fn normalize_invalid_hex() {
-    let e = expect_err!(normalize_uri_path_component("abcd%yy"), ErrorKind::InvalidURIPath);
+    let e = expect_err!(normalize_uri_path_component("abcd%yy"), InvalidURIPath);
     assert!(format!("{}", e).starts_with("Invalid URI path:"));
 
-    expect_err!(normalize_uri_path_component("abcd%yy"), ErrorKind::InvalidURIPath);
+    expect_err!(normalize_uri_path_component("abcd%yy"), InvalidURIPath);
 
-    expect_err!(normalize_uri_path_component("abcd%0"), ErrorKind::InvalidURIPath);
+    expect_err!(normalize_uri_path_component("abcd%0"), InvalidURIPath);
 
-    expect_err!(normalize_uri_path_component("abcd%"), ErrorKind::InvalidURIPath);
+    expect_err!(normalize_uri_path_component("abcd%"), InvalidURIPath);
 
     assert_eq!(normalize_uri_path_component("abcd%65").unwrap(), "abcde");
 }
@@ -221,23 +223,25 @@ fn duplicate_headers() {
 
     let sig = AWSSigV4::new();
 
-    let e = expect_err!(sig.get_authorization_header_parameters(&request), ErrorKind::MultipleHeaderValues);
+    let e = expect_err!(sig.get_authorization_header_parameters(&request), MultipleHeaderValues);
     assert_eq!(format!("{}", e), "Multiple values for header: authorization");
 }
 
 macro_rules! run_auth_test_expect_kind {
-    ($auth_str:expr, $expected:pat) => {{
+    ($auth_str:expr, $expected:ident) => {{
         let e = run_auth_test_get_err($auth_str);
-        match &e.kind {
-            $expected => format!("{}", e),
-            _ => panic!("Expected {}; got ErrorKind::{:?}: {}", stringify!($expected), &e.kind, &e),
+        match e {
+            SignatureError::$expected {
+                ..
+            } => format!("{}", e),
+            _ => panic!("Expected {}; got {:?}: {}", stringify!($expected), &e, &e),
         }
     }};
 }
 
 macro_rules! run_auth_test {
     ($auth_str:expr) => {
-        run_auth_test_expect_kind!($auth_str, ErrorKind::MalformedSignature)
+        run_auth_test_expect_kind!($auth_str, MalformedSignature)
     };
 }
 
@@ -276,7 +280,9 @@ fn run_auth_test_get_err(auth_str: &str) -> SignatureError {
 
         match kind {
             SigningKeyKind::KSecret => Ok((principal, k_secret.to_vec())),
-            _ => Err(SignatureError::new(ErrorKind::UnknownAccessKey, access_key_id)),
+            _ => Err(SignatureError::UnknownAccessKey {
+                access_key: access_key_id.to_string(),
+            }),
         }
     };
 
@@ -328,7 +334,7 @@ Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, \
 SignedHeaders=host;x-amz-date, \
 Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea"
         ),
-        "Malformed signature: invalid Authorization header: duplicate key Credential"
+        "Malformed signature: invalid Authorization header: duplicate field Credential"
     );
 }
 
@@ -374,10 +380,7 @@ Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea"
 
 #[test]
 fn test_wrong_auth_algorithm() {
-    assert_eq!(
-        run_auth_test_expect_kind!("AWS3-ZZZ Credential=12345", ErrorKind::MissingHeader),
-        "Missing header: authorization"
-    );
+    assert_eq!(run_auth_test_expect_kind!("AWS3-ZZZ Credential=12345", MissingHeader), "Missing header: authorization");
 }
 
 #[test]
@@ -424,7 +427,7 @@ fn duplicate_query_parameter() {
 
     let sig = AWSSigV4::new();
 
-    let e = expect_err!(sig.get_request_signature(&request), ErrorKind::MultipleParameterValues);
+    let e = expect_err!(sig.get_request_signature(&request), MultipleParameterValues);
     assert_eq!(format!("{}", e), "Multiple values for query parameter: X-Amz-Signature");
 }
 
@@ -451,7 +454,7 @@ fn non_utf8_header() {
 
     let sig = AWSSigV4::new();
 
-    expect_err!(sig.get_authorization_header_parameters(&request), ErrorKind::MalformedHeader);
+    expect_err!(sig.get_authorization_header_parameters(&request), MalformedHeader);
 }
 
 #[test]
@@ -471,7 +474,7 @@ fn missing_header() {
 
     let sig = AWSSigV4::new();
 
-    expect_err!(sig.get_authorization_header_parameters(&request), ErrorKind::MissingHeader);
+    expect_err!(sig.get_authorization_header_parameters(&request), MissingHeader);
 }
 
 #[test]
@@ -492,7 +495,7 @@ fn missing_date() {
 
     let sig = AWSSigV4::new();
 
-    let e = expect_err!(sig.get_signed_headers(&request), ErrorKind::MissingHeader);
+    let e = expect_err!(sig.get_signed_headers(&request), MissingHeader);
     assert_eq!(format!("{}", e), "Missing header: x-amz-date");
 }
 
@@ -513,8 +516,8 @@ fn invalid_date() {
     };
 
     let sig = AWSSigV4::new();
-    let e = expect_err!(sig.get_request_timestamp(&request), ErrorKind::MalformedHeader);
-    assert_eq!(format!("{}", e), "Malformed header: date");
+    let e = expect_err!(sig.get_request_timestamp(&request), MalformedHeader);
+    assert_eq!(format!("{}", e), "Malformed header: Date is not a valid timestamp");
 
     let mut headers2: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
     headers2.insert("authorization".to_string(), vec![_AUTH_HEADER1.as_bytes().to_vec()]);
@@ -531,7 +534,7 @@ fn invalid_date() {
     };
 
     let sig = AWSSigV4::new();
-    expect_err!(sig.get_request_timestamp(&request), ErrorKind::MissingHeader);
+    expect_err!(sig.get_request_timestamp(&request), MissingHeader);
 
     let headers3: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
     let request = Request {
@@ -545,6 +548,6 @@ fn invalid_date() {
     };
 
     let sig = AWSSigV4::new();
-    let e = expect_err!(sig.get_request_timestamp(&request), ErrorKind::MalformedParameter);
-    assert_eq!(format!("{}", e), "Malformed query parameter: X-Amz-Date");
+    let e = expect_err!(sig.get_request_timestamp(&request), MalformedParameter);
+    assert_eq!(format!("{}", e), "Malformed query parameter: X-Amz-Date is not a valid timestamp");
 }
