@@ -266,9 +266,9 @@ fn run_auth_test_get_err(auth_str: &str) -> SignatureError {
     let get_signing_key = |kind: SigningKeyKind,
                            access_key_id: &str,
                            _session_token: Option<&str>,
-                           _req_date_opt: Option<&str>,
-                           _region_opt: Option<&str>,
-                           _service_opt: Option<&str>| {
+                           _req_date_opt: &str,
+                           _region_opt: &str,
+                           _service_opt: &str| {
         let k_secret = "AWS4wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".as_bytes();
         let principal = Principal::create_user(
             "aws".to_string(),

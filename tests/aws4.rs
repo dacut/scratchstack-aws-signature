@@ -6,9 +6,9 @@ use std::path::PathBuf;
 use std::str::from_utf8;
 
 extern crate aws_sig_verify;
-use aws_sig_verify::{AWSSigV4, AWSSigV4Algorithm, Principal, Request, SignatureError, SigningKeyKind};
-
-use ring::hmac;
+use aws_sig_verify::{
+    derive_key_from_secret_key, AWSSigV4, AWSSigV4Algorithm, Principal, Request, SignatureError, SigningKeyKind,
+};
 
 #[test]
 fn get_header_key_duplicate_get_header_key_duplicate() {
@@ -318,11 +318,11 @@ fn get_signing_key(
     kind: SigningKeyKind,
     _access_key_id: &str,
     _session_token: Option<&str>,
-    req_date_opt: Option<&str>,
-    region_opt: Option<&str>,
-    service_opt: Option<&str>,
+    req_date: &str,
+    region: &str,
+    service: &str,
 ) -> Result<(Principal, Vec<u8>), SignatureError> {
-    let k_secret = "AWS4wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".as_bytes();
+    let secret_key = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".as_bytes();
     let principal = Principal::create_user(
         "aws".to_string(),
         "123456789012".to_string(),
@@ -331,71 +331,6 @@ fn get_signing_key(
         "AIDAIAAAAAAAAAAAAAAAA".to_string(),
     );
 
-    let signing_key = match kind {
-        SigningKeyKind::KSecret => k_secret.to_vec(),
-        _ => get_signing_key_kdate(kind, k_secret, req_date_opt, region_opt, service_opt)?,
-    };
-
+    let signing_key = derive_key_from_secret_key(secret_key, kind, req_date, region, service);
     Ok((principal, signing_key))
-}
-
-fn get_signing_key_kdate(
-    kind: SigningKeyKind,
-    k_secret: &[u8],
-    req_date_opt: Option<&str>,
-    region_opt: Option<&str>,
-    service_opt: Option<&str>,
-) -> Result<Vec<u8>, SignatureError> {
-    if let Some(req_date) = req_date_opt {
-        let k_date = hmac::sign(&hmac::Key::new(hmac::HMAC_SHA256, k_secret.as_ref()), req_date.as_bytes());
-        match kind {
-            SigningKeyKind::KDate => Ok(k_date.as_ref().to_vec()),
-            _ => get_signing_key_kregion(kind, k_date.as_ref(), region_opt, service_opt),
-        }
-    } else {
-        Err(SignatureError::InvalidCredential {
-            message: "Missing request date parameter".to_string(),
-        })
-    }
-}
-
-fn get_signing_key_kregion(
-    kind: SigningKeyKind,
-    k_date: &[u8],
-    region_opt: Option<&str>,
-    service_opt: Option<&str>,
-) -> Result<Vec<u8>, SignatureError> {
-    if let Some(region) = region_opt {
-        let k_region = hmac::sign(&hmac::Key::new(hmac::HMAC_SHA256, k_date.as_ref()), region.as_bytes());
-        match kind {
-            SigningKeyKind::KRegion => Ok(k_region.as_ref().to_vec()),
-            _ => get_signing_key_kservice(kind, k_region.as_ref(), service_opt),
-        }
-    } else {
-        Err(SignatureError::InvalidCredential {
-            message: "Missing request region parameter".to_string(),
-        })
-    }
-}
-
-fn get_signing_key_kservice(
-    kind: SigningKeyKind,
-    k_region: &[u8],
-    service_opt: Option<&str>,
-) -> Result<Vec<u8>, SignatureError> {
-    if let Some(service) = service_opt {
-        let k_service = hmac::sign(&hmac::Key::new(hmac::HMAC_SHA256, k_region.as_ref()), service.as_bytes());
-        match kind {
-            SigningKeyKind::KService => Ok(k_service.as_ref().to_vec()),
-            _ => {
-                let k_signing =
-                    hmac::sign(&hmac::Key::new(hmac::HMAC_SHA256, k_service.as_ref()), "aws4_request".as_bytes());
-                Ok(k_signing.as_ref().to_vec())
-            }
-        }
-    } else {
-        Err(SignatureError::InvalidCredential {
-            message: "Missing service parameter".to_string(),
-        })
-    }
 }

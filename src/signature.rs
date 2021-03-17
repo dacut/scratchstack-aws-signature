@@ -8,8 +8,7 @@
 //! algorithms.
 //!
 use std::collections::{BTreeMap, HashMap};
-use std::convert::From;
-use std::convert::TryInto;
+use std::convert::{From, Into};
 use std::error;
 use std::fmt;
 use std::io;
@@ -186,7 +185,7 @@ pub enum SignatureError {
 impl fmt::Display for SignatureError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::IO(ref e) => e.fmt(f),            
+            Self::IO(ref e) => e.fmt(f),
             Self::InvalidBodyEncoding {
                 message,
             } => write!(f, "Invalid body encoding: {}", message),
@@ -298,60 +297,84 @@ pub struct Principal {
 }
 
 impl Principal {
-    /// Create an assumed-role Principal object.
-    pub fn create_assumed_role(
-        partition: String,
-        account_id: String,
-        path: String,
-        name: String,
-        session_name: String,
-    ) -> Self {
+    pub fn create_assumed_role<S1, S2, S3, S4, S5>(
+        partition: S1,
+        account_id: S2,
+        path: S3,
+        name: S4,
+        session_name: S5,
+    ) -> Self
+    where
+        S1: Into<String>,
+        S2: Into<String>,
+        S3: Into<String>,
+        S4: Into<String>,
+        S5: Into<String>,
+    {
         Self {
-            partition: partition,
+            partition: partition.into(),
             principal_type: PrincipalType::AssumedRole(IAMAssumedRoleDetails {
-                account_id: account_id,
-                path: path,
-                name: name,
-                session_name: session_name,
+                account_id: account_id.into(),
+                path: path.into(),
+                name: name.into(),
+                session_name: session_name.into(),
             }),
         }
     }
 
-    /// Create a group Principal object.
-    pub fn create_group(partition: String, account_id: String, path: String, name: String, group_id: String) -> Self {
+    pub fn create_group<S1, S2, S3, S4, S5>(partition: S1, account_id: S2, path: S3, name: S4, group_id: S5) -> Self
+    where
+        S1: Into<String>,
+        S2: Into<String>,
+        S3: Into<String>,
+        S4: Into<String>,
+        S5: Into<String>,
+    {
         Self {
-            partition: partition,
+            partition: partition.into(),
             principal_type: PrincipalType::Group(IAMGroupDetails {
-                account_id: account_id,
-                path: path,
-                name: name,
-                group_id: group_id,
+                account_id: account_id.into(),
+                path: path.into(),
+                name: name.into(),
+                group_id: group_id.into(),
             }),
         }
     }
 
-    /// Create role Principal object.
-    pub fn create_role(partition: String, account_id: String, path: String, name: String, role_id: String) -> Self {
+    pub fn create_role<S1, S2, S3, S4, S5>(partition: S1, account_id: S2, path: S3, name: S4, role_id: S5) -> Self
+    where
+        S1: Into<String>,
+        S2: Into<String>,
+        S3: Into<String>,
+        S4: Into<String>,
+        S5: Into<String>,
+    {
         Self {
-            partition: partition,
+            partition: partition.into(),
             principal_type: PrincipalType::Role(IAMRoleDetails {
-                account_id: account_id,
-                path: path,
-                name: name,
-                role_id: role_id,
+                account_id: account_id.into(),
+                path: path.into(),
+                name: name.into(),
+                role_id: role_id.into(),
             }),
         }
     }
 
-    /// Create a user Principal object.
-    pub fn create_user(partition: String, account_id: String, path: String, name: String, user_id: String) -> Self {
+    pub fn create_user<S1, S2, S3, S4, S5>(partition: S1, account_id: S2, path: S3, name: S4, user_id: S5) -> Self
+    where
+        S1: Into<String>,
+        S2: Into<String>,
+        S3: Into<String>,
+        S4: Into<String>,
+        S5: Into<String>,
+    {
         Self {
-            partition: partition,
+            partition: partition.into(),
             principal_type: PrincipalType::User(IAMUserDetails {
-                account_id: account_id,
-                path: path,
-                name: name,
-                user_id: user_id,
+                account_id: account_id.into(),
+                path: path.into(),
+                name: name.into(),
+                user_id: user_id.into(),
             }),
         }
     }
@@ -458,18 +481,22 @@ impl fmt::Display for PrincipalType {
     }
 }
 
-/// The function that returns a signing key of a given type.
-pub type SigningKeyFn = fn(
-    SigningKeyKind,
-    &str,         // access_key_id
-    Option<&str>, // token
-    Option<&str>, // request date
-    Option<&str>, // request region
-    Option<&str>, // service
-) -> Result<(Principal, Vec<u8>), SignatureError>;
+/// A user-implemented function that returns a signing key of a given type.
+///
+/// This function should have the signature:
+///
+/// ```ignore
+/// fn get_signing_key(signing_key_kind: SigningKeyKind, access_key_id: &str, token: Option<&str>,
+///     request_date: &str, region: &str, service: &str) -> Result<(Principal, Vec<u8>), SignatureError>
+/// ```
+///
+/// The return value on success is a tuple containing the principal owning the access key and the secret key derived into the
+/// form specified by signing_key_kind. The helper function `derive_key_from_secret_key` can be used to return this derived
+/// key.
+pub type SigningKeyFn =
+    fn(SigningKeyKind, &str, Option<&str>, &str, &str, &str) -> Result<(Principal, Vec<u8>), SignatureError>;
 
-/// A data structure containing the elements of the request
-/// (some client-supplied, some service-supplied) involved in the SigV4
+/// A data structure containing the elements of the request (some client-supplied, some service-supplied) involved in the SigV4
 /// verification process.
 #[derive(Clone, Debug)]
 pub struct Request {
@@ -569,8 +596,7 @@ impl Request {
     }
 }
 
-/// Trait for calculating various attributes of a SigV4 signature according
-/// to variants of the SigV4 algorithm.
+/// Trait for calculating various attributes of a SigV4 signature according to variants of the SigV4 algorithm.
 pub trait AWSSigV4Algorithm {
     /// The canonicalized URI path for a request.
     fn get_canonical_uri_path(&self, req: &Request) -> Result<String, SignatureError> {
@@ -579,9 +605,8 @@ pub trait AWSSigV4Algorithm {
 
     /// The canonical query string from the query parameters.
     ///
-    /// This takes the query_string from the request, merges it with the body
-    /// if the request has a body of type `application/x-www-form-urlencoded`,
-    /// and orders the parameters.
+    /// This takes the query_string from the request, merges it with the body if the request has a body of type
+    /// `application/x-www-form-urlencoded`, and orders the parameters.
     fn get_canonical_query_string(&self, req: &Request) -> Result<String, SignatureError> {
         let query_parameters = req.get_query_parameters()?;
         let mut results = Vec::new();
@@ -627,9 +652,8 @@ pub trait AWSSigV4Algorithm {
         Ok(results.join("&").to_string())
     }
 
-    /// The parameters from the Authorization header (only -- not the query
-    /// parameter). If the Authorization header is not present or is not an
-    /// AWS SigV4 header, an Err(SignatureError) is returned.
+    /// The parameters from the Authorization header (only -- not the query parameter). If the Authorization header is not present
+    /// or is not an AWS SigV4 header, an Err(SignatureError) is returned.
     fn get_authorization_header_parameters(&self, req: &Request) -> Result<HashMap<String, String>, SignatureError> {
         let auth_headers_opt = req.headers.get(AUTHORIZATION);
         let aws4_hmac_sha256_u8: &[u8] = AWS4_HMAC_SHA256.as_ref();
@@ -644,8 +668,7 @@ pub trait AWSSigV4Algorithm {
             Some(auth_headers) => {
                 let mut parameters_opt: Option<&str> = None;
 
-                // Multiple Authorization headers may be present, but only one may be
-                // of type AWS4-HMAC-SHA256.
+                // Multiple Authorization headers may be present, but only one may be of type AWS4-HMAC-SHA256.
                 for auth_header in auth_headers {
                     if auth_header != aws4_hmac_sha256_v8 && !auth_header.starts_with(aws4_hmac_sha256_space_u8) {
                         continue;
@@ -684,8 +707,7 @@ pub trait AWSSigV4Algorithm {
         }
     }
 
-    /// Returns a sorted dictionary containing the signed header names and
-    /// their values.
+    /// Returns a sorted dictionary containing the signed header names and their values.
     fn get_signed_headers(&self, req: &Request) -> Result<BTreeMap<String, Vec<Vec<u8>>>, SignatureError> {
         // See if the signed headers are listed in the query string.
         let qp_result = req.get_query_param_one(X_AMZ_SIGNEDHEADERS);
@@ -721,8 +743,7 @@ pub trait AWSSigV4Algorithm {
         // Header names are separated by semicolons.
         let parts: Vec<String> = signed_headers.split(';').map(|s| s.to_string()).collect();
 
-        // Make sure the signed headers list is canonicalized. For security
-        // reasons, we consider it an error if it isn't.
+        // Make sure the signed headers list is canonicalized. For security reasons, we consider it an error if it isn't.
         let mut canonicalized = parts.clone();
         canonicalized.sort_unstable_by(|a, b| a.to_lowercase().partial_cmp(&b.to_lowercase()).unwrap());
 
@@ -1021,18 +1042,17 @@ pub trait AWSSigV4Algorithm {
 
         let timestamp = self.get_request_timestamp(req)?;
         let req_date = format!("{}", timestamp.date().format("%Y%m%d"));
-
         let (principal, key) = signing_key_fn(
             signing_key_kind,
             &access_key,
             session_token.as_ref().map(String::as_ref),
-            Some(&req_date),
-            Some(&req.region),
-            Some(&req.service),
+            &req_date,
+            &req.region,
+            &req.service,
         )?;
         let string_to_sign = self.get_string_to_sign(req)?;
 
-        let k_signing = get_signing_key(signing_key_kind, &key, &req_date, &req.region, &req.service);
+        let k_signing = get_signing_key(signing_key_kind, key, &req_date, &req.region, &req.service);
 
         Ok((principal, hex::encode(hmac_sha256(k_signing.as_ref(), &string_to_sign).as_ref())))
     }
@@ -1181,8 +1201,7 @@ pub fn normalize_uri_path_component(path_component: &str) -> Result<String, Sign
 
 /// Normalizes the specified URI path, removing redundant slashes and relative path components.
 pub fn canonicalize_uri_path(uri_path: &str) -> Result<String, SignatureError> {
-    // Special case: empty path is converted to '/'; also short-circuit the
-    // usual '/' path here.
+    // Special case: empty path is converted to '/'; also short-circuit the usual '/' path here.
     if uri_path == "" || uri_path == "/" {
         return Ok("/".to_string());
     }
@@ -1194,8 +1213,7 @@ pub fn canonicalize_uri_path(uri_path: &str) -> Result<String, SignatureError> {
         });
     }
 
-    // Replace double slashes; this makes it easier to handle slashes at the
-    // end.
+    // Replace double slashes; this makes it easier to handle slashes at the end.
     let uri_path = MULTISLASH.replace_all(uri_path, "/");
 
     // Examine each path component for relative directories.
@@ -1208,11 +1226,9 @@ pub fn canonicalize_uri_path(uri_path: &str) -> Result<String, SignatureError> {
             // Relative path: current directory; remove this.
             components.remove(i);
 
-        // Don't increment i; with the deletion, we're now pointing to
-        // the next element in the path.
+            // Don't increment i; with the deletion, we're now pointing to the next element in the path.
         } else if component == ".." {
-            // Relative path: parent directory.  Remove this and the previous
-            // component.
+            // Relative path: parent directory.  Remove this and the previous component.
 
             if i <= 1 {
                 // This isn't allowed at the beginning!
@@ -1224,8 +1240,7 @@ pub fn canonicalize_uri_path(uri_path: &str) -> Result<String, SignatureError> {
             components.remove(i - 1);
             components.remove(i - 1);
 
-            // Since we've deleted two components, we need to back up one to
-            // examine what's now the next component.
+            // Since we've deleted two components, we need to back up one to examine what's now the next component.
             i -= 1;
         } else {
             // Leave it alone; proceed to the next component.
@@ -1311,65 +1326,87 @@ pub fn split_authorization_header_parameters(parameters: &str) -> Result<HashMap
     Ok(result)
 }
 
+/// Convert a secret key into the specified kind of signing key.
+pub fn derive_key_from_secret_key(
+    secret_key: &[u8],
+    derived_key_type: SigningKeyKind,
+    req_date: &str,
+    region: &str,
+    service: &str,
+) -> Vec<u8> {
+    let mut k_secret = Vec::<u8>::with_capacity(secret_key.len() + 4);
+    k_secret.extend("AWS4".bytes());
+    k_secret.extend_from_slice(secret_key);
+
+    match derived_key_type {
+        SigningKeyKind::KSecret => k_secret,
+        SigningKeyKind::KDate => get_kdate_key(SigningKeyKind::KSecret, k_secret.as_slice(), req_date).to_vec(),
+        SigningKeyKind::KRegion => {
+            get_kregion_key(SigningKeyKind::KSecret, k_secret.as_slice(), req_date, region).to_vec()
+        }
+        SigningKeyKind::KService => {
+            get_kservice_key(SigningKeyKind::KSecret, k_secret.as_slice(), req_date, region, service).to_vec()
+        }
+        SigningKeyKind::KSigning => {
+            get_signing_key(SigningKeyKind::KSecret, k_secret.as_slice(), req_date, region, service).to_vec()
+        }
+    }
+}
+
 /// Return the signing key given a possibly non-final signing key.
-pub fn get_signing_key<'a>(
+pub fn get_signing_key<K: Into<Vec<u8>>>(
     signing_key_kind: SigningKeyKind,
-    key: &'a [u8],
-    req_date: &'a str,
-    region: &'a str,
-    service: &'a str,
-) -> [u8; 32] {
+    key: K,
+    req_date: &str,
+    region: &str,
+    service: &str,
+) -> Vec<u8> {
     match signing_key_kind {
-        SigningKeyKind::KSigning => key.try_into(),
+        SigningKeyKind::KSigning => key.into(),
         _ => {
             let k_service = get_kservice_key(signing_key_kind, key, req_date, region, service);
-            hmac_sha256(k_service.as_ref(), AWS4_REQUEST.as_bytes()).as_ref().try_into()
+            hmac_sha256(k_service.as_ref(), AWS4_REQUEST.as_bytes()).as_ref().to_vec()
         }
     }
-    .expect("Invalid HMAC-SHA256 length")
 }
 
-pub fn get_kservice_key<'a>(
+pub fn get_kservice_key<K: Into<Vec<u8>>>(
     signing_key_kind: SigningKeyKind,
-    key: &'a [u8],
-    req_date: &'a str,
-    region: &'a str,
-    service: &'a str,
-) -> [u8; 32] {
+    key: K,
+    req_date: &str,
+    region: &str,
+    service: &str,
+) -> Vec<u8> {
     match signing_key_kind {
-        SigningKeyKind::KService => key.try_into(),
+        SigningKeyKind::KService => key.into(),
         _ => {
             let k_region = get_kregion_key(signing_key_kind, key, req_date, region);
-            hmac_sha256(k_region.as_ref(), service.as_bytes()).as_ref().try_into()
+            hmac_sha256(k_region.as_ref(), service.as_bytes()).as_ref().to_vec()
         }
     }
-    .expect("Invalid HMAC-SHA256 length")
 }
 
-pub fn get_kregion_key<'a>(
+pub fn get_kregion_key<K: Into<Vec<u8>>>(
     signing_key_kind: SigningKeyKind,
-    key: &'a [u8],
-    req_date: &'a str,
-    region: &'a str,
-) -> [u8; 32] {
+    key: K,
+    req_date: &str,
+    region: &str,
+) -> Vec<u8> {
     match signing_key_kind {
-        SigningKeyKind::KRegion => key.try_into(),
+        SigningKeyKind::KRegion => key.into(),
         _ => {
             let k_date = get_kdate_key(signing_key_kind, key, req_date);
-            hmac_sha256(k_date.as_ref(), region.as_bytes()).as_ref().try_into()
+            hmac_sha256(k_date.as_ref(), region.as_bytes()).as_ref().to_vec()
         }
     }
-    .expect("Invalid HMAC-SHA256 length")
 }
 
-pub fn get_kdate_key<'a>(signing_key_kind: SigningKeyKind, key: &'a [u8], req_date: &'a str) -> [u8; 32] {
+pub fn get_kdate_key<K: Into<Vec<u8>>>(signing_key_kind: SigningKeyKind, key: K, req_date: &str) -> Vec<u8> {
     match signing_key_kind {
-        SigningKeyKind::KDate => key.try_into(),
-        _ => {
-            // key is KSecret == AWS4 + secret key.
-            // KDate = HMAC(KSecret + req_date)
-            hmac_sha256(&key, req_date.as_bytes()).as_ref().try_into()
-        }
+        SigningKeyKind::KDate => key.into(),
+
+        // key is KSecret == AWS4 + secret key.
+        // KDate = HMAC(KSecret + req_date)
+        _ => hmac_sha256(key.into().as_slice(), req_date.as_bytes()).as_ref().to_vec(),
     }
-    .expect("Invalid HMAC-SHA256 length")
 }
