@@ -1,6 +1,7 @@
+use super::principal::Principal;
 use super::signature::{
     canonicalize_uri_path, normalize_query_parameters, normalize_uri_path_component, AWSSigV4, AWSSigV4Algorithm,
-    Principal, Request, SignatureError, SigningKeyKind,
+    Request, SignatureError, SigningKeyKind,
 };
 
 use super::chronoutil::ParseISO8601;
@@ -23,60 +24,30 @@ fn check_iso8601_error_handling() {
 
 #[test]
 fn check_principal_formats() {
-    let principal = Principal::create_user(
-        "aws".to_string(),
-        "123456789012".to_string(),
-        "/".to_string(),
-        "test".to_string(),
-        "AIDAIAAAAAAAAAAAAAAAA".to_string(),
-    );
+    let principal = Principal::user("aws", "123456789012", "/", "test", "AIDAIAAAAAAAAAAAAAAAA").unwrap();
     let mut s = String::new();
     write!(s, "{}", principal).expect("must succeed");
     assert_eq!(s, "arn:aws:iam::123456789012:user/test");
 
-    let principal = Principal::create_user(
-        "aws".to_string(),
-        "123456789012".to_string(),
-        "/path/".to_string(),
-        "test".to_string(),
-        "AIDAIAAAAAAAAAAAAAAAA".to_string(),
-    );
+    let principal = Principal::user("aws", "123456789012", "/path/", "test", "AIDAIAAAAAAAAAAAAAAAA").unwrap();
     let mut s = String::new();
     write!(s, "{}", principal).expect("must succeed");
     assert_eq!(s, "arn:aws:iam::123456789012:user/path/test");
 
-    let principal = Principal::create_group(
-        "aws".to_string(),
-        "123456789012".to_string(),
-        "/path/".to_string(),
-        "test".to_string(),
-        "AIGAIAAAAAAAAAAAAAAAA".to_string(),
-    );
+    let principal = Principal::group("aws", "123456789012", "/path/", "test", "AIGAIAAAAAAAAAAAAAAAA").unwrap();
     let mut s = String::new();
     write!(s, "{}", principal).expect("must succeed");
     assert_eq!(s, "arn:aws:iam::123456789012:group/path/test");
 
-    let principal = Principal::create_role(
-        "aws".to_string(),
-        "123456789012".to_string(),
-        "/path/".to_string(),
-        "test".to_string(),
-        "AIGAIAAAAAAAAAAAAAAAA".to_string(),
-    );
+    let principal = Principal::role("aws", "123456789012", "/path/", "test", "AIGAIAAAAAAAAAAAAAAAA").unwrap();
     let mut s = String::new();
     write!(s, "{}", principal).expect("must succeed");
     assert_eq!(s, "arn:aws:iam::123456789012:role/path/test");
 
-    let principal = Principal::create_assumed_role(
-        "aws".to_string(),
-        "123456789012".to_string(),
-        "/path/".to_string(),
-        "test".to_string(),
-        "MyTestSession".to_string(),
-    );
+    let principal = Principal::assumed_role("aws", "123456789012", "/path/", "test", "MyTestSession").unwrap();
     let mut s = String::new();
     write!(s, "{}", principal).expect("must succeed");
-    assert_eq!(s, "arn:aws:iam::123456789012:assumed-role/path/test/MyTestSession");
+    assert_eq!(s, "arn:aws:sts::123456789012:assumed-role/path/test/MyTestSession");
 }
 
 #[test]
@@ -270,13 +241,7 @@ fn run_auth_test_get_err(auth_str: &str) -> SignatureError {
                            _region_opt: &str,
                            _service_opt: &str| {
         let k_secret = "AWS4wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".as_bytes();
-        let principal = Principal::create_user(
-            "aws".to_string(),
-            "123456789012".to_string(),
-            "/".to_string(),
-            "test".to_string(),
-            "AIDAIAAAAAAAAAAAAAAAA".to_string(),
-        );
+        let principal = Principal::user("aws", "123456789012", "/", "test", "AIDAIAAAAAAAAAAAAAAAA").unwrap();
 
         match kind {
             SigningKeyKind::KSecret => Ok((principal, k_secret.to_vec())),

@@ -323,13 +323,7 @@ fn get_signing_key(
     service: &str,
 ) -> Result<(Principal, Vec<u8>), SignatureError> {
     let secret_key = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".as_bytes();
-    let principal = Principal::create_user(
-        "aws".to_string(),
-        "123456789012".to_string(),
-        "/".to_string(),
-        "test".to_string(),
-        "AIDAIAAAAAAAAAAAAAAAA".to_string(),
-    );
+    let principal = Principal::user("aws", "123456789012", "/", "test", "AIDAIAAAAAAAAAAAAAAAA").unwrap();
 
     let signing_key = derive_key_from_secret_key(secret_key, kind, req_date, region, service);
     Ok((principal, signing_key))

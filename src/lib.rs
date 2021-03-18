@@ -19,11 +19,12 @@ extern crate ring;
 
 mod chronoutil;
 mod hmac;
+mod principal;
 mod signature;
+pub use crate::principal::{Principal};
 pub use crate::signature::{
     canonicalize_uri_path, derive_key_from_secret_key, normalize_query_parameters, normalize_uri_path_component,
-    AWSSigV4, AWSSigV4Algorithm, IAMAssumedRoleDetails, IAMGroupDetails, IAMRoleDetails, IAMUserDetails, Principal,
-    PrincipalType, Request, SignatureError, SigningKeyFn, SigningKeyKind,
+    AWSSigV4, AWSSigV4Algorithm, Request, SignatureError, SigningKeyFn, SigningKeyKind,
 };
 
 #[cfg(test)]
