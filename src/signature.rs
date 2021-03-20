@@ -7,14 +7,14 @@
 //! and [SigV4S3](https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-authenticating-requests.html)
 //! algorithms.
 //!
-use std::collections::{BTreeMap, HashMap};
-use std::convert::{From, Into};
-use std::error;
-use std::fmt;
-use std::io;
-use std::io::Write;
-use std::str::from_utf8;
-use std::vec::Vec;
+use std::{
+    collections::{BTreeMap, HashMap},
+    convert::{From, Into},
+    error::Error,
+    fmt::{Display, Formatter, Result as FmtResult},
+    io::{Error as IOError, Write},
+    str::from_utf8,
+};
 
 use chrono::{DateTime, Duration, Utc};
 use hex;
@@ -98,7 +98,7 @@ lazy_static! {
 #[derive(Debug)]
 pub enum SignatureError {
     /// Validation failed due to an underlying I/O error.
-    IO(io::Error),
+    IO(IOError),
 
     /// The request body used an unsupported character set encoding. Currently only UTF-8 is supported.
     InvalidBodyEncoding {
@@ -183,8 +183,8 @@ pub enum SignatureError {
     },
 }
 
-impl fmt::Display for SignatureError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for SignatureError {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
             Self::IO(ref e) => e.fmt(f),
             Self::InvalidBodyEncoding {
@@ -241,8 +241,8 @@ impl fmt::Display for SignatureError {
     }
 }
 
-impl error::Error for SignatureError {
-    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
+impl Error for SignatureError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::IO(ref e) => Some(e),
             _ => None,
@@ -250,8 +250,8 @@ impl error::Error for SignatureError {
     }
 }
 
-impl From<std::io::Error> for SignatureError {
-    fn from(e: std::io::Error) -> SignatureError {
+impl From<IOError> for SignatureError {
+    fn from(e: IOError) -> SignatureError {
         SignatureError::IO(e)
     }
 }
@@ -275,8 +275,8 @@ pub enum SigningKeyKind {
     KSigning,
 }
 
-impl fmt::Display for SigningKeyKind {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl Display for SigningKeyKind {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
             SigningKeyKind::KSecret => write!(f, "KSecret"),
             SigningKeyKind::KDate => write!(f, "KDate"),

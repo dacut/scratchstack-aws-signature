@@ -53,11 +53,22 @@ impl Principal {
     {
         Ok(Self {
             partition: validate_partition(partition)?,
-            principal_type: PrincipalType::AssumedRole(IAMAssumedRoleDetails::new(account_id, path, name, session_name)?),
+            principal_type: PrincipalType::AssumedRole(IAMAssumedRoleDetails::new(
+                account_id,
+                path,
+                name,
+                session_name,
+            )?),
         })
     }
 
-    pub fn group<S1, S2, S3, S4, S5>(partition: S1, account_id: S2, path: S3, name: S4, group_id: S5) -> Result<Self, PrincipalError>
+    pub fn group<S1, S2, S3, S4, S5>(
+        partition: S1,
+        account_id: S2,
+        path: S3,
+        name: S4,
+        group_id: S5,
+    ) -> Result<Self, PrincipalError>
     where
         S1: Into<String>,
         S2: Into<String>,
@@ -71,7 +82,13 @@ impl Principal {
         })
     }
 
-    pub fn role<S1, S2, S3, S4, S5>(partition: S1, account_id: S2, path: S3, name: S4, role_id: S5) -> Result<Self, PrincipalError>
+    pub fn role<S1, S2, S3, S4, S5>(
+        partition: S1,
+        account_id: S2,
+        path: S3,
+        name: S4,
+        role_id: S5,
+    ) -> Result<Self, PrincipalError>
     where
         S1: Into<String>,
         S2: Into<String>,
@@ -85,7 +102,13 @@ impl Principal {
         })
     }
 
-    pub fn user<S1, S2, S3, S4, S5>(partition: S1, account_id: S2, path: S3, name: S4, user_id: S5) -> Result<Self, PrincipalError>
+    pub fn user<S1, S2, S3, S4, S5>(
+        partition: S1,
+        account_id: S2,
+        path: S3,
+        name: S4,
+        user_id: S5,
+    ) -> Result<Self, PrincipalError>
     where
         S1: Into<String>,
         S2: Into<String>,
@@ -95,7 +118,7 @@ impl Principal {
     {
         Ok(Self {
             partition: validate_partition(partition)?,
-            principal_type: PrincipalType::User(IAMUserDetails::new(account_id, path, name, user_id)?)
+            principal_type: PrincipalType::User(IAMUserDetails::new(account_id, path, name, user_id)?),
         })
     }
 }
@@ -103,10 +126,20 @@ impl Principal {
 impl Display for Principal {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match &self.principal_type {
-            PrincipalType::AssumedRole(ref d) => write!(f, "arn:{}:sts::{}:assumed-role{}{}/{}", self.partition, d.account_id, d.path, d.name, d.session_name),
-            PrincipalType::Group(ref d) => write!(f, "arn:{}:iam::{}:group{}{}", self.partition, d.account_id, d.path, d.name),
-            PrincipalType::Role(ref d) => write!(f, "arn:{}:iam::{}:role{}{}", self.partition, d.account_id, d.path, d.name),
-            PrincipalType::User(ref d) => write!(f, "arn:{}:iam::{}:user{}{}", self.partition, d.account_id, d.path, d.name),
+            PrincipalType::AssumedRole(ref d) => write!(
+                f,
+                "arn:{}:sts::{}:assumed-role{}{}/{}",
+                self.partition, d.account_id, d.path, d.name, d.session_name
+            ),
+            PrincipalType::Group(ref d) => {
+                write!(f, "arn:{}:iam::{}:group{}{}", self.partition, d.account_id, d.path, d.name)
+            }
+            PrincipalType::Role(ref d) => {
+                write!(f, "arn:{}:iam::{}:role{}{}", self.partition, d.account_id, d.path, d.name)
+            }
+            PrincipalType::User(ref d) => {
+                write!(f, "arn:{}:iam::{}:user{}{}", self.partition, d.account_id, d.path, d.name)
+            }
             PrincipalType::Service(s) => write!(f, "arn:{}:iam::amazonaws:service/{}", self.partition, s),
         }
     }
@@ -145,8 +178,12 @@ impl IAMAssumedRoleDetails {
         S3: Into<String>,
         S4: Into<String>,
     {
-        Ok(Self { account_id: validate_account_id(account_id)?, path: validate_path(path)?,
-                  name: validate_name(name, 64)?, session_name: session_name.into() })
+        Ok(Self {
+            account_id: validate_account_id(account_id)?,
+            path: validate_path(path)?,
+            name: validate_name(name, 64)?,
+            session_name: session_name.into(),
+        })
     }
 }
 
@@ -173,8 +210,12 @@ impl IAMGroupDetails {
         S3: Into<String>,
         S4: Into<String>,
     {
-        Ok(Self { account_id: validate_account_id(account_id)?, path: validate_path(path)?,
-                  name: validate_name(name, 128)?, group_id: group_id.into(), })
+        Ok(Self {
+            account_id: validate_account_id(account_id)?,
+            path: validate_path(path)?,
+            name: validate_name(name, 128)?,
+            group_id: group_id.into(),
+        })
     }
 }
 
@@ -201,8 +242,12 @@ impl IAMRoleDetails {
         S3: Into<String>,
         S4: Into<String>,
     {
-        Ok(Self { account_id: validate_account_id(account_id)?, path: validate_path(path)?,
-                  name: validate_name(name, 64)?, role_id: role_id.into(), })
+        Ok(Self {
+            account_id: validate_account_id(account_id)?,
+            path: validate_path(path)?,
+            name: validate_name(name, 64)?,
+            role_id: role_id.into(),
+        })
     }
 }
 
@@ -229,8 +274,12 @@ impl IAMUserDetails {
         S3: Into<String>,
         S4: Into<String>,
     {
-        Ok(Self { account_id: validate_account_id(account_id)?, path: validate_path(path)?,
-                  name: validate_name(name, 64)?, user_id: user_id.into(), })
+        Ok(Self {
+            account_id: validate_account_id(account_id)?,
+            path: validate_path(path)?,
+            name: validate_name(name, 64)?,
+            user_id: user_id.into(),
+        })
     }
 }
 
@@ -271,7 +320,7 @@ fn validate_account_id<S: Into<String>>(account_id: S) -> Result<String, Princip
     }
 
     for c in a_bytes.iter() {
-        if ! c.is_ascii_digit() {
+        if !c.is_ascii_digit() {
             return Err(PrincipalError::InvalidAccountId);
         }
     }
@@ -296,7 +345,7 @@ fn validate_path<S: Into<String>>(path: S) -> Result<String, PrincipalError> {
 
     // Check that all characters fall in the fange u+0021 - u+007e
     for c in p_bytes {
-        if *c < 0x21 || *c > 0x7e  {
+        if *c < 0x21 || *c > 0x7e {
             return Err(PrincipalError::InvalidPath);
         }
     }
@@ -316,7 +365,14 @@ fn validate_name<S: Into<String>>(name: S, max_length: usize) -> Result<String, 
 
     // Check that all characters are alphanumeric or , - . = @ _
     for c in n_bytes {
-        if !(c.is_ascii_alphanumeric() || *c == b',' || *c == b'-' || *c == b'.' || *c == b'=' || *c == b'@' || *c == b'_') {
+        if !(c.is_ascii_alphanumeric()
+            || *c == b','
+            || *c == b'-'
+            || *c == b'.'
+            || *c == b'='
+            || *c == b'@'
+            || *c == b'_')
+        {
             return Err(PrincipalError::InvalidName);
         }
     }
@@ -324,4 +380,3 @@ fn validate_name<S: Into<String>>(name: S, max_length: usize) -> Result<String, 
     drop(n_bytes);
     Ok(name)
 }
-
