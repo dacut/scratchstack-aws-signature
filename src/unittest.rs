@@ -1,3 +1,6 @@
+use std::{
+    fmt::Write,
+};
 use super::principal::Principal;
 use super::signature::{
     canonicalize_uri_path, normalize_query_parameters, normalize_uri_path_component, AWSSigV4, AWSSigV4Algorithm,
@@ -6,8 +9,12 @@ use super::signature::{
 
 use super::chronoutil::ParseISO8601;
 use chrono::{DateTime, Datelike, Timelike};
-use std::collections::HashMap;
-use std::fmt::Write;
+use http::{
+    header::{HeaderMap, HeaderValue},
+    uri::{PathAndQuery, Uri},
+};
+use tokio;
+use test_env_log::{self, test};
 
 #[test]
 fn check_iso8601_error_handling() {
@@ -175,21 +182,19 @@ Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea";
 
 #[test]
 fn duplicate_headers() {
-    let mut headers: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
-    headers.insert(
-        "authorization".to_string(),
-        vec![_AUTH_HEADER1.as_bytes().to_vec(), _AUTH_HEADER1.as_bytes().to_vec()],
-    );
-    headers.insert("x-amz-date".to_string(), vec!["20150830T123600Z".as_bytes().to_vec()]);
+    let mut headers = HeaderMap::<HeaderValue>::with_capacity(3);
+    headers.append("authorization", HeaderValue::from_static(_AUTH_HEADER1));
+    headers.append("authorization", HeaderValue::from_static(_AUTH_HEADER1));
+    headers.append("x-amz-date", HeaderValue::from_static("20150830T123600Z"));
 
+    let uri = Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap();
     let request = Request {
         request_method: "GET".to_string(),
-        uri_path: "/".to_string(),
-        query_string: "".to_string(),
+        uri: uri,
         headers: headers,
-        body: "".as_bytes().to_vec(),
-        region: "us-east-1".to_string(),
-        service: "service".to_string(),
+        body: None,
+        region: "us-east-1".to_string().to_string(),
+        service: "service".to_string().to_string(),
     };
 
     let sig = AWSSigV4::new();
@@ -200,7 +205,7 @@ fn duplicate_headers() {
 
 macro_rules! run_auth_test_expect_kind {
     ($auth_str:expr, $expected:ident) => {{
-        let e = run_auth_test_get_err($auth_str);
+        let e = run_auth_test_get_err($auth_str).await;
         match e {
             SignatureError::$expected {
                 ..
@@ -216,54 +221,56 @@ macro_rules! run_auth_test {
     };
 }
 
-fn run_auth_test_get_err(auth_str: &str) -> SignatureError {
-    let mut headers: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
-    headers.insert("authorization".to_string(), vec![auth_str.as_bytes().to_vec()]);
-    headers.insert("host".to_string(), vec!["example.amazonaws.com".as_bytes().to_vec()]);
-    headers.insert("x-amz-date".to_string(), vec!["20150830T123600Z".as_bytes().to_vec()]);
+async fn run_auth_test_get_err_get_signing_key(
+    kind: SigningKeyKind, access_key_id: String, _session_token: Option<String>, _req_date_opt: String,
+    _region_opt: String, _service_opt: String) -> Result<(Principal, Vec<u8>), SignatureError>
+{
+    let k_secret = "AWS4wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".as_bytes();
+    let principal = Principal::user("aws", "123456789012", "/", "test", "AIDAIAAAAAAAAAAAAAAAA").unwrap();
 
+    match kind {
+        SigningKeyKind::KSecret => Ok((principal, k_secret.to_vec())),
+        _ => Err(SignatureError::UnknownAccessKey {
+            access_key: access_key_id.to_string(),
+        }),
+    }
+}
+
+async fn run_auth_test_get_err(auth_str: &str) -> SignatureError {
+    let mut headers = HeaderMap::<HeaderValue>::with_capacity(3);
+    headers.insert("authorization", HeaderValue::from_str(auth_str).unwrap());
+    headers.insert("host", HeaderValue::from_static("example.amazonaws.com"));
+    headers.insert("x-amz-date", HeaderValue::from_static("20150830T123600Z"));
+
+    let uri = Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap();
     let request = Request {
         request_method: "GET".to_string(),
-        uri_path: "/".to_string(),
-        query_string: "".to_string(),
+        uri: uri,
         headers: headers,
-        body: "".as_bytes().to_vec(),
+        body: None,
         region: "us-east-1".to_string(),
         service: "service".to_string(),
     };
 
     let sig = AWSSigV4::new();
 
-    let get_signing_key = |kind: SigningKeyKind,
-                           access_key_id: &str,
-                           _session_token: Option<&str>,
-                           _req_date_opt: &str,
-                           _region_opt: &str,
-                           _service_opt: &str| {
-        let k_secret = "AWS4wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".as_bytes();
-        let principal = Principal::user("aws", "123456789012", "/", "test", "AIDAIAAAAAAAAAAAAAAAA").unwrap();
+    let get_signing_key = run_auth_test_get_err_get_signing_key;
 
-        match kind {
-            SigningKeyKind::KSecret => Ok((principal, k_secret.to_vec())),
-            _ => Err(SignatureError::UnknownAccessKey {
-                access_key: access_key_id.to_string(),
-            }),
-        }
-    };
-
-    sig.verify(&request, SigningKeyKind::KSecret, get_signing_key, None).unwrap_err()
+    sig.verify(&request, SigningKeyKind::KSecret, get_signing_key, None).await.unwrap_err()
 }
 
-#[test]
-fn test_missing_auth_parameters() {
+#[tokio::test]
+#[test_env_log::test]
+async fn test_missing_auth_parameters() {
     assert_eq!(
         run_auth_test!("AWS4-HMAC-SHA256 "),
         "Malformed signature: invalid Authorization header: missing parameters"
     );
 }
 
-#[test]
-fn test_missing_auth_signed_headers() {
+#[tokio::test]
+#[test_env_log::test]
+async fn test_missing_auth_signed_headers() {
     assert_eq!(
         run_auth_test!(
             "\
@@ -275,8 +282,9 @@ Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea"
     );
 }
 
-#[test]
-fn test_missing_auth_credential() {
+#[tokio::test]
+#[test_env_log::test]
+async fn test_missing_auth_credential() {
     assert_eq!(
         run_auth_test!(
             "\
@@ -288,8 +296,9 @@ Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea"
     );
 }
 
-#[test]
-fn test_duplicate_auth_credential() {
+#[tokio::test]
+#[test_env_log::test]
+async fn test_duplicate_auth_credential() {
     assert_eq!(
         run_auth_test!(
             "\
@@ -303,8 +312,9 @@ Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea"
     );
 }
 
-#[test]
-fn test_missing_auth_signature() {
+#[tokio::test]
+#[test_env_log::test]
+async fn test_missing_auth_signature() {
     assert_eq!(
         run_auth_test!(
             "\
@@ -316,8 +326,9 @@ SignedHeaders=host;x-amz-date"
     );
 }
 
-#[test]
-fn test_missing_auth_eq() {
+#[tokio::test]
+#[test_env_log::test]
+async fn test_missing_auth_eq() {
     assert_eq!(
         run_auth_test!(
             "\
@@ -330,8 +341,9 @@ Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea"
     );
 }
 
-#[test]
-fn test_noncanonical_signed_headers() {
+#[tokio::test]
+#[test_env_log::test]
+async fn test_noncanonical_signed_headers() {
     assert_eq!(
         run_auth_test!(
             "AWS4-HMAC-SHA256 \
@@ -343,28 +355,25 @@ Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea"
     );
 }
 
-#[test]
-fn test_wrong_auth_algorithm() {
+#[tokio::test]
+#[test_env_log::test]
+async fn test_wrong_auth_algorithm() {
     assert_eq!(run_auth_test_expect_kind!("AWS3-ZZZ Credential=12345", MissingHeader), "Missing header: authorization");
 }
 
-#[test]
-fn test_multiple_algorithms() {
-    let mut headers: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
-    headers.insert(
-        "authorization".to_string(),
-        vec![
-            b"Basic foobar".to_vec(),
-            b"AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678".to_vec(),
-        ],
-    );
+#[tokio::test]
+#[test_env_log::test]
+async fn test_multiple_algorithms() {
+    let mut headers = HeaderMap::<HeaderValue>::with_capacity(2);
+    headers.append("authorization", HeaderValue::from_static("Basic foobar"));
+    headers.append("authorization", HeaderValue::from_static("AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678"));
 
+    let uri = Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap();
     let request = Request {
         request_method: "GET".to_string(),
-        uri_path: "/".to_string(),
-        query_string: "".to_string(),
+        uri: uri,
         headers: headers,
-        body: "".as_bytes().to_vec(),
+        body: None,
         region: "us-east-1".to_string(),
         service: "service".to_string(),
     };
@@ -376,16 +385,16 @@ fn test_multiple_algorithms() {
     assert_eq!(params.get("Signature").unwrap(), "5678");
 }
 
-#[test]
-fn duplicate_query_parameter() {
-    let headers: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
+#[tokio::test]
+#[test_env_log::test]
+async fn duplicate_query_parameter() {
+    let headers = HeaderMap::new();
 
     let request = Request {
         request_method: "GET".to_string(),
-        uri_path: "/".to_string(),
-        query_string: "X-Amz-Signature=1234&X-Amz-Signature=1234".to_string(),
+        uri: Uri::builder().path_and_query(PathAndQuery::from_static("/?X-Amz-Signature=1234&X-Amz-Signature=1234")).build().unwrap(),
         headers: headers,
-        body: "".as_bytes().to_vec(),
+        body: None,
         region: "us-east-1".to_string(),
         service: "service".to_string(),
     };
@@ -397,42 +406,16 @@ fn duplicate_query_parameter() {
 }
 
 #[test]
-fn non_utf8_header() {
-    let mut headers: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
-    headers.insert(
-        "authorization".to_string(),
-        vec![vec![
-            b'A', b'W', b'S', b'4', b'-', b'H', b'M', b'A', b'C', b'-', b'S', b'H', b'A', b'2', b'5', b'6', b' ', 0x80,
-            0x80,
-        ]],
-    );
-
-    let request = Request {
-        request_method: "GET".to_string(),
-        uri_path: "/".to_string(),
-        query_string: "".to_string(),
-        headers: headers,
-        body: "".as_bytes().to_vec(),
-        region: "us-east-1".to_string(),
-        service: "service".to_string(),
-    };
-
-    let sig = AWSSigV4::new();
-
-    expect_err!(sig.get_authorization_header_parameters(&request), MalformedHeader);
-}
-
-#[test]
+#[test_env_log::test]
 fn missing_header() {
-    let mut headers: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
-    headers.insert("authorization".to_string(), vec![]);
+    let mut headers = HeaderMap::<HeaderValue>::with_capacity(1);
+    headers.insert("authorization", HeaderValue::from_static(""));
 
     let request = Request {
         request_method: "GET".to_string(),
-        uri_path: "/".to_string(),
-        query_string: "".to_string(),
+        uri: Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap(),
         headers: headers,
-        body: "".as_bytes().to_vec(),
+        body: None,
         region: "us-east-1".to_string(),
         service: "service".to_string(),
     };
@@ -443,17 +426,17 @@ fn missing_header() {
 }
 
 #[test]
+#[test_env_log::test]
 fn missing_date() {
-    let mut headers: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
-    headers.insert("authorization".to_string(), vec![_AUTH_HEADER1.as_bytes().to_vec()]);
-    headers.insert("host".to_string(), vec!["localhost".as_bytes().to_vec()]);
+    let mut headers = HeaderMap::<HeaderValue>::with_capacity(2);
+    headers.insert("authorization", HeaderValue::from_static(_AUTH_HEADER1));
+    headers.insert("host", HeaderValue::from_static("localhost"));
 
     let request = Request {
         request_method: "GET".to_string(),
-        uri_path: "/".to_string(),
-        query_string: "".to_string(),
+        uri: Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap(),
         headers: headers,
-        body: "".as_bytes().to_vec(),
+        body: None,
         region: "us-east-1".to_string(),
         service: "service".to_string(),
     };
@@ -465,17 +448,17 @@ fn missing_date() {
 }
 
 #[test]
+#[test_env_log::test]
 fn invalid_date() {
-    let mut headers1: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
-    headers1.insert("authorization".to_string(), vec![_AUTH_HEADER1.as_bytes().to_vec()]);
-    headers1.insert("date".to_string(), vec!["zzzzzzzzz".as_bytes().to_vec()]);
+    let mut headers = HeaderMap::<HeaderValue>::with_capacity(2);
+    headers.insert("authorization", HeaderValue::from_static(_AUTH_HEADER1));
+    headers.insert("date", HeaderValue::from_static("zzzzzzzzz"));
 
     let request = Request {
         request_method: "GET".to_string(),
-        uri_path: "/".to_string(),
-        query_string: "".to_string(),
-        headers: headers1,
-        body: "".as_bytes().to_vec(),
+        uri: Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap(),
+        headers: headers,
+        body: None,
         region: "us-east-1".to_string(),
         service: "service".to_string(),
     };
@@ -484,16 +467,14 @@ fn invalid_date() {
     let e = expect_err!(sig.get_request_timestamp(&request), MalformedHeader);
     assert_eq!(format!("{}", e), "Malformed header: Date is not a valid timestamp");
 
-    let mut headers2: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
-    headers2.insert("authorization".to_string(), vec![_AUTH_HEADER1.as_bytes().to_vec()]);
-    headers2.insert("date".to_string(), vec![]);
+    let mut headers = HeaderMap::<HeaderValue>::with_capacity(2);
+    headers.insert("authorization", HeaderValue::from_static(_AUTH_HEADER1));
 
     let request = Request {
         request_method: "GET".to_string(),
-        uri_path: "/".to_string(),
-        query_string: "".to_string(),
-        headers: headers2,
-        body: "".as_bytes().to_vec(),
+        uri: Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap(),
+        headers: headers,
+        body: None,
         region: "us-east-1".to_string(),
         service: "service".to_string(),
     };
@@ -501,13 +482,12 @@ fn invalid_date() {
     let sig = AWSSigV4::new();
     expect_err!(sig.get_request_timestamp(&request), MissingHeader);
 
-    let headers3: HashMap<String, Vec<Vec<u8>>> = HashMap::new();
+    let headers = HeaderMap::new();
     let request = Request {
         request_method: "GET".to_string(),
-        uri_path: "/".to_string(),
-        query_string: "X-Amz-Date=zzzz".to_string(),
-        headers: headers3,
-        body: "".as_bytes().to_vec(),
+        uri: Uri::builder().path_and_query(PathAndQuery::from_static("/?X-Amz-Date=zzzz")).build().unwrap(),
+        headers: headers,
+        body: None,
         region: "us-east-1".to_string(),
         service: "service".to_string(),
     };
