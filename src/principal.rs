@@ -121,6 +121,20 @@ impl Principal {
             principal_type: PrincipalType::User(IAMUserDetails::new(account_id, path, name, user_id)?),
         })
     }
+
+    pub fn service<S1, S2>(
+        partition: S1,
+        service_name: S2,
+    ) -> Result<Self, PrincipalError>
+    where
+        S1: Into<String>,
+        S2: Into<String>,
+    {
+        Ok(Self {
+            partition: validate_partition(partition)?,
+            principal_type: PrincipalType::Service(service_name.into()),
+        })
+    }
 }
 
 impl Display for Principal {
