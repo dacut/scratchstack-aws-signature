@@ -335,7 +335,7 @@ pub struct Request {
 
 impl Request {
     /// Create a Request from an HTTP request.
-    pub fn from_http_request_parts<S1, S2>(parts: Parts, body: Option<Vec<u8>>, region: S1, service: S2) -> Self
+    pub fn from_http_request_parts<S1, S2>(parts: &Parts, body: Option<Vec<u8>>, region: S1, service: S2) -> Self
     where
         S1: Into<String>,
         S2: Into<String>,
@@ -343,7 +343,7 @@ impl Request {
         Self {
             request_method: parts.method.as_str().to_string(),
             uri: parts.uri.clone(),
-            headers: parts.headers,
+            headers: parts.headers.clone(),
             body: body,
             region: region.into(),
             service: service.into(),
@@ -857,41 +857,44 @@ pub trait AWSSigV4Algorithm {
     }
 
     /// The principal and expected signature for the request.
-    async fn get_expected_signature<F>(
+    async fn get_expected_signature<F, R>(
         &self,
         req: &Request,
         signing_key_kind: SigningKeyKind,
-        signing_key_fn: SigningKeyFn<F>,
+        signing_key_fn: F,
     ) -> Result<(Principal, String), SignatureError>
     where
-        F: Future<Output=Result<(Principal, Vec<u8>), SignatureError>> + Send;
+        F: FnOnce(SigningKeyKind, String, Option<String>, String, String, String) -> R + Send,
+        R: Future<Output=Result<(Principal, Vec<u8>), SignatureError>> + Send;
 
     /// Verify that the request timestamp is not beyond the allowed timestamp mismatch and that the request signature
     /// matches our expected signature.
     ///
     /// This version allows you to specify the server timestamp for testing. For normal use, use `verify()`.
-    async fn verify_at<F>(
+    async fn verify_at<F, R>(
         &self,
         req: &Request,
         signing_key_kind: SigningKeyKind,
-        signing_key_fn: SigningKeyFn<F>,
+        signing_key_fn: F,
         server_timestamp: &DateTime<Utc>,
         allowed_mismatch: Option<Duration>,
     ) -> Result<Principal, SignatureError>
     where
-        F: Future<Output=Result<(Principal, Vec<u8>), SignatureError>> + Send;
+        F: FnOnce(SigningKeyKind, String, Option<String>, String, String, String) -> R + Send,
+        R: Future<Output=Result<(Principal, Vec<u8>), SignatureError>> + Send;
 
     /// Verify that the request timestamp is not beyond the allowed timestamp mismatch and that the request signature
     /// matches our expected signature.
-    async fn verify<F>(
+    async fn verify<F, R>(
         &self,
         req: &Request,
         signing_key_kind: SigningKeyKind,
-        signing_key_fn: SigningKeyFn<F>,
+        signing_key_fn: F,
         allowed_mismatch: Option<Duration>,
     ) -> Result<Principal, SignatureError>
     where
-        F: Future<Output=Result<(Principal, Vec<u8>), SignatureError>> + Send;
+        F: FnOnce(SigningKeyKind, String, Option<String>, String, String, String) -> R + Send,
+        R: Future<Output=Result<(Principal, Vec<u8>), SignatureError>> + Send;
 }
 
 /// The implementation of the standard AWS SigV4 algorithm.
@@ -906,14 +909,15 @@ impl AWSSigV4 {
 
 #[async_trait]
 impl AWSSigV4Algorithm for AWSSigV4 {
-    async fn get_expected_signature<F>(
+    async fn get_expected_signature<F, R>(
         &self,
         req: &Request,
         signing_key_kind: SigningKeyKind,
-        signing_key_fn: SigningKeyFn<F>,
+        signing_key_fn: F,
     ) -> Result<(Principal, String), SignatureError>
     where
-        F: Future<Output=Result<(Principal, Vec<u8>), SignatureError>> + Send
+        F: FnOnce(SigningKeyKind, String, Option<String>, String, String, String) -> R + Send,
+        R: Future<Output=Result<(Principal, Vec<u8>), SignatureError>> + Send,
     {
         let access_key = self.get_access_key(req)?;
         let session_token_result = self.get_session_token(req);
@@ -950,16 +954,17 @@ impl AWSSigV4Algorithm for AWSSigV4 {
     }
     
     
-    async fn verify_at<F>(
+    async fn verify_at<F, R>(
         &self,
         req: &Request,
         signing_key_kind: SigningKeyKind,
-        signing_key_fn: SigningKeyFn<F>,
+        signing_key_fn: F,
         server_timestamp: &DateTime<Utc>,
         allowed_mismatch: Option<Duration>,
     ) -> Result<Principal, SignatureError>
     where
-        F: Future<Output=Result<(Principal, Vec<u8>), SignatureError>> + Send
+        F: FnOnce(SigningKeyKind, String, Option<String>, String, String, String) -> R + Send,
+        R: Future<Output=Result<(Principal, Vec<u8>), SignatureError>> + Send
     {
         if let Some(mm) = allowed_mismatch {
             let req_ts = self.get_request_timestamp(req)?;
@@ -989,15 +994,16 @@ impl AWSSigV4Algorithm for AWSSigV4 {
 
     /// Verify that the request timestamp is not beyond the allowed timestamp mismatch and that the request signature
     /// matches our expected signature.
-    async fn verify<F>(
+    async fn verify<F, R>(
         &self,
         req: &Request,
         signing_key_kind: SigningKeyKind,
-        signing_key_fn: SigningKeyFn<F>,
+        signing_key_fn: F,
         allowed_mismatch: Option<Duration>,
     ) -> Result<Principal, SignatureError> 
     where
-        F: Future<Output=Result<(Principal, Vec<u8>), SignatureError>> + Send
+        F: FnOnce(SigningKeyKind, String, Option<String>, String, String, String) -> R + Send,
+        R: Future<Output=Result<(Principal, Vec<u8>), SignatureError>> + Send
     {
         self.verify_at(req, signing_key_kind, signing_key_fn, &Utc::now(), allowed_mismatch).await
     }
