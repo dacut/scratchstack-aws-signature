@@ -122,10 +122,7 @@ impl Principal {
         })
     }
 
-    pub fn service<S1, S2>(
-        partition: S1,
-        service_name: S2,
-    ) -> Result<Self, PrincipalError>
+    pub fn service<S1, S2>(partition: S1, service_name: S2) -> Result<Self, PrincipalError>
     where
         S1: Into<String>,
         S2: Into<String>,

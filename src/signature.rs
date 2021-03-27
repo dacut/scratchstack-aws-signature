@@ -8,22 +8,22 @@
 //! algorithms.
 //!
 use std::{
+    any::type_name,
     collections::{BTreeMap, HashMap},
     convert::{From, Into},
     error::Error,
+    fmt::{Debug, Display, Formatter, Result as FmtResult},
     future::Future,
-    fmt::{Display, Formatter, Result as FmtResult},
     io::{Error as IOError, Write},
     str::from_utf8,
 };
 
-use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use hex;
 use http::{
     header::{HeaderMap, HeaderValue},
-    request::{Parts},
-    Uri
+    request::Parts,
+    Uri,
 };
 use lazy_static::lazy_static;
 use log::debug;
@@ -194,7 +194,7 @@ pub enum SignatureError {
 impl Display for SignatureError {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
-            Self::IO(ref e) => e.fmt(f),
+            Self::IO(ref e) => Display::fmt(e, f),
             Self::InvalidBodyEncoding {
                 message,
             } => write!(f, "Invalid body encoding: {}", message),
@@ -295,23 +295,78 @@ impl Display for SigningKeyKind {
     }
 }
 
-/// A user-implemented function that returns a signing key of a given type.
-///
-/// This function should have the signature:
-///
-/// ```text,ignore
-/// async fn get_signing_key(signing_key_kind: SigningKeyKind, access_key_id: String, token: Option<String>,
-///     request_date: String, region: String, service: String) -> Result<(Principal, Vec<u8>), SignatureError>
-/// ```
-///
-/// The return value on success is a tuple containing the principal owning the access key and the secret key derived into the
-/// form specified by signing_key_kind. The helper function `derive_key_from_secret_key` can be used to return this derived
-/// key.
-pub type SigningKeyFn<F> =
-    fn(SigningKeyKind, String, Option<String>, String, String, String) -> F;
+/// A trait that describes how we obtain a signing key of a given type given a request. If you need to encapsulate
+/// additional data (e.g. a database connection) to look up a key, use this to implement a struct.
+pub trait GetSigningKey {
+    type Future: Future<Output = Result<(Principal, Vec<u8>), SignatureError>>;
 
-/// A data structure containing the elements of the request (some client-supplied, some service-supplied) involved in the SigV4
-/// verification process.
+    /// Get the signing key for the given request.
+    fn call(
+        &mut self,
+        kind: SigningKeyKind,
+        access_key: String,
+        session_token: Option<String>,
+        request_date: String,
+        region: String,
+        service: String,
+    ) -> Self::Future;
+}
+
+pub struct GetSigningKeyFn<F, Fut>
+where
+    F: FnMut(SigningKeyKind, String, Option<String>, String, String, String) -> Fut,
+    Fut: Future<Output = Result<(Principal, Vec<u8>), SignatureError>>,
+{
+    f: F,
+}
+
+/// Wrap an async function taking a signing request and returns a result into a `GetSigningKey` trait implementation.
+///
+/// The function signature should look like:
+/// `async fn ..(kind: SigningKeyKind, access_key: String, session_token: Option<String>, request_date: String,
+/// region: String, service: String) -> Result<(Principal, Vec<u8>), SignatureError>`
+pub fn get_signing_key_fn<F, Fut>(f: F) -> GetSigningKeyFn<F, Fut>
+where
+    F: FnMut(SigningKeyKind, String, Option<String>, String, String, String) -> Fut,
+    Fut: Future<Output = Result<(Principal, Vec<u8>), SignatureError>>,
+{
+    GetSigningKeyFn {
+        f,
+    }
+}
+
+impl<F, Fut> Debug for GetSigningKeyFn<F, Fut>
+where
+    F: FnMut(SigningKeyKind, String, Option<String>, String, String, String) -> Fut,
+    Fut: Future<Output = Result<(Principal, Vec<u8>), SignatureError>>,
+{
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        f.debug_struct("GetSigningKeyFn").field("f", &format_args!("{}", type_name::<F>())).finish()
+    }
+}
+
+impl<F, Fut> GetSigningKey for GetSigningKeyFn<F, Fut>
+where
+    F: FnMut(SigningKeyKind, String, Option<String>, String, String, String) -> Fut,
+    Fut: Future<Output = Result<(Principal, Vec<u8>), SignatureError>>,
+{
+    type Future = Fut;
+
+    fn call(
+        &mut self,
+        kind: SigningKeyKind,
+        access_key: String,
+        session_token: Option<String>,
+        request_date: String,
+        region: String,
+        service: String,
+    ) -> Self::Future {
+        (self.f)(kind, access_key, session_token, request_date, region, service)
+    }
+}
+
+/// A data structure containing the elements of the request (some client-supplied, some service-supplied) involved in
+/// the SigV4 verification process.
 #[derive(Debug)]
 pub struct Request {
     /// The request method (GET, PUT, POST) (client).
@@ -351,7 +406,7 @@ impl Request {
     }
 
     /// Retrieve a header value, requiring exactly one value be present.
-    fn get_header_one<S: Into<String>>(&self, header: S) -> Result<String, SignatureError> {
+    pub(crate) fn get_header_one<S: Into<String>>(&self, header: S) -> Result<String, SignatureError> {
         let header = header.into();
         let mut iter = self.headers.get_all(&header).iter();
         match iter.next() {
@@ -364,7 +419,7 @@ impl Request {
                     Err(_) => Err(SignatureError::MalformedHeader {
                         message: format!("{} cannot does not contain valid UTF-8", header),
                     }),
-                }
+                },
                 Some(_) => Err(SignatureError::MultipleHeaderValues {
                     header: header.to_string(),
                 }),
@@ -373,7 +428,7 @@ impl Request {
     }
 
     /// The query parameters from the request, normalized, in a mapping format.
-    fn get_query_parameters(&self) -> Result<HashMap<String, Vec<String>>, SignatureError> {
+    pub(crate) fn get_query_parameters(&self) -> Result<HashMap<String, Vec<String>>, SignatureError> {
         match self.uri.query() {
             Some(s) => normalize_query_parameters(s),
             None => Ok(HashMap::new()),
@@ -381,7 +436,7 @@ impl Request {
     }
 
     /// Retrieve a query parameter, requiring exactly one value be present.
-    fn get_query_param_one(&self, parameter: &str) -> Result<String, SignatureError> {
+    pub(crate) fn get_query_param_one(&self, parameter: &str) -> Result<String, SignatureError> {
         match self.get_query_parameters()?.get(parameter) {
             None => Err(SignatureError::MissingParameter {
                 parameter: parameter.to_string(),
@@ -399,7 +454,7 @@ impl Request {
     }
 
     /// Get the content type and character set used in the body
-    fn get_content_type_and_charset(&self) -> Result<(String, String), SignatureError> {
+    pub(crate) fn get_content_type_and_charset(&self) -> Result<(String, String), SignatureError> {
         let content_type_opts = self.get_header_one(CONTENT_TYPE)?;
 
         let mut parts = content_type_opts.split(";");
@@ -423,22 +478,18 @@ impl Request {
 
         return Ok((content_type.to_string(), "utf-8".to_string()));
     }
-}
 
-/// Trait for calculating various attributes of a SigV4 signature according to variants of the SigV4 algorithm.
-#[async_trait]
-pub trait AWSSigV4Algorithm {
     /// The canonicalized URI path for a request.
-    fn get_canonical_uri_path(&self, req: &Request) -> Result<String, SignatureError> {
-        canonicalize_uri_path(&req.uri.path())
+    pub(crate) fn get_canonical_uri_path(&self) -> Result<String, SignatureError> {
+        canonicalize_uri_path(&self.uri.path())
     }
 
     /// The canonical query string from the query parameters.
     ///
     /// This takes the query_string from the request, merges it with the body if the request has a body of type
     /// `application/x-www-form-urlencoded`, and orders the parameters.
-    fn get_canonical_query_string(&self, req: &Request) -> Result<String, SignatureError> {
-        let query_parameters = req.get_query_parameters()?;
+    pub(crate) fn get_canonical_query_string(&self) -> Result<String, SignatureError> {
+        let query_parameters = self.get_query_parameters()?;
         let mut results = Vec::new();
 
         for (key, values) in query_parameters.iter() {
@@ -450,7 +501,7 @@ pub trait AWSSigV4Algorithm {
             }
         }
 
-        if let Ok((content_type, charset)) = req.get_content_type_and_charset() {
+        if let Ok((content_type, charset)) = self.get_content_type_and_charset() {
             if content_type == APPLICATION_X_WWW_FORM_URLENCODED {
                 if charset != "utf-8" && charset != "utf8" {
                     return Err(SignatureError::InvalidBodyEncoding {
@@ -459,7 +510,7 @@ pub trait AWSSigV4Algorithm {
                 }
 
                 // Parse the body as a URL string
-                let body_utf8 = match &req.body {
+                let body_utf8 = match &self.body {
                     None => "",
                     Some(body) => match from_utf8(&body) {
                         Ok(s) => s,
@@ -469,7 +520,7 @@ pub trait AWSSigV4Algorithm {
                                     .to_string(),
                             });
                         }
-                    }
+                    },
                 };
 
                 let body_normalized = normalize_query_parameters(body_utf8)?;
@@ -487,33 +538,31 @@ pub trait AWSSigV4Algorithm {
 
     /// The parameters from the Authorization header (only -- not the query parameter). If the Authorization header is not present
     /// or is not an AWS SigV4 header, an Err(SignatureError) is returned.
-    fn get_authorization_header_parameters(&self, req: &Request) -> Result<HashMap<String, String>, SignatureError> {
-        let auth_headers = req.headers.get_all(AUTHORIZATION);
+    pub(crate) fn get_authorization_header_parameters(&self) -> Result<HashMap<String, String>, SignatureError> {
+        let auth_headers = self.headers.get_all(AUTHORIZATION);
         let mut parameters_opt: Option<&str> = None;
 
         let mut auth_iter = auth_headers.iter();
         loop {
             match auth_iter.next() {
                 None => break,
-                Some(auth_header) => {
-                    match auth_header.to_str() {
-                        Ok(auth_header) => {
-                            if let Some(captures) = AWS4_HMAC_SHA256_RE.captures(auth_header){
-                                if parameters_opt.is_some() {
-                                    return Err(SignatureError::MultipleHeaderValues {
-                                        header: AUTHORIZATION.to_string(),
-                                    });
-                                }
-
-                                parameters_opt = Some(auth_header.split_at(captures.get(0).unwrap().end()).1);
-                                debug!("parameters_opt set to {:?}; captures={:?}", parameters_opt, captures);
-                            } else {
-                                debug!("Not SigV4: {:?}", auth_header);
+                Some(auth_header) => match auth_header.to_str() {
+                    Ok(auth_header) => {
+                        if let Some(captures) = AWS4_HMAC_SHA256_RE.captures(auth_header) {
+                            if parameters_opt.is_some() {
+                                return Err(SignatureError::MultipleHeaderValues {
+                                    header: AUTHORIZATION.to_string(),
+                                });
                             }
+
+                            parameters_opt = Some(auth_header.split_at(captures.get(0).unwrap().end()).1);
+                            debug!("parameters_opt set to {:?}; captures={:?}", parameters_opt, captures);
+                        } else {
+                            debug!("Not SigV4: {:?}", auth_header);
                         }
-                        Err(_) => (),
                     }
-                }
+                    Err(_) => (),
+                },
             }
         }
 
@@ -534,9 +583,9 @@ pub trait AWSSigV4Algorithm {
     }
 
     /// Returns a sorted dictionary containing the signed header names and their values.
-    fn get_signed_headers(&self, req: &Request) -> Result<BTreeMap<String, Vec<Vec<u8>>>, SignatureError> {
+    pub(crate) fn get_signed_headers(&self) -> Result<BTreeMap<String, Vec<Vec<u8>>>, SignatureError> {
         // See if the signed headers are listed in the query string.
-        let qp_result = req.get_query_param_one(X_AMZ_SIGNEDHEADERS);
+        let qp_result = self.get_query_param_one(X_AMZ_SIGNEDHEADERS);
         let ah_result;
         let ah_signedheaders;
 
@@ -546,7 +595,7 @@ pub trait AWSSigV4Algorithm {
                 SignatureError::MissingParameter {
                     ..
                 } => {
-                    ah_result = self.get_authorization_header_parameters(req);
+                    ah_result = self.get_authorization_header_parameters();
                     match ah_result {
                         Err(e) => return Err(e),
                         Ok(ref ahp) => {
@@ -582,14 +631,16 @@ pub trait AWSSigV4Algorithm {
         let mut result = BTreeMap::<String, Vec<Vec<u8>>>::new();
         for header in canonicalized.iter() {
             let mut header_values = Vec::new();
-            let mut v_iter = req.headers.get_all(header).iter();
+            let mut v_iter = self.headers.get_all(header).iter();
 
             while let Some(ref value) = v_iter.next() {
                 match from_utf8(value.as_bytes()) {
                     Ok(value) => header_values.push(value.as_bytes().to_vec()),
-                    Err(_) => return Err(SignatureError::MalformedHeader {
-                        message: format!("Header {} contains invalid UTF-8 characters", header)
-                    })
+                    Err(_) => {
+                        return Err(SignatureError::MalformedHeader {
+                            message: format!("Header {} contains invalid UTF-8 characters", header),
+                        })
+                    }
                 }
             }
             if header_values.len() == 0 {
@@ -613,14 +664,14 @@ pub trait AWSSigV4Algorithm {
     /// * The `Date` HTTP header.
     ///
     /// The timestamp _should_ be in ISO 8601 `YYYYMMDDTHHMMSSZ` format
-    /// without milliseconds (_must_ per  [AWS documentation](https://docs.aws.amazon.com/general/latest/gr/sigv4-date-handling.html)).
+    /// without milliseconds (_must_ per [AWS documentation](https://docs.aws.amazon.com/general/latest/gr/sigv4-date-handling.html)).
     /// However, the AWS SigV4 test suite includes a variety of date formats,
     /// including RFC 2822, RFC 3339, and ISO 8601. This routine allows all
     /// of these formats.
-    fn get_request_timestamp(&self, req: &Request) -> Result<DateTime<Utc>, SignatureError> {
+    pub(crate) fn get_request_timestamp(&self) -> Result<DateTime<Utc>, SignatureError> {
         // It turns out that unrolling this logic is the most straightforward way to return sensible error messages.
 
-        match req.get_query_param_one(X_AMZ_DATE) {
+        match self.get_query_param_one(X_AMZ_DATE) {
             Ok(date_str) => parse_date_str(
                 &date_str,
                 SignatureError::MalformedParameter {
@@ -630,7 +681,7 @@ pub trait AWSSigV4Algorithm {
             Err(e) => match e {
                 SignatureError::MissingParameter {
                     ..
-                } => match req.get_header_one(X_AMZ_DATE_LOWER) {
+                } => match self.get_header_one(X_AMZ_DATE_LOWER) {
                     Ok(date_str) => parse_date_str(
                         &date_str,
                         SignatureError::MalformedHeader {
@@ -640,7 +691,7 @@ pub trait AWSSigV4Algorithm {
                     Err(e) => match e {
                         SignatureError::MissingHeader {
                             ..
-                        } => match req.get_header_one(DATE) {
+                        } => match self.get_header_one(DATE) {
                             Ok(date_str) => parse_date_str(
                                 &date_str,
                                 SignatureError::MalformedHeader {
@@ -661,17 +712,17 @@ pub trait AWSSigV4Algorithm {
     /// of the request.
     ///
     /// The result is a string in the form `YYYYMMDD/region/service/aws4_request`.
-    fn get_credential_scope(&self, req: &Request) -> Result<String, SignatureError> {
-        let ts = self.get_request_timestamp(req)?;
+    pub(crate) fn get_credential_scope(&self) -> Result<String, SignatureError> {
+        let ts = self.get_request_timestamp()?;
         let date = ts.date().format("%Y%m%d");
-        Ok(format!("{}/{}/{}/{}", date, req.region, req.service, AWS4_REQUEST))
+        Ok(format!("{}/{}/{}/{}", date, self.region, self.service, AWS4_REQUEST))
     }
 
     /// The access key used to sign the request.
     ///
     /// If the credential scope does not match our expected credential scope, a SignatureError is returned.
-    fn get_access_key(&self, req: &Request) -> Result<String, SignatureError> {
-        let qp_result = req.get_query_param_one(X_AMZ_CREDENTIAL);
+    pub(crate) fn get_access_key(&self) -> Result<String, SignatureError> {
+        let qp_result = self.get_query_param_one(X_AMZ_CREDENTIAL);
         let auth_headers;
 
         let credential = match qp_result {
@@ -680,14 +731,14 @@ pub trait AWSSigV4Algorithm {
                 SignatureError::MissingParameter {
                     ..
                 } => {
-                    auth_headers = self.get_authorization_header_parameters(req)?;
+                    auth_headers = self.get_authorization_header_parameters()?;
                     match auth_headers.get(CREDENTIAL) {
                         Some(c) => c,
                         None => {
                             debug!("auth_headers={:?}", auth_headers);
                             return Err(SignatureError::MalformedSignature {
                                 message: "invalid Authorization header: missing Credential".to_string(),
-                            })
+                            });
                         }
                     }
                 }
@@ -704,7 +755,7 @@ pub trait AWSSigV4Algorithm {
 
         let access_key = parts[0];
         let request_scope = parts[1];
-        let server_scope = self.get_credential_scope(req)?;
+        let server_scope = self.get_credential_scope()?;
         if request_scope == server_scope {
             Ok(access_key.to_string())
         } else {
@@ -718,15 +769,15 @@ pub trait AWSSigV4Algorithm {
     ///
     /// Session tokens are used only for temporary credentials. If a long-term credential was used, the result
     /// is `Ok(None)`.
-    fn get_session_token(&self, req: &Request) -> Result<Option<String>, SignatureError> {
-        let qp_result = req.get_query_param_one(X_AMZ_SECURITY_TOKEN);
+    pub(crate) fn get_session_token(&self) -> Result<Option<String>, SignatureError> {
+        let qp_result = self.get_query_param_one(X_AMZ_SECURITY_TOKEN);
 
         match qp_result {
             Ok(token) => Ok(Some(token)),
             Err(e) => match e {
                 SignatureError::MissingParameter {
                     ..
-                } => match req.get_header_one(X_AMZ_SECURITY_TOKEN_LOWER) {
+                } => match self.get_header_one(X_AMZ_SECURITY_TOKEN_LOWER) {
                     Ok(token) => Ok(Some(token)),
                     Err(e) => match e {
                         SignatureError::MissingParameter {
@@ -741,14 +792,14 @@ pub trait AWSSigV4Algorithm {
     }
 
     /// The signature passed into the request.
-    fn get_request_signature(&self, req: &Request) -> Result<String, SignatureError> {
-        match req.get_query_param_one(X_AMZ_SIGNATURE) {
+    pub(crate) fn get_request_signature(&self) -> Result<String, SignatureError> {
+        match self.get_query_param_one(X_AMZ_SIGNATURE) {
             Ok(sig) => Ok(sig),
             Err(e) => match e {
                 SignatureError::MissingParameter {
                     ..
                 } => {
-                    let ah: HashMap<String, String> = self.get_authorization_header_parameters(req)?;
+                    let ah: HashMap<String, String> = self.get_authorization_header_parameters()?;
                     match ah.get(SIGNATURE) {
                         Some(c) => Ok(c.to_string()),
                         None => Err(SignatureError::MalformedSignature {
@@ -772,14 +823,14 @@ pub trait AWSSigV4Algorithm {
     ///     signed_headers + '\n' +
     ///     sha256(body).hexdigest()
     /// ```
-    fn get_canonical_request(&self, req: &Request) -> Result<Vec<u8>, SignatureError> {
+    pub(crate) fn get_canonical_request(&self) -> Result<Vec<u8>, SignatureError> {
         let mut result = Vec::<u8>::new();
         let mut header_keys = Vec::<u8>::new();
-        let canonical_uri_path = self.get_canonical_uri_path(req)?;
-        let canonical_query_string = self.get_canonical_query_string(req)?;
-        let body_hex_digest = self.get_body_digest(req)?;
+        let canonical_uri_path = self.get_canonical_uri_path()?;
+        let canonical_query_string = self.get_canonical_query_string()?;
+        let body_hex_digest = self.get_body_digest()?;
 
-        result.write(req.request_method.as_bytes())?;
+        result.write(self.request_method.as_bytes())?;
         result.push(b'\n');
         result.write(canonical_uri_path.as_bytes())?;
         result.push(b'\n');
@@ -788,7 +839,7 @@ pub trait AWSSigV4Algorithm {
 
         let mut is_first_key = true;
 
-        for (key, values) in self.get_signed_headers(req)? {
+        for (key, values) in self.get_signed_headers()? {
             let key_bytes = key.as_bytes();
 
             result.write(key_bytes)?;
@@ -820,7 +871,7 @@ pub trait AWSSigV4Algorithm {
         result.append(&mut header_keys);
         result.push(b'\n');
 
-        match req.get_content_type_and_charset() {
+        match self.get_content_type_and_charset() {
             Ok((content_type, _)) if content_type == APPLICATION_X_WWW_FORM_URLENCODED => {
                 result.write(SHA256_EMPTY.as_bytes())?
             }
@@ -831,19 +882,19 @@ pub trait AWSSigV4Algorithm {
     }
 
     /// The SHA-256 hex digest of the body.
-    fn get_body_digest(&self, req: &Request) -> Result<String, SignatureError> {
-        match &req.body {
+    pub(crate) fn get_body_digest(&self) -> Result<String, SignatureError> {
+        match &self.body {
             None => Ok(SHA256_EMPTY.to_string()),
             Some(body) => Ok(hex::encode(digest(&SHA256, &body).as_ref())),
         }
     }
 
     /// The string to sign for the request.
-    fn get_string_to_sign(&self, req: &Request) -> Result<Vec<u8>, SignatureError> {
+    pub(crate) fn get_string_to_sign(&self) -> Result<Vec<u8>, SignatureError> {
         let mut result = Vec::new();
-        let timestamp = self.get_request_timestamp(req)?;
-        let credential_scope = self.get_credential_scope(req)?;
-        let canonical_request = self.get_canonical_request(req)?;
+        let timestamp = self.get_request_timestamp()?;
+        let credential_scope = self.get_credential_scope()?;
+        let canonical_request = self.get_canonical_request()?;
 
         result.write(AWS4_HMAC_SHA256.as_bytes())?;
         result.push(b'\n');
@@ -855,158 +906,97 @@ pub trait AWSSigV4Algorithm {
 
         Ok(result)
     }
-
-    /// The principal and expected signature for the request.
-    async fn get_expected_signature<F, R>(
-        &self,
-        req: &Request,
-        signing_key_kind: SigningKeyKind,
-        signing_key_fn: F,
-    ) -> Result<(Principal, String), SignatureError>
-    where
-        F: FnOnce(SigningKeyKind, String, Option<String>, String, String, String) -> R + Send,
-        R: Future<Output=Result<(Principal, Vec<u8>), SignatureError>> + Send;
-
-    /// Verify that the request timestamp is not beyond the allowed timestamp mismatch and that the request signature
-    /// matches our expected signature.
-    ///
-    /// This version allows you to specify the server timestamp for testing. For normal use, use `verify()`.
-    async fn verify_at<F, R>(
-        &self,
-        req: &Request,
-        signing_key_kind: SigningKeyKind,
-        signing_key_fn: F,
-        server_timestamp: &DateTime<Utc>,
-        allowed_mismatch: Option<Duration>,
-    ) -> Result<Principal, SignatureError>
-    where
-        F: FnOnce(SigningKeyKind, String, Option<String>, String, String, String) -> R + Send,
-        R: Future<Output=Result<(Principal, Vec<u8>), SignatureError>> + Send;
-
-    /// Verify that the request timestamp is not beyond the allowed timestamp mismatch and that the request signature
-    /// matches our expected signature.
-    async fn verify<F, R>(
-        &self,
-        req: &Request,
-        signing_key_kind: SigningKeyKind,
-        signing_key_fn: F,
-        allowed_mismatch: Option<Duration>,
-    ) -> Result<Principal, SignatureError>
-    where
-        F: FnOnce(SigningKeyKind, String, Option<String>, String, String, String) -> R + Send,
-        R: Future<Output=Result<(Principal, Vec<u8>), SignatureError>> + Send;
 }
 
-/// The implementation of the standard AWS SigV4 algorithm.
-#[derive(Clone, Copy, Debug)]
-pub struct AWSSigV4 {}
+/// Return the expected signature for a request.
+pub async fn sigv4_get_expected_signature<GSK: GetSigningKey>(
+    req: &Request,
+    signing_key_kind: SigningKeyKind,
+    gsk: &mut GSK,
+) -> Result<(Principal, String), SignatureError> {
+    let access_key = req.get_access_key()?;
+    let session_token_result = req.get_session_token();
+    let session_token = match session_token_result {
+        Ok(tok) => match tok {
+            Some(tok) => Some(tok.to_string()),
+            None => None,
+        },
+        Err(e) => match e {
+            SignatureError::MissingParameter {
+                ..
+            }
+            | SignatureError::MissingHeader {
+                ..
+            } => None,
+            _ => return Err(e),
+        },
+    };
 
-impl AWSSigV4 {
-    pub fn new() -> Self {
-        Self {}
-    }
-}
-
-#[async_trait]
-impl AWSSigV4Algorithm for AWSSigV4 {
-    async fn get_expected_signature<F, R>(
-        &self,
-        req: &Request,
-        signing_key_kind: SigningKeyKind,
-        signing_key_fn: F,
-    ) -> Result<(Principal, String), SignatureError>
-    where
-        F: FnOnce(SigningKeyKind, String, Option<String>, String, String, String) -> R + Send,
-        R: Future<Output=Result<(Principal, Vec<u8>), SignatureError>> + Send,
-    {
-        let access_key = self.get_access_key(req)?;
-        let session_token_result = self.get_session_token(req);
-        let session_token = match session_token_result {
-            Ok(tok) => match tok {
-                Some(tok) => Some(tok.to_string()),
-                None => None,
-            },
-            Err(e) => match e {
-                SignatureError::MissingParameter {
-                    ..
-                }
-                | SignatureError::MissingHeader {
-                    ..
-                } => None,
-                _ => return Err(e),
-            },
-        };
-    
-        let timestamp = self.get_request_timestamp(req)?;
-        let req_date = format!("{}", timestamp.date().format("%Y%m%d"));
-        let (principal, key) = signing_key_fn(
+    let timestamp = req.get_request_timestamp()?;
+    let req_date = format!("{}", timestamp.date().format("%Y%m%d"));
+    let (principal, key) = gsk
+        .call(
             signing_key_kind,
             access_key.to_string(),
             session_token,
             req_date.to_string(),
             req.region.to_string(),
             req.service.to_string(),
-        ).await?;
-        let string_to_sign = self.get_string_to_sign(req)?;
-    
-        let k_signing = get_signing_key(signing_key_kind, key, &req_date, &req.region, &req.service);
-        Ok((principal, hex::encode(hmac_sha256(k_signing.as_ref(), &string_to_sign).as_ref())))
-    }
-    
-    
-    async fn verify_at<F, R>(
-        &self,
-        req: &Request,
-        signing_key_kind: SigningKeyKind,
-        signing_key_fn: F,
-        server_timestamp: &DateTime<Utc>,
-        allowed_mismatch: Option<Duration>,
-    ) -> Result<Principal, SignatureError>
-    where
-        F: FnOnce(SigningKeyKind, String, Option<String>, String, String, String) -> R + Send,
-        R: Future<Output=Result<(Principal, Vec<u8>), SignatureError>> + Send
-    {
-        if let Some(mm) = allowed_mismatch {
-            let req_ts = self.get_request_timestamp(req)?;
-            let min_ts = server_timestamp.checked_sub_signed(mm).unwrap_or(*server_timestamp);
-            let max_ts = server_timestamp.checked_add_signed(mm).unwrap_or(*server_timestamp);
+        )
+        .await?;
+    let string_to_sign = req.get_string_to_sign()?;
 
-            if req_ts < min_ts || req_ts > max_ts {
-                return Err(SignatureError::TimestampOutOfRange {
-                    minimum: min_ts,
-                    maximum: max_ts,
-                    received: req_ts,
-                });
-            }
-        }
+    let k_signing = get_ksigning_key(signing_key_kind, key, &req_date, &req.region, &req.service);
+    Ok((principal, hex::encode(hmac_sha256(k_signing.as_ref(), &string_to_sign).as_ref())))
+}
 
-        let (principal, expected_sig) = self.get_expected_signature(&req, signing_key_kind, signing_key_fn).await?;
-        let request_sig = self.get_request_signature(&req)?;
+/// Verify a SigV4 request at a particular point-in-time. This verifies that the request timestamp is not beyond the
+/// allowed timestamp mismatch against the specified point-in-time, and that the request signature matches our expected
+/// signature.
+///
+/// This is mainly for unit testing. For general purpose use, use `sigv4_verify`.
+pub async fn sigv4_verify_at<GSK: GetSigningKey>(
+    req: &Request,
+    signing_key_kind: SigningKeyKind,
+    gsk: &mut GSK,
+    server_timestamp: &DateTime<Utc>,
+    allowed_mismatch: Option<Duration>,
+) -> Result<Principal, SignatureError> {
+    if let Some(mm) = allowed_mismatch {
+        let req_ts = req.get_request_timestamp()?;
+        let min_ts = server_timestamp.checked_sub_signed(mm).unwrap_or(*server_timestamp);
+        let max_ts = server_timestamp.checked_add_signed(mm).unwrap_or(*server_timestamp);
 
-        if expected_sig != request_sig {
-            Err(SignatureError::InvalidSignature {
-                message: format!("Expected {} instead of {}", expected_sig, request_sig),
-            })
-        } else {
-            Ok(principal)
+        if req_ts < min_ts || req_ts > max_ts {
+            return Err(SignatureError::TimestampOutOfRange {
+                minimum: min_ts,
+                maximum: max_ts,
+                received: req_ts,
+            });
         }
     }
 
-    /// Verify that the request timestamp is not beyond the allowed timestamp mismatch and that the request signature
-    /// matches our expected signature.
-    async fn verify<F, R>(
-        &self,
-        req: &Request,
-        signing_key_kind: SigningKeyKind,
-        signing_key_fn: F,
-        allowed_mismatch: Option<Duration>,
-    ) -> Result<Principal, SignatureError> 
-    where
-        F: FnOnce(SigningKeyKind, String, Option<String>, String, String, String) -> R + Send,
-        R: Future<Output=Result<(Principal, Vec<u8>), SignatureError>> + Send
-    {
-        self.verify_at(req, signing_key_kind, signing_key_fn, &Utc::now(), allowed_mismatch).await
+    let request_sig = req.get_request_signature()?;
+    let (principal, expected_sig) = sigv4_get_expected_signature(&req, signing_key_kind, gsk).await?;
+
+    if expected_sig != request_sig {
+        Err(SignatureError::InvalidSignature {
+            message: format!("Expected {} instead of {}", expected_sig, request_sig),
+        })
+    } else {
+        Ok(principal)
     }
+}
+
+/// Verify a SigV4 request. This verifies that the request timestamp is not beyond the allowed timestamp mismatch
+/// against the current time, and that the request signature matches our expected signature.
+pub async fn sigv4_verify<GSK: GetSigningKey>(
+    req: &Request,
+    signing_key_kind: SigningKeyKind,
+    gsk: &mut GSK,
+    allowed_mismatch: Option<Duration>,
+) -> Result<Principal, SignatureError> {
+    sigv4_verify_at(req, signing_key_kind, gsk, &Utc::now(), allowed_mismatch).await
 }
 
 /// Indicates whether the specified byte is RFC3986 unreserved -- i.e., can be represented without being
@@ -1226,13 +1216,13 @@ pub fn derive_key_from_secret_key(
             get_kservice_key(SigningKeyKind::KSecret, k_secret.as_slice(), req_date, region, service).to_vec()
         }
         SigningKeyKind::KSigning => {
-            get_signing_key(SigningKeyKind::KSecret, k_secret.as_slice(), req_date, region, service).to_vec()
+            get_ksigning_key(SigningKeyKind::KSecret, k_secret.as_slice(), req_date, region, service).to_vec()
         }
     }
 }
 
-/// Return the signing key given a possibly non-final signing key.
-pub fn get_signing_key<K: Into<Vec<u8>>>(
+/// Return a KSigning key given a KSigning, KService, KRegion, KDate, or KSecret key.
+pub fn get_ksigning_key<K: Into<Vec<u8>>>(
     signing_key_kind: SigningKeyKind,
     key: K,
     req_date: &str,
@@ -1248,6 +1238,9 @@ pub fn get_signing_key<K: Into<Vec<u8>>>(
     }
 }
 
+/// Return a KService key given a KService, KRegion, KDate, or KSecret key.
+///
+/// This function panics if given a KSigning key.
 pub fn get_kservice_key<K: Into<Vec<u8>>>(
     signing_key_kind: SigningKeyKind,
     key: K,
@@ -1257,13 +1250,17 @@ pub fn get_kservice_key<K: Into<Vec<u8>>>(
 ) -> Vec<u8> {
     match signing_key_kind {
         SigningKeyKind::KService => key.into(),
-        _ => {
+        SigningKeyKind::KRegion | SigningKeyKind::KDate | SigningKeyKind::KSecret => {
             let k_region = get_kregion_key(signing_key_kind, key, req_date, region);
             hmac_sha256(k_region.as_ref(), service.as_bytes()).as_ref().to_vec()
         }
+        _ => panic!("Can't derive KService key from {}", signing_key_kind),
     }
 }
 
+/// Return a KRegion key given a KRegion, KDate, or KSecret key.
+///
+/// This function panics if given a KSigning or KService key.
 pub fn get_kregion_key<K: Into<Vec<u8>>>(
     signing_key_kind: SigningKeyKind,
     key: K,
@@ -1272,19 +1269,25 @@ pub fn get_kregion_key<K: Into<Vec<u8>>>(
 ) -> Vec<u8> {
     match signing_key_kind {
         SigningKeyKind::KRegion => key.into(),
-        _ => {
+        SigningKeyKind::KDate | SigningKeyKind::KSecret => {
             let k_date = get_kdate_key(signing_key_kind, key, req_date);
             hmac_sha256(k_date.as_ref(), region.as_bytes()).as_ref().to_vec()
         }
+        _ => panic!("Can't derive KRegion key from {}", signing_key_kind),
     }
 }
 
+/// Return a KDate key given a KDate or KSecret key.
+///
+/// This function panics if given a KRegion, KSigning, or KService key.
 pub fn get_kdate_key<K: Into<Vec<u8>>>(signing_key_kind: SigningKeyKind, key: K, req_date: &str) -> Vec<u8> {
     match signing_key_kind {
         SigningKeyKind::KDate => key.into(),
 
         // key is KSecret == AWS4 + secret key.
         // KDate = HMAC(KSecret + req_date)
-        _ => hmac_sha256(key.into().as_slice(), req_date.as_bytes()).as_ref().to_vec(),
+        SigningKeyKind::KSecret => hmac_sha256(key.into().as_slice(), req_date.as_bytes()).as_ref().to_vec(),
+
+        _ => panic!("Can't derive KDate key from {}", signing_key_kind),
     }
 }

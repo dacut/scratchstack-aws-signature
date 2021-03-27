@@ -1,3 +1,9 @@
+use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc};
+use http::{
+    header::{HeaderMap, HeaderName, HeaderValue},
+    uri::{PathAndQuery, Uri},
+};
+use log::debug;
 use std::{
     env,
     fs::File,
@@ -5,15 +11,9 @@ use std::{
     path::PathBuf,
     str::from_utf8,
 };
-use http::{
-    header::{HeaderMap, HeaderName, HeaderValue},
-    uri::{PathAndQuery, Uri},
-};
-use log::debug;
 
-extern crate aws_sig_verify;
-use aws_sig_verify::{
-    derive_key_from_secret_key, AWSSigV4, AWSSigV4Algorithm, Principal, Request, SignatureError, SigningKeyKind,
+use crate::{
+    derive_key_from_secret_key, get_signing_key_fn, sigv4_verify_at, Principal, Request, SignatureError, SigningKeyKind,
 };
 use test_env_log;
 
@@ -216,7 +216,7 @@ async fn run(basename: &str) {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let mut req_path = PathBuf::new();
     req_path.push(manifest_dir);
-    req_path.push("tests");
+    req_path.push("src");
     req_path.push("aws-sig-v4-test-suite");
     req_path.push(basename);
 
@@ -245,29 +245,39 @@ async fn run(basename: &str) {
     sts.read_to_end(&mut expected_string_to_sign).unwrap();
     expected_string_to_sign.retain(|c| *c != b'\r');
 
-    let sig = AWSSigV4::new();
-
     let canonical_request =
-        sig.get_canonical_request(&request).expect(&format!("Failed to get canonical request: {:?}", sreq_path));
-    let string_to_sign =
-        sig.get_string_to_sign(&request).expect(&format!("Failed to get string to sign: {:?}", sreq_path));
+        request.get_canonical_request().expect(&format!("Failed to get canonical request: {:?}", sreq_path));
+    let string_to_sign = request.get_string_to_sign().expect(&format!("Failed to get string to sign: {:?}", sreq_path));
+
+    let mut signing_key_fn = get_signing_key_fn(get_signing_key);
 
     assert_eq!(from_utf8(&canonical_request), from_utf8(&expected_canonical_request), "Failed on {:?}", sreq_path);
     assert_eq!(from_utf8(&string_to_sign), from_utf8(&expected_string_to_sign), "Failed on {:?}", sreq_path);
 
-    sig.verify(&request, SigningKeyKind::KSecret, get_signing_key, None).await
+    let test_time = DateTime::<Utc>::from_utc(
+        NaiveDateTime::new(NaiveDate::from_ymd(2015, 8, 30), NaiveTime::from_hms(12, 36, 0)),
+        Utc,
+    );
+    let mismatch = Some(Duration::seconds(300));
+
+    sigv4_verify_at(&request, SigningKeyKind::KSecret, &mut signing_key_fn, &test_time, mismatch)
+        .await
         .expect(&format!("Signature verification failed: {:?}", sreq_path));
 
-    sig.verify(&request, SigningKeyKind::KDate, get_signing_key, None).await
+    sigv4_verify_at(&request, SigningKeyKind::KDate, &mut signing_key_fn, &test_time, mismatch)
+        .await
         .expect(&format!("Signature verification failed: {:?}", sreq_path));
 
-    sig.verify(&request, SigningKeyKind::KRegion, get_signing_key, None).await
+    sigv4_verify_at(&request, SigningKeyKind::KRegion, &mut signing_key_fn, &test_time, mismatch)
+        .await
         .expect(&format!("Signature verification failed: {:?}", sreq_path));
 
-    sig.verify(&request, SigningKeyKind::KService, get_signing_key, None).await
+    sigv4_verify_at(&request, SigningKeyKind::KService, &mut signing_key_fn, &test_time, mismatch)
+        .await
         .expect(&format!("Signature verification failed: {:?}", sreq_path));
 
-    sig.verify(&request, SigningKeyKind::KSigning, get_signing_key, None).await
+    sigv4_verify_at(&request, SigningKeyKind::KSigning, &mut signing_key_fn, &test_time, mismatch)
+        .await
         .expect(&format!("Signature verification failed: {:?}", sreq_path));
 }
 
@@ -313,7 +323,7 @@ fn parse_file(f: File, filename: &PathBuf) -> Request {
     let path_query_str = muq_parts[1].to_string();
     let pq = match PathAndQuery::from_maybe_shared(path_query_str.clone()) {
         Ok(pq) => pq,
-        Err(e) => panic!("Invalid path/query str: {:#?}: {:?}", path_query_str, e)
+        Err(e) => panic!("Invalid path/query str: {:#?}: {:?}", path_query_str, e),
     };
     let uri = Uri::builder().path_and_query(pq).build().unwrap();
 
@@ -329,7 +339,7 @@ fn parse_file(f: File, filename: &PathBuf) -> Request {
 
         let line = line_full.trim_end();
         if line.len() == 0 {
-            break
+            break;
         }
 
         if line.starts_with(" ") || line.starts_with("\t") {
@@ -369,7 +379,8 @@ fn parse_file(f: File, filename: &PathBuf) -> Request {
 
     if let Some((key, value)) = current {
         debug!("Pushing unfinished header: {:#?}: {:#?}", key, from_utf8(&value).unwrap());
-        headers.append(HeaderName::from_bytes(key.as_str().as_bytes()).unwrap(), HeaderValue::from_bytes(&value).unwrap());
+        headers
+            .append(HeaderName::from_bytes(key.as_str().as_bytes()).unwrap(), HeaderValue::from_bytes(&value).unwrap());
     }
 
     let mut body: Vec<u8> = Vec::new();

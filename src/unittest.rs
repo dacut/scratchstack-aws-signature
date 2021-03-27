@@ -1,11 +1,9 @@
-use std::{
-    fmt::Write,
-};
 use super::principal::Principal;
 use super::signature::{
-    canonicalize_uri_path, normalize_query_parameters, normalize_uri_path_component, AWSSigV4, AWSSigV4Algorithm,
+    canonicalize_uri_path, get_signing_key_fn, normalize_query_parameters, normalize_uri_path_component, sigv4_verify,
     Request, SignatureError, SigningKeyKind,
 };
+use std::fmt::Write;
 
 use super::chronoutil::ParseISO8601;
 use chrono::{DateTime, Datelike, Timelike};
@@ -13,8 +11,8 @@ use http::{
     header::{HeaderMap, HeaderValue},
     uri::{PathAndQuery, Uri},
 };
-use tokio;
 use test_env_log::{self, test};
+use tokio;
 
 #[test]
 fn check_iso8601_error_handling() {
@@ -197,9 +195,7 @@ fn duplicate_headers() {
         service: "service".to_string().to_string(),
     };
 
-    let sig = AWSSigV4::new();
-
-    let e = expect_err!(sig.get_authorization_header_parameters(&request), MultipleHeaderValues);
+    let e = expect_err!(request.get_authorization_header_parameters(), MultipleHeaderValues);
     assert_eq!(format!("{}", e), "Multiple values for header: authorization");
 }
 
@@ -222,9 +218,13 @@ macro_rules! run_auth_test {
 }
 
 async fn run_auth_test_get_err_get_signing_key(
-    kind: SigningKeyKind, access_key_id: String, _session_token: Option<String>, _req_date_opt: String,
-    _region_opt: String, _service_opt: String) -> Result<(Principal, Vec<u8>), SignatureError>
-{
+    kind: SigningKeyKind,
+    access_key_id: String,
+    _session_token: Option<String>,
+    _req_date_opt: String,
+    _region_opt: String,
+    _service_opt: String,
+) -> Result<(Principal, Vec<u8>), SignatureError> {
     let k_secret = "AWS4wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".as_bytes();
     let principal = Principal::user("aws", "123456789012", "/", "test", "AIDAIAAAAAAAAAAAAAAAA").unwrap();
 
@@ -252,11 +252,9 @@ async fn run_auth_test_get_err(auth_str: &str) -> SignatureError {
         service: "service".to_string(),
     };
 
-    let sig = AWSSigV4::new();
+    let mut get_signing_key = get_signing_key_fn(run_auth_test_get_err_get_signing_key);
 
-    let get_signing_key = run_auth_test_get_err_get_signing_key;
-
-    sig.verify(&request, SigningKeyKind::KSecret, get_signing_key, None).await.unwrap_err()
+    sigv4_verify(&request, SigningKeyKind::KSecret, &mut get_signing_key, None).await.unwrap_err()
 }
 
 #[tokio::test]
@@ -366,7 +364,10 @@ async fn test_wrong_auth_algorithm() {
 async fn test_multiple_algorithms() {
     let mut headers = HeaderMap::<HeaderValue>::with_capacity(2);
     headers.append("authorization", HeaderValue::from_static("Basic foobar"));
-    headers.append("authorization", HeaderValue::from_static("AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678"));
+    headers.append(
+        "authorization",
+        HeaderValue::from_static("AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678"),
+    );
 
     let uri = Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap();
     let request = Request {
@@ -378,8 +379,7 @@ async fn test_multiple_algorithms() {
         service: "service".to_string(),
     };
 
-    let sig = AWSSigV4::new();
-    let params = sig.get_authorization_header_parameters(&request).unwrap();
+    let params = request.get_authorization_header_parameters().unwrap();
     assert_eq!(params.get("Credential").unwrap(), "1234");
     assert_eq!(params.get("SignedHeaders").unwrap(), "date;host");
     assert_eq!(params.get("Signature").unwrap(), "5678");
@@ -392,16 +392,17 @@ async fn duplicate_query_parameter() {
 
     let request = Request {
         request_method: "GET".to_string(),
-        uri: Uri::builder().path_and_query(PathAndQuery::from_static("/?X-Amz-Signature=1234&X-Amz-Signature=1234")).build().unwrap(),
+        uri: Uri::builder()
+            .path_and_query(PathAndQuery::from_static("/?X-Amz-Signature=1234&X-Amz-Signature=1234"))
+            .build()
+            .unwrap(),
         headers: headers,
         body: None,
         region: "us-east-1".to_string(),
         service: "service".to_string(),
     };
 
-    let sig = AWSSigV4::new();
-
-    let e = expect_err!(sig.get_request_signature(&request), MultipleParameterValues);
+    let e = expect_err!(request.get_request_signature(), MultipleParameterValues);
     assert_eq!(format!("{}", e), "Multiple values for query parameter: X-Amz-Signature");
 }
 
@@ -420,9 +421,7 @@ fn missing_header() {
         service: "service".to_string(),
     };
 
-    let sig = AWSSigV4::new();
-
-    expect_err!(sig.get_authorization_header_parameters(&request), MissingHeader);
+    expect_err!(request.get_authorization_header_parameters(), MissingHeader);
 }
 
 #[test]
@@ -441,9 +440,7 @@ fn missing_date() {
         service: "service".to_string(),
     };
 
-    let sig = AWSSigV4::new();
-
-    let e = expect_err!(sig.get_signed_headers(&request), MissingHeader);
+    let e = expect_err!(request.get_signed_headers(), MissingHeader);
     assert_eq!(format!("{}", e), "Missing header: x-amz-date");
 }
 
@@ -463,8 +460,7 @@ fn invalid_date() {
         service: "service".to_string(),
     };
 
-    let sig = AWSSigV4::new();
-    let e = expect_err!(sig.get_request_timestamp(&request), MalformedHeader);
+    let e = expect_err!(request.get_request_timestamp(), MalformedHeader);
     assert_eq!(format!("{}", e), "Malformed header: Date is not a valid timestamp");
 
     let mut headers = HeaderMap::<HeaderValue>::with_capacity(2);
@@ -479,8 +475,7 @@ fn invalid_date() {
         service: "service".to_string(),
     };
 
-    let sig = AWSSigV4::new();
-    expect_err!(sig.get_request_timestamp(&request), MissingHeader);
+    expect_err!(request.get_request_timestamp(), MissingHeader);
 
     let headers = HeaderMap::new();
     let request = Request {
@@ -492,7 +487,6 @@ fn invalid_date() {
         service: "service".to_string(),
     };
 
-    let sig = AWSSigV4::new();
-    let e = expect_err!(sig.get_request_timestamp(&request), MalformedParameter);
+    let e = expect_err!(request.get_request_timestamp(), MalformedParameter);
     assert_eq!(format!("{}", e), "Malformed query parameter: X-Amz-Date is not a valid timestamp");
 }
