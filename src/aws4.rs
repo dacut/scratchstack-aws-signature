@@ -1,4 +1,4 @@
-use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc};
+use chrono::{Date, DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use http::{
     header::{HeaderMap, HeaderName, HeaderValue},
     uri::{PathAndQuery, Uri},
@@ -11,11 +11,13 @@ use std::{
     path::PathBuf,
     str::from_utf8,
 };
+use tower::Service;
 
-use crate::{
-    derive_key_from_secret_key, get_signing_key_fn, sigv4_verify_at, Principal, Request, SignatureError, SigningKeyKind,
-};
+use crate::{get_signing_key_fn, sigv4_verify_at, Principal, Request, SignatureError, SigningKey, SigningKeyKind};
 use test_env_log;
+
+const TEST_REGION: &str = "us-east-1";
+const TEST_SERVICE: &str = "service";
 
 #[tokio::test]
 #[test_env_log::test]
@@ -220,39 +222,48 @@ async fn run(basename: &str) {
     req_path.push("aws-sig-v4-test-suite");
     req_path.push(basename);
 
+    // The signed request calculated by AWS for verification.
     let mut sreq_path = PathBuf::new();
     sreq_path.push(&req_path);
     sreq_path.set_extension("sreq");
 
+    // Read the signed request file and generate our request format from it.
+    let sreq = File::open(&sreq_path).expect(&format!("Failed to open {:?}", sreq_path));
+    let request = parse_file(sreq, &sreq_path);
+
+    // The canonical request calculated by AWS for verification.
     let mut creq_path = PathBuf::new();
     creq_path.push(&req_path);
     creq_path.set_extension("creq");
 
+    let mut creq = File::open(&creq_path).expect(&format!("Failed to open {:?}", creq_path));
+    let mut expected_canonical_request = Vec::new();
+    creq.read_to_end(&mut expected_canonical_request).unwrap();
+    expected_canonical_request.retain(|c| *c != b'\r'); // Remove carriage returns (not newlines)
+
+    // The string-to-sign calculated by AWS for verification.
     let mut sts_path = PathBuf::new();
     sts_path.push(&req_path);
     sts_path.set_extension("sts");
 
-    let sreq = File::open(&sreq_path).expect(&format!("Failed to open {:?}", sreq_path));
-    let request = parse_file(sreq, &sreq_path);
-
-    let mut creq = File::open(&creq_path).expect(&format!("Failed to open {:?}", creq_path));
-    let mut expected_canonical_request = Vec::new();
-    creq.read_to_end(&mut expected_canonical_request).unwrap();
-    expected_canonical_request.retain(|c| *c != b'\r');
-
     let mut sts = File::open(&sts_path).expect(&format!("Failed to open {:?}", sts_path));
     let mut expected_string_to_sign = Vec::new();
     sts.read_to_end(&mut expected_string_to_sign).unwrap();
-    expected_string_to_sign.retain(|c| *c != b'\r');
+    expected_string_to_sign.retain(|c| *c != b'\r'); // Remove carriage returns (not newlines)
 
+    // Compare the canonical request we calculate vs that from AWS.
     let canonical_request =
         request.get_canonical_request().expect(&format!("Failed to get canonical request: {:?}", sreq_path));
-    let string_to_sign = request.get_string_to_sign().expect(&format!("Failed to get string to sign: {:?}", sreq_path));
-
-    let mut signing_key_fn = get_signing_key_fn(get_signing_key);
-
     assert_eq!(from_utf8(&canonical_request), from_utf8(&expected_canonical_request), "Failed on {:?}", sreq_path);
+
+    // Compare the string-to-sign we calculate vs that from AWS.
+    let string_to_sign = request
+        .get_string_to_sign(TEST_REGION, TEST_SERVICE)
+        .expect(&format!("Failed to get string to sign: {:?}", sreq_path));
     assert_eq!(from_utf8(&string_to_sign), from_utf8(&expected_string_to_sign), "Failed on {:?}", sreq_path);
+
+    // Create a service for getting the signing key.
+    let mut signing_key_svc = get_signing_key_fn(get_signing_key);
 
     let test_time = DateTime::<Utc>::from_utc(
         NaiveDateTime::new(NaiveDate::from_ymd(2015, 8, 30), NaiveTime::from_hms(12, 36, 0)),
@@ -260,24 +271,28 @@ async fn run(basename: &str) {
     );
     let mismatch = Some(Duration::seconds(300));
 
-    sigv4_verify_at(&request, SigningKeyKind::KSecret, &mut signing_key_fn, &test_time, mismatch)
-        .await
+    // Create a GetSigningKeyRequest from our existing request.
+    let req_date = request.get_request_date().unwrap();
+    let gsk_req = request.to_get_signing_key_request(SigningKeyKind::KSecret, TEST_REGION, TEST_SERVICE).unwrap();
+    let (_principal, k_secret) = signing_key_svc.call(gsk_req).await.unwrap();
+
+    sigv4_verify_at(&request, &k_secret, &test_time, mismatch, TEST_REGION, TEST_SERVICE)
         .expect(&format!("Signature verification failed: {:?}", sreq_path));
 
-    sigv4_verify_at(&request, SigningKeyKind::KDate, &mut signing_key_fn, &test_time, mismatch)
-        .await
+    let k_date = k_secret.to_kdate_key(&req_date);
+    sigv4_verify_at(&request, &k_date, &test_time, mismatch, TEST_REGION, TEST_SERVICE)
         .expect(&format!("Signature verification failed: {:?}", sreq_path));
 
-    sigv4_verify_at(&request, SigningKeyKind::KRegion, &mut signing_key_fn, &test_time, mismatch)
-        .await
+    let k_region = k_date.to_kregion_key(&req_date, TEST_REGION);
+    sigv4_verify_at(&request, &k_region, &test_time, mismatch, TEST_REGION, TEST_SERVICE)
         .expect(&format!("Signature verification failed: {:?}", sreq_path));
 
-    sigv4_verify_at(&request, SigningKeyKind::KService, &mut signing_key_fn, &test_time, mismatch)
-        .await
+    let k_service = k_region.to_kservice_key(&req_date, TEST_REGION, TEST_SERVICE);
+    sigv4_verify_at(&request, &k_service, &test_time, mismatch, TEST_REGION, TEST_SERVICE)
         .expect(&format!("Signature verification failed: {:?}", sreq_path));
 
-    sigv4_verify_at(&request, SigningKeyKind::KSigning, &mut signing_key_fn, &test_time, mismatch)
-        .await
+    let k_signing = k_service.to_ksigning_key(&req_date, TEST_REGION, TEST_SERVICE);
+    sigv4_verify_at(&request, &k_signing, &test_time, mismatch, TEST_REGION, TEST_SERVICE)
         .expect(&format!("Signature verification failed: {:?}", sreq_path));
 }
 
@@ -285,15 +300,17 @@ async fn get_signing_key(
     kind: SigningKeyKind,
     _access_key_id: String,
     _session_token: Option<String>,
-    req_date: String,
+    req_date: Date<Utc>,
     region: String,
     service: String,
-) -> Result<(Principal, Vec<u8>), SignatureError> {
-    let secret_key = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".as_bytes();
-    let principal = Principal::user("aws", "123456789012", "/", "test", "AIDAIAAAAAAAAAAAAAAAA").unwrap();
+) -> Result<(Principal, SigningKey), SignatureError> {
+    let k_secret = SigningKey {
+        kind: SigningKeyKind::KSecret,
+        key: b"AWS4wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_vec(),
+    };
 
-    let signing_key = derive_key_from_secret_key(secret_key, kind, &req_date, &region, &service);
-    Ok((principal, signing_key))
+    let principal = Principal::user("aws", "123456789012", "/", "test", "AIDAIAAAAAAAAAAAAAAAA").unwrap();
+    Ok((principal, k_secret.derive(kind, &req_date, region, service)))
 }
 
 fn parse_file(f: File, filename: &PathBuf) -> Request {
@@ -391,7 +408,5 @@ fn parse_file(f: File, filename: &PathBuf) -> Request {
         uri: uri,
         headers: headers,
         body: Some(body),
-        region: "us-east-1".to_string(),
-        service: "service".to_string(),
     }
 }

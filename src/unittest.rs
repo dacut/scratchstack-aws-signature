@@ -1,18 +1,21 @@
 use super::principal::Principal;
 use super::signature::{
-    canonicalize_uri_path, get_signing_key_fn, normalize_query_parameters, normalize_uri_path_component, sigv4_verify,
-    Request, SignatureError, SigningKeyKind,
+    canonicalize_uri_path, normalize_query_parameters, normalize_uri_path_component, sigv4_verify, Request,
+    SignatureError, SigningKey, SigningKeyKind,
 };
 use std::fmt::Write;
 
 use super::chronoutil::ParseISO8601;
-use chrono::{DateTime, Datelike, Timelike};
+use chrono::{Date, DateTime, Datelike, NaiveDate, Timelike, Utc};
 use http::{
     header::{HeaderMap, HeaderValue},
     uri::{PathAndQuery, Uri},
 };
 use test_env_log::{self, test};
 use tokio;
+
+const TEST_REGION: &str = "us-east-1";
+const TEST_SERVICE: &str = "service";
 
 #[test]
 fn check_iso8601_error_handling() {
@@ -191,8 +194,6 @@ fn duplicate_headers() {
         uri: uri,
         headers: headers,
         body: None,
-        region: "us-east-1".to_string().to_string(),
-        service: "service".to_string().to_string(),
     };
 
     let e = expect_err!(request.get_authorization_header_parameters(), MultipleHeaderValues);
@@ -219,21 +220,19 @@ macro_rules! run_auth_test {
 
 async fn run_auth_test_get_err_get_signing_key(
     kind: SigningKeyKind,
-    access_key_id: String,
+    _access_key_id: String,
     _session_token: Option<String>,
-    _req_date_opt: String,
-    _region_opt: String,
-    _service_opt: String,
-) -> Result<(Principal, Vec<u8>), SignatureError> {
-    let k_secret = "AWS4wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".as_bytes();
-    let principal = Principal::user("aws", "123456789012", "/", "test", "AIDAIAAAAAAAAAAAAAAAA").unwrap();
+    req_date: Date<Utc>,
+    region: String,
+    service: String,
+) -> Result<(Principal, SigningKey), SignatureError> {
+    let k_secret = SigningKey {
+        kind: SigningKeyKind::KSecret,
+        key: b"AWS4wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_vec(),
+    };
 
-    match kind {
-        SigningKeyKind::KSecret => Ok((principal, k_secret.to_vec())),
-        _ => Err(SignatureError::UnknownAccessKey {
-            access_key: access_key_id.to_string(),
-        }),
-    }
+    let principal = Principal::user("aws", "123456789012", "/", "test", "AIDAIAAAAAAAAAAAAAAAA").unwrap();
+    Ok((principal, k_secret.derive(kind, &req_date, region, service)))
 }
 
 async fn run_auth_test_get_err(auth_str: &str) -> SignatureError {
@@ -248,13 +247,21 @@ async fn run_auth_test_get_err(auth_str: &str) -> SignatureError {
         uri: uri,
         headers: headers,
         body: None,
-        region: "us-east-1".to_string(),
-        service: "service".to_string(),
     };
 
-    let mut get_signing_key = get_signing_key_fn(run_auth_test_get_err_get_signing_key);
+    let test_date = Date::<Utc>::from_utc(NaiveDate::from_ymd(2015, 8, 30), Utc);
+    let (_principal, k_signing) = run_auth_test_get_err_get_signing_key(
+        SigningKeyKind::KSigning,
+        "".to_string(),
+        None,
+        test_date,
+        TEST_REGION.to_string(),
+        TEST_SERVICE.to_string(),
+    )
+    .await
+    .unwrap();
 
-    sigv4_verify(&request, SigningKeyKind::KSecret, &mut get_signing_key, None).await.unwrap_err()
+    sigv4_verify(&request, &k_signing, None, TEST_REGION, TEST_SERVICE).unwrap_err()
 }
 
 #[tokio::test]
@@ -375,8 +382,6 @@ async fn test_multiple_algorithms() {
         uri: uri,
         headers: headers,
         body: None,
-        region: "us-east-1".to_string(),
-        service: "service".to_string(),
     };
 
     let params = request.get_authorization_header_parameters().unwrap();
@@ -398,8 +403,6 @@ async fn duplicate_query_parameter() {
             .unwrap(),
         headers: headers,
         body: None,
-        region: "us-east-1".to_string(),
-        service: "service".to_string(),
     };
 
     let e = expect_err!(request.get_request_signature(), MultipleParameterValues);
@@ -417,8 +420,6 @@ fn missing_header() {
         uri: Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap(),
         headers: headers,
         body: None,
-        region: "us-east-1".to_string(),
-        service: "service".to_string(),
     };
 
     expect_err!(request.get_authorization_header_parameters(), MissingHeader);
@@ -436,8 +437,6 @@ fn missing_date() {
         uri: Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap(),
         headers: headers,
         body: None,
-        region: "us-east-1".to_string(),
-        service: "service".to_string(),
     };
 
     let e = expect_err!(request.get_signed_headers(), MissingHeader);
@@ -456,8 +455,6 @@ fn invalid_date() {
         uri: Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap(),
         headers: headers,
         body: None,
-        region: "us-east-1".to_string(),
-        service: "service".to_string(),
     };
 
     let e = expect_err!(request.get_request_timestamp(), MalformedHeader);
@@ -471,8 +468,6 @@ fn invalid_date() {
         uri: Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap(),
         headers: headers,
         body: None,
-        region: "us-east-1".to_string(),
-        service: "service".to_string(),
     };
 
     expect_err!(request.get_request_timestamp(), MissingHeader);
@@ -483,8 +478,6 @@ fn invalid_date() {
         uri: Uri::builder().path_and_query(PathAndQuery::from_static("/?X-Amz-Date=zzzz")).build().unwrap(),
         headers: headers,
         body: None,
-        region: "us-east-1".to_string(),
-        service: "service".to_string(),
     };
 
     let e = expect_err!(request.get_request_timestamp(), MalformedParameter);

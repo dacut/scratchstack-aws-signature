@@ -23,9 +23,9 @@ mod principal;
 mod signature;
 pub use crate::principal::Principal;
 pub use crate::signature::{
-    canonicalize_uri_path, derive_key_from_secret_key, get_signing_key_fn, normalize_query_parameters,
-    normalize_uri_path_component, sigv4_get_expected_signature, sigv4_verify, sigv4_verify_at, GetSigningKey, Request,
-    SignatureError, SigningKeyKind,
+    canonicalize_uri_path, get_signing_key_fn, normalize_query_parameters, normalize_uri_path_component,
+    sigv4_get_expected_signature, sigv4_verify, sigv4_verify_at, GetSigningKey, GetSigningKeyFn, GetSigningKeyRequest,
+    Request, SignatureError, SigningKey, SigningKeyKind,
 };
 
 #[cfg(test)]

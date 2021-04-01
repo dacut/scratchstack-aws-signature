@@ -16,9 +16,10 @@ use std::{
     future::Future,
     io::{Error as IOError, Write},
     str::from_utf8,
+    task::{Context, Poll},
 };
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{Date, DateTime, Datelike, Duration, Utc};
 use hex;
 use http::{
     header::{HeaderMap, HeaderValue},
@@ -29,6 +30,7 @@ use lazy_static::lazy_static;
 use log::debug;
 use regex::Regex;
 use ring::digest::{digest, SHA256};
+use tower::{BoxError, Service};
 
 use crate::chronoutil::parse_date_str;
 use crate::hmac::hmac_sha256;
@@ -125,6 +127,11 @@ pub enum SignatureError {
         message: String,
     },
 
+    /// The type of signing key is incorrect for this operation.
+    InvalidSigningKeyKind {
+        message: String,
+    },
+
     /// The URI path includes invalid components. This can be a malformed hex encoding (e.g. `%0J`), a non-absolute
     /// URI path (`foo/bar`), or a URI path that attempts to navigate above the root (`/x/../../../y`).
     InvalidURIPath {
@@ -204,6 +211,9 @@ impl Display for SignatureError {
             Self::InvalidSignature {
                 message,
             } => write!(f, "Invalid request signature: {}", message),
+            Self::InvalidSigningKeyKind {
+                message,
+            } => write!(f, "Invalid signing key kind: {}", message),
             Self::InvalidURIPath {
                 message,
             } => write!(f, "Invalid URI path: {}", message),
@@ -295,73 +305,254 @@ impl Display for SigningKeyKind {
     }
 }
 
-/// A trait that describes how we obtain a signing key of a given type given a request. If you need to encapsulate
-/// additional data (e.g. a database connection) to look up a key, use this to implement a struct.
-pub trait GetSigningKey {
-    type Future: Future<Output = Result<(Principal, Vec<u8>), SignatureError>>;
-
-    /// Get the signing key for the given request.
-    fn call(
-        &mut self,
-        kind: SigningKeyKind,
-        access_key: String,
-        session_token: Option<String>,
-        request_date: String,
-        region: String,
-        service: String,
-    ) -> Self::Future;
+/// A signing key of some type.
+#[derive(Clone)]
+pub struct SigningKey {
+    pub kind: SigningKeyKind,
+    pub key: Vec<u8>,
 }
 
-pub struct GetSigningKeyFn<F, Fut>
+impl Debug for SigningKey {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        f.debug_struct("SigningKey")
+            .field("kind", &self.kind)
+            .field("key", &format!("<{} bytes>", self.key.len()))
+            .finish()
+    }
+}
+
+impl SigningKey {
+    /// Convert this key into the specified kind of key.
+    ///
+    /// This function returns an error if the existing key cannot be derived into the dervied key kind.
+    pub fn try_derive<R, S>(
+        &self,
+        derived_key_kind: SigningKeyKind,
+        req_date: &Date<Utc>,
+        region: R,
+        service: S,
+    ) -> Result<Self, SignatureError>
+    where
+        R: AsRef<str>,
+        S: AsRef<str>,
+    {
+        match derived_key_kind {
+            SigningKeyKind::KSigning => Ok(self.to_ksigning_key(&req_date, &region, &service)),
+            SigningKeyKind::KService => self.try_to_kservice_key(&req_date, &region, &service),
+            SigningKeyKind::KRegion => self.try_to_kregion_key(&req_date, &region),
+            SigningKeyKind::KDate => self.try_to_kdate_key(&req_date),
+            SigningKeyKind::KSecret => match self.kind {
+                SigningKeyKind::KSecret => Ok(self.clone()),
+                _ => Err(SignatureError::InvalidSigningKeyKind {
+                    message: format!("Cannot derive {} key from {} key", derived_key_kind, self.kind),
+                }),
+            },
+        }
+    }
+
+    /// Return a KService key given a KService, KRegion, KDate, or KSecret key.
+    ///
+    /// This function returns an error if given a KSigning key.
+    pub fn try_to_kservice_key<R, S>(&self, req_date: &Date<Utc>, region: R, service: S) -> Result<Self, SignatureError>
+    where
+        R: AsRef<str>,
+        S: AsRef<str>,
+    {
+        match self.kind {
+            SigningKeyKind::KService => Ok(self.clone()),
+            SigningKeyKind::KRegion | SigningKeyKind::KDate | SigningKeyKind::KSecret => {
+                let k_region = self.to_kregion_key(&req_date, &region);
+                Ok(Self {
+                    kind: SigningKeyKind::KService,
+                    key: hmac_sha256(&k_region.key, service.as_ref().as_bytes()).as_ref().to_vec(),
+                })
+            }
+            _ => Err(SignatureError::InvalidSigningKeyKind {
+                message: format!("Can't derive KService key from {}", self.kind),
+            }),
+        }
+    }
+
+    /// Return a KRegion key given a KRegion, KDate, or KSecret key.
+    ///
+    /// This function returns an error if given a KSigning or KService key.
+    pub fn try_to_kregion_key<R>(&self, req_date: &Date<Utc>, region: R) -> Result<Self, SignatureError>
+    where
+        R: AsRef<str>,
+    {
+        match self.kind {
+            SigningKeyKind::KRegion => Ok(self.clone()),
+            SigningKeyKind::KDate | SigningKeyKind::KSecret => {
+                let k_date = self.to_kdate_key(req_date);
+                Ok(Self {
+                    kind: SigningKeyKind::KRegion,
+                    key: hmac_sha256(&k_date.key, region.as_ref().as_bytes()).as_ref().to_vec(),
+                })
+            }
+            _ => Err(SignatureError::InvalidSigningKeyKind {
+                message: format!("Can't derive KRegion key from {}", self.kind),
+            }),
+        }
+    }
+
+    /// Return a KDate key given a KDate or KSecret key.
+    ///
+    /// This function returns an error if given a KRegion, KSigning, or KService key.
+    pub fn try_to_kdate_key(&self, req_date: &Date<Utc>) -> Result<Self, SignatureError> {
+        match self.kind {
+            // Already the same type.
+            SigningKeyKind::KDate => Ok(self.clone()),
+
+            // key is KSecret == AWS4 + secret key.
+            // KDate = HMAC(KSecret + req_date)
+            SigningKeyKind::KSecret => {
+                let ymd = format!("{:04}{:02}{:02}", req_date.year(), req_date.month(), req_date.day());
+                Ok(SigningKey {
+                    kind: SigningKeyKind::KDate,
+                    key: hmac_sha256(&self.key, ymd.as_bytes()).as_ref().to_vec(),
+                })
+            }
+
+            _ => Err(SignatureError::InvalidSigningKeyKind {
+                message: format!("Can't derive KDate key from {}", self.kind),
+            }),
+        }
+    }
+
+    /// Convert this key into the specified kind of key.
+    ///
+    /// This function panics if the existing key cannot be derived into the dervied key kind. Use `try_derive` for
+    /// a non-panicking version.
+    pub fn derive<R, S>(&self, derived_key_kind: SigningKeyKind, req_date: &Date<Utc>, region: R, service: S) -> Self
+    where
+        R: AsRef<str>,
+        S: AsRef<str>,
+    {
+        match self.try_derive(derived_key_kind, &req_date, &region, &service) {
+            Ok(s) => s,
+            Err(e) => panic!("{}", e),
+        }
+    }
+
+    /// Return a KSigning key given a KSigning, KService, KRegion, KDate, or KSecret key.
+    ///
+    /// This function is infallible (does not panic).
+    pub fn to_ksigning_key<R, S>(&self, req_date: &Date<Utc>, region: R, service: S) -> Self
+    where
+        R: AsRef<str>,
+        S: AsRef<str>,
+    {
+        match self.kind {
+            SigningKeyKind::KSigning => self.clone(),
+            _ => {
+                let k_service = self.to_kservice_key(&req_date, &region, &service);
+                Self {
+                    kind: SigningKeyKind::KSigning,
+                    key: hmac_sha256(&k_service.key, AWS4_REQUEST.as_bytes()).as_ref().to_vec(),
+                }
+            }
+        }
+    }
+
+    /// Return a KService key given a KService, KRegion, KDate, or KSecret key.
+    ///
+    /// This function panics an error if given a KSigning key. Use `try_to_kservice_key` for a non-panicking version,.
+    pub fn to_kservice_key<R, S>(&self, req_date: &Date<Utc>, region: R, service: S) -> Self
+    where
+        R: AsRef<str>,
+        S: AsRef<str>,
+    {
+        match self.try_to_kservice_key(&req_date, &region, &service) {
+            Ok(s) => s,
+            Err(e) => panic!("{}", e),
+        }
+    }
+
+    /// Return a KRegion key given a KRegion, KDate, or KSecret key.
+    ///
+    /// This function panics if given a KSigning or KService key. Use `try_to_kregion_key` for a for a non-panicking
+    /// version.
+    pub fn to_kregion_key<R>(&self, req_date: &Date<Utc>, region: R) -> Self
+    where
+        R: AsRef<str>,
+    {
+        match self.try_to_kregion_key(&req_date, &region) {
+            Ok(s) => s,
+            Err(e) => panic!("{}", e),
+        }
+    }
+
+    /// Return a KDate key given a KDate or KSecret key.
+    ///
+    /// This function panics if given a KRegion, KSigning, or KService key. Use `try_to_kdate_key` for a non-panicking
+    /// version.
+    pub fn to_kdate_key(&self, req_date: &Date<Utc>) -> Self {
+        match self.try_to_kdate_key(&req_date) {
+            Ok(s) => s,
+            Err(e) => panic!("{}", e),
+        }
+    }
+}
+
+/// A trait bound that describes how we obtain a signing key of a given type given a request. If you need to encapsulate
+/// additional data (e.g. a database connection) to look up a key, use this to implement a struct.
+pub trait GetSigningKey {}
+
+pub struct GetSigningKeyRequest {
+    pub signing_key_kind: SigningKeyKind,
+    pub access_key: String,
+    pub session_token: Option<String>,
+    pub request_date: Date<Utc>,
+    pub region: String,
+    pub service: String,
+}
+
+impl<F, E> GetSigningKey
+    for dyn Service<GetSigningKeyRequest, Response = (Principal, SigningKey), Error = E, Future = F>
 where
-    F: FnMut(SigningKeyKind, String, Option<String>, String, String, String) -> Fut,
-    Fut: Future<Output = Result<(Principal, Vec<u8>), SignatureError>>,
+    F: Future<Output = Result<(Principal, SigningKey), SignatureError>> + Send + Sync,
+    E: Into<BoxError>,
 {
+}
+
+#[derive(Clone, Copy)]
+pub struct GetSigningKeyFn<F> {
     f: F,
 }
 
 /// Wrap an async function taking a signing request and returns a result into a `GetSigningKey` trait implementation.
 ///
 /// The function signature should look like:
-/// `async fn ..(kind: SigningKeyKind, access_key: String, session_token: Option<String>, request_date: String,
-/// region: String, service: String) -> Result<(Principal, Vec<u8>), SignatureError>`
-pub fn get_signing_key_fn<F, Fut>(f: F) -> GetSigningKeyFn<F, Fut>
-where
-    F: FnMut(SigningKeyKind, String, Option<String>, String, String, String) -> Fut,
-    Fut: Future<Output = Result<(Principal, Vec<u8>), SignatureError>>,
-{
+/// `async fn ..(kind: SigningKeyKind, access_key: String, session_token: Option<String>, request_date: Date<Utc>,
+/// region: String, service: String) -> Result<(Principal, SigningKey), SignatureError>`
+pub fn get_signing_key_fn<F>(f: F) -> GetSigningKeyFn<F> {
     GetSigningKeyFn {
         f,
     }
 }
 
-impl<F, Fut> Debug for GetSigningKeyFn<F, Fut>
-where
-    F: FnMut(SigningKeyKind, String, Option<String>, String, String, String) -> Fut,
-    Fut: Future<Output = Result<(Principal, Vec<u8>), SignatureError>>,
-{
+impl<F> Debug for GetSigningKeyFn<F> {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         f.debug_struct("GetSigningKeyFn").field("f", &format_args!("{}", type_name::<F>())).finish()
     }
 }
 
-impl<F, Fut> GetSigningKey for GetSigningKeyFn<F, Fut>
+impl<F, Fut, E> Service<GetSigningKeyRequest> for GetSigningKeyFn<F>
 where
-    F: FnMut(SigningKeyKind, String, Option<String>, String, String, String) -> Fut,
-    Fut: Future<Output = Result<(Principal, Vec<u8>), SignatureError>>,
+    F: FnMut(SigningKeyKind, String, Option<String>, Date<Utc>, String, String) -> Fut,
+    Fut: Future<Output = Result<(Principal, SigningKey), E>> + Send + Sync,
+    E: Into<BoxError>,
 {
+    type Response = (Principal, SigningKey);
+    type Error = E;
     type Future = Fut;
 
-    fn call(
-        &mut self,
-        kind: SigningKeyKind,
-        access_key: String,
-        session_token: Option<String>,
-        request_date: String,
-        region: String,
-        service: String,
-    ) -> Self::Future {
-        (self.f)(kind, access_key, session_token, request_date, region, service)
+    fn poll_ready(&mut self, _cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: GetSigningKeyRequest) -> Self::Future {
+        (self.f)(req.signing_key_kind, req.access_key, req.session_token, req.request_date, req.region, req.service)
     }
 }
 
@@ -380,29 +571,37 @@ pub struct Request {
 
     /// The request body (if any) (client).
     pub body: Option<Vec<u8>>,
-
-    /// The region the request was sent to (service).
-    pub region: String,
-
-    /// The service the request was sent to (service).
-    pub service: String,
 }
 
 impl Request {
     /// Create a Request from an HTTP request.
-    pub fn from_http_request_parts<S1, S2>(parts: &Parts, body: Option<Vec<u8>>, region: S1, service: S2) -> Self
-    where
-        S1: Into<String>,
-        S2: Into<String>,
-    {
+    pub fn from_http_request_parts(parts: &Parts, body: Option<Vec<u8>>) -> Self {
         Self {
             request_method: parts.method.as_str().to_string(),
             uri: parts.uri.clone(),
             headers: parts.headers.clone(),
             body: body,
-            region: region.into(),
-            service: service.into(),
         }
+    }
+
+    pub fn to_get_signing_key_request<A1, A2>(
+        &self,
+        signing_key_kind: SigningKeyKind,
+        region: A1,
+        service: A2,
+    ) -> Result<GetSigningKeyRequest, SignatureError>
+    where
+        A1: AsRef<str>,
+        A2: AsRef<str>,
+    {
+        Ok(GetSigningKeyRequest {
+            signing_key_kind: signing_key_kind,
+            access_key: self.get_access_key(&region, &service)?,
+            session_token: self.get_session_token()?,
+            request_date: self.get_request_date()?,
+            region: region.as_ref().to_string(),
+            service: service.as_ref().to_string(),
+        })
     }
 
     /// Retrieve a header value, requiring exactly one value be present.
@@ -576,7 +775,22 @@ impl Request {
                         message: format!("invalid Authorization header: missing parameters"),
                     })
                 } else {
-                    split_authorization_header_parameters(&parameters)
+                    let result = split_authorization_header_parameters(&parameters)?;
+                    if result.get(CREDENTIAL).is_none() {
+                        Err(SignatureError::MalformedSignature {
+                            message: format!("invalid Authorization header: missing Credential"),
+                        })
+                    } else if result.get(SIGNATURE).is_none() {
+                        Err(SignatureError::MalformedSignature {
+                            message: format!("invalid Authorization header: missing Signature"),
+                        })
+                    } else if result.get(SIGNEDHEADERS).is_none() {
+                        Err(SignatureError::MalformedSignature {
+                            message: format!("invalid Authorization header: missing SignedHeaders"),
+                        })
+                    } else {
+                        Ok(result)
+                    }
                 }
             }
         }
@@ -655,6 +869,12 @@ impl Request {
         Ok(result)
     }
 
+    /// The date of the request.
+    pub(crate) fn get_request_date(&self) -> Result<Date<Utc>, SignatureError> {
+        let timestamp = self.get_request_timestamp()?;
+        Ok(timestamp.date())
+    }
+
     /// The timestamp of the request.
     ///
     /// This returns the first value found from:
@@ -712,16 +932,24 @@ impl Request {
     /// of the request.
     ///
     /// The result is a string in the form `YYYYMMDD/region/service/aws4_request`.
-    pub(crate) fn get_credential_scope(&self) -> Result<String, SignatureError> {
+    pub(crate) fn get_credential_scope<A1, A2>(&self, region: A1, service: A2) -> Result<String, SignatureError>
+    where
+        A1: AsRef<str>,
+        A2: AsRef<str>,
+    {
         let ts = self.get_request_timestamp()?;
         let date = ts.date().format("%Y%m%d");
-        Ok(format!("{}/{}/{}/{}", date, self.region, self.service, AWS4_REQUEST))
+        Ok(format!("{}/{}/{}/{}", date, region.as_ref(), service.as_ref(), AWS4_REQUEST))
     }
 
     /// The access key used to sign the request.
     ///
     /// If the credential scope does not match our expected credential scope, a SignatureError is returned.
-    pub(crate) fn get_access_key(&self) -> Result<String, SignatureError> {
+    pub(crate) fn get_access_key<A1, A2>(&self, region: A1, service: A2) -> Result<String, SignatureError>
+    where
+        A1: AsRef<str>,
+        A2: AsRef<str>,
+    {
         let qp_result = self.get_query_param_one(X_AMZ_CREDENTIAL);
         let auth_headers;
 
@@ -755,7 +983,7 @@ impl Request {
 
         let access_key = parts[0];
         let request_scope = parts[1];
-        let server_scope = self.get_credential_scope()?;
+        let server_scope = self.get_credential_scope(region, service)?;
         if request_scope == server_scope {
             Ok(access_key.to_string())
         } else {
@@ -780,7 +1008,7 @@ impl Request {
                 } => match self.get_header_one(X_AMZ_SECURITY_TOKEN_LOWER) {
                     Ok(token) => Ok(Some(token)),
                     Err(e) => match e {
-                        SignatureError::MissingParameter {
+                        SignatureError::MissingHeader {
                             ..
                         } => Ok(None),
                         _ => Err(e),
@@ -890,10 +1118,14 @@ impl Request {
     }
 
     /// The string to sign for the request.
-    pub(crate) fn get_string_to_sign(&self) -> Result<Vec<u8>, SignatureError> {
+    pub(crate) fn get_string_to_sign<A1, A2>(&self, region: A1, service: A2) -> Result<Vec<u8>, SignatureError>
+    where
+        A1: AsRef<str>,
+        A2: AsRef<str>,
+    {
         let mut result = Vec::new();
         let timestamp = self.get_request_timestamp()?;
-        let credential_scope = self.get_credential_scope()?;
+        let credential_scope = self.get_credential_scope(region, service)?;
         let canonical_request = self.get_canonical_request()?;
 
         result.write(AWS4_HMAC_SHA256.as_bytes())?;
@@ -909,45 +1141,20 @@ impl Request {
 }
 
 /// Return the expected signature for a request.
-pub async fn sigv4_get_expected_signature<GSK: GetSigningKey>(
+pub fn sigv4_get_expected_signature<A1, A2>(
     req: &Request,
-    signing_key_kind: SigningKeyKind,
-    gsk: &mut GSK,
-) -> Result<(Principal, String), SignatureError> {
-    let access_key = req.get_access_key()?;
-    let session_token_result = req.get_session_token();
-    let session_token = match session_token_result {
-        Ok(tok) => match tok {
-            Some(tok) => Some(tok.to_string()),
-            None => None,
-        },
-        Err(e) => match e {
-            SignatureError::MissingParameter {
-                ..
-            }
-            | SignatureError::MissingHeader {
-                ..
-            } => None,
-            _ => return Err(e),
-        },
-    };
+    signing_key: &SigningKey,
+    region: A1,
+    service: A2,
+) -> Result<String, SignatureError>
+where
+    A1: AsRef<str>,
+    A2: AsRef<str>,
+{
+    let k_signing = signing_key.to_ksigning_key(&(req.get_request_date()?), &region, &service);
+    let string_to_sign = req.get_string_to_sign(&region, &service)?;
 
-    let timestamp = req.get_request_timestamp()?;
-    let req_date = format!("{}", timestamp.date().format("%Y%m%d"));
-    let (principal, key) = gsk
-        .call(
-            signing_key_kind,
-            access_key.to_string(),
-            session_token,
-            req_date.to_string(),
-            req.region.to_string(),
-            req.service.to_string(),
-        )
-        .await?;
-    let string_to_sign = req.get_string_to_sign()?;
-
-    let k_signing = get_ksigning_key(signing_key_kind, key, &req_date, &req.region, &req.service);
-    Ok((principal, hex::encode(hmac_sha256(k_signing.as_ref(), &string_to_sign).as_ref())))
+    Ok(hex::encode(hmac_sha256(&k_signing.key, &string_to_sign).as_ref()))
 }
 
 /// Verify a SigV4 request at a particular point-in-time. This verifies that the request timestamp is not beyond the
@@ -955,13 +1162,18 @@ pub async fn sigv4_get_expected_signature<GSK: GetSigningKey>(
 /// signature.
 ///
 /// This is mainly for unit testing. For general purpose use, use `sigv4_verify`.
-pub async fn sigv4_verify_at<GSK: GetSigningKey>(
+pub fn sigv4_verify_at<A1, A2>(
     req: &Request,
-    signing_key_kind: SigningKeyKind,
-    gsk: &mut GSK,
+    signing_key: &SigningKey,
     server_timestamp: &DateTime<Utc>,
     allowed_mismatch: Option<Duration>,
-) -> Result<Principal, SignatureError> {
+    region: A1,
+    service: A2,
+) -> Result<(), SignatureError>
+where
+    A1: AsRef<str>,
+    A2: AsRef<str>,
+{
     if let Some(mm) = allowed_mismatch {
         let req_ts = req.get_request_timestamp()?;
         let min_ts = server_timestamp.checked_sub_signed(mm).unwrap_or(*server_timestamp);
@@ -977,26 +1189,31 @@ pub async fn sigv4_verify_at<GSK: GetSigningKey>(
     }
 
     let request_sig = req.get_request_signature()?;
-    let (principal, expected_sig) = sigv4_get_expected_signature(&req, signing_key_kind, gsk).await?;
+    let expected_sig = sigv4_get_expected_signature(&req, &signing_key, &region, &service)?;
 
     if expected_sig != request_sig {
         Err(SignatureError::InvalidSignature {
             message: format!("Expected {} instead of {}", expected_sig, request_sig),
         })
     } else {
-        Ok(principal)
+        Ok(())
     }
 }
 
 /// Verify a SigV4 request. This verifies that the request timestamp is not beyond the allowed timestamp mismatch
 /// against the current time, and that the request signature matches our expected signature.
-pub async fn sigv4_verify<GSK: GetSigningKey>(
+pub fn sigv4_verify<A1, A2>(
     req: &Request,
-    signing_key_kind: SigningKeyKind,
-    gsk: &mut GSK,
+    signing_key: &SigningKey,
     allowed_mismatch: Option<Duration>,
-) -> Result<Principal, SignatureError> {
-    sigv4_verify_at(req, signing_key_kind, gsk, &Utc::now(), allowed_mismatch).await
+    region: A1,
+    service: A2,
+) -> Result<(), SignatureError>
+where
+    A1: AsRef<str>,
+    A2: AsRef<str>,
+{
+    sigv4_verify_at(req, signing_key, &Utc::now(), allowed_mismatch, region, service)
 }
 
 /// Indicates whether the specified byte is RFC3986 unreserved -- i.e., can be represented without being
@@ -1192,102 +1409,4 @@ pub fn split_authorization_header_parameters(parameters: &str) -> Result<HashMap
     }
 
     Ok(result)
-}
-
-/// Convert a secret key into the specified kind of signing key.
-pub fn derive_key_from_secret_key(
-    secret_key: &[u8],
-    derived_key_type: SigningKeyKind,
-    req_date: &str,
-    region: &str,
-    service: &str,
-) -> Vec<u8> {
-    let mut k_secret = Vec::<u8>::with_capacity(secret_key.len() + 4);
-    k_secret.extend("AWS4".bytes());
-    k_secret.extend_from_slice(secret_key);
-
-    match derived_key_type {
-        SigningKeyKind::KSecret => k_secret,
-        SigningKeyKind::KDate => get_kdate_key(SigningKeyKind::KSecret, k_secret.as_slice(), req_date).to_vec(),
-        SigningKeyKind::KRegion => {
-            get_kregion_key(SigningKeyKind::KSecret, k_secret.as_slice(), req_date, region).to_vec()
-        }
-        SigningKeyKind::KService => {
-            get_kservice_key(SigningKeyKind::KSecret, k_secret.as_slice(), req_date, region, service).to_vec()
-        }
-        SigningKeyKind::KSigning => {
-            get_ksigning_key(SigningKeyKind::KSecret, k_secret.as_slice(), req_date, region, service).to_vec()
-        }
-    }
-}
-
-/// Return a KSigning key given a KSigning, KService, KRegion, KDate, or KSecret key.
-pub fn get_ksigning_key<K: Into<Vec<u8>>>(
-    signing_key_kind: SigningKeyKind,
-    key: K,
-    req_date: &str,
-    region: &str,
-    service: &str,
-) -> Vec<u8> {
-    match signing_key_kind {
-        SigningKeyKind::KSigning => key.into(),
-        _ => {
-            let k_service = get_kservice_key(signing_key_kind, key, req_date, region, service);
-            hmac_sha256(k_service.as_ref(), AWS4_REQUEST.as_bytes()).as_ref().to_vec()
-        }
-    }
-}
-
-/// Return a KService key given a KService, KRegion, KDate, or KSecret key.
-///
-/// This function panics if given a KSigning key.
-pub fn get_kservice_key<K: Into<Vec<u8>>>(
-    signing_key_kind: SigningKeyKind,
-    key: K,
-    req_date: &str,
-    region: &str,
-    service: &str,
-) -> Vec<u8> {
-    match signing_key_kind {
-        SigningKeyKind::KService => key.into(),
-        SigningKeyKind::KRegion | SigningKeyKind::KDate | SigningKeyKind::KSecret => {
-            let k_region = get_kregion_key(signing_key_kind, key, req_date, region);
-            hmac_sha256(k_region.as_ref(), service.as_bytes()).as_ref().to_vec()
-        }
-        _ => panic!("Can't derive KService key from {}", signing_key_kind),
-    }
-}
-
-/// Return a KRegion key given a KRegion, KDate, or KSecret key.
-///
-/// This function panics if given a KSigning or KService key.
-pub fn get_kregion_key<K: Into<Vec<u8>>>(
-    signing_key_kind: SigningKeyKind,
-    key: K,
-    req_date: &str,
-    region: &str,
-) -> Vec<u8> {
-    match signing_key_kind {
-        SigningKeyKind::KRegion => key.into(),
-        SigningKeyKind::KDate | SigningKeyKind::KSecret => {
-            let k_date = get_kdate_key(signing_key_kind, key, req_date);
-            hmac_sha256(k_date.as_ref(), region.as_bytes()).as_ref().to_vec()
-        }
-        _ => panic!("Can't derive KRegion key from {}", signing_key_kind),
-    }
-}
-
-/// Return a KDate key given a KDate or KSecret key.
-///
-/// This function panics if given a KRegion, KSigning, or KService key.
-pub fn get_kdate_key<K: Into<Vec<u8>>>(signing_key_kind: SigningKeyKind, key: K, req_date: &str) -> Vec<u8> {
-    match signing_key_kind {
-        SigningKeyKind::KDate => key.into(),
-
-        // key is KSecret == AWS4 + secret key.
-        // KDate = HMAC(KSecret + req_date)
-        SigningKeyKind::KSecret => hmac_sha256(key.into().as_slice(), req_date.as_bytes()).as_ref().to_vec(),
-
-        _ => panic!("Can't derive KDate key from {}", signing_key_kind),
-    }
 }
