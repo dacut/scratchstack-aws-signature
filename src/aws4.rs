@@ -306,7 +306,7 @@ async fn get_signing_key(
 ) -> Result<(Principal, SigningKey), SignatureError> {
     let k_secret = SigningKey {
         kind: SigningKeyKind::KSecret,
-        key: b"AWS4wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_vec(),
+        key: b"wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_vec(),
     };
 
     let principal = Principal::user("aws", "123456789012", "/", "test", "AIDAIAAAAAAAAAAAAAAAA").unwrap();

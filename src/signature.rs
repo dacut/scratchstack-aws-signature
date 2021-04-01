@@ -19,7 +19,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use chrono::{Date, DateTime, Datelike, Duration, Utc};
+use chrono::{Date, DateTime, Duration, Utc};
 use hex;
 use http::{
     header::{HeaderMap, HeaderValue},
@@ -27,7 +27,7 @@ use http::{
     Uri,
 };
 use lazy_static::lazy_static;
-use log::debug;
+use log::trace;
 use regex::Regex;
 use ring::digest::{digest, SHA256};
 use tower::{BoxError, Service};
@@ -122,6 +122,9 @@ pub enum SignatureError {
         message: String,
     },
 
+    /// The secret key contains invalid bytes.
+    InvalidSecretKey,
+
     /// The signature passed in the request did not match the calculated signature value.
     InvalidSignature {
         message: String,
@@ -208,6 +211,7 @@ impl Display for SignatureError {
             Self::InvalidCredential {
                 message,
             } => write!(f, "Invalid credential: {}", message),
+            Self::InvalidSecretKey => write!(f, "Invalid secret key"),
             Self::InvalidSignature {
                 message,
             } => write!(f, "Invalid request signature: {}", message),
@@ -406,10 +410,14 @@ impl SigningKey {
             // key is KSecret == AWS4 + secret key.
             // KDate = HMAC(KSecret + req_date)
             SigningKeyKind::KSecret => {
-                let ymd = format!("{:04}{:02}{:02}", req_date.year(), req_date.month(), req_date.day());
+                let ymd = format!("{}", req_date.format("%Y%m%d"));
+                let k_secret_str = match from_utf8(&self.key) {
+                    Ok(s) => s,
+                    Err(_) => return Err(SignatureError::InvalidSecretKey),
+                };
                 Ok(SigningKey {
                     kind: SigningKeyKind::KDate,
-                    key: hmac_sha256(&self.key, ymd.as_bytes()).as_ref().to_vec(),
+                    key: hmac_sha256(format!("AWS4{}", k_secret_str).as_bytes(), ymd.as_bytes()).as_ref().to_vec(),
                 })
             }
 
@@ -755,9 +763,9 @@ impl Request {
                             }
 
                             parameters_opt = Some(auth_header.split_at(captures.get(0).unwrap().end()).1);
-                            debug!("parameters_opt set to {:?}; captures={:?}", parameters_opt, captures);
+                            trace!("parameters_opt set to {:?}; captures={:?}", parameters_opt, captures);
                         } else {
-                            debug!("Not SigV4: {:?}", auth_header);
+                            trace!("Not SigV4: {:?}", auth_header);
                         }
                     }
                     Err(_) => (),
@@ -963,7 +971,7 @@ impl Request {
                     match auth_headers.get(CREDENTIAL) {
                         Some(c) => c,
                         None => {
-                            debug!("auth_headers={:?}", auth_headers);
+                            trace!("auth_headers={:?}", auth_headers);
                             return Err(SignatureError::MalformedSignature {
                                 message: "invalid Authorization header: missing Credential".to_string(),
                             });
@@ -1127,6 +1135,8 @@ impl Request {
         let timestamp = self.get_request_timestamp()?;
         let credential_scope = self.get_credential_scope(region, service)?;
         let canonical_request = self.get_canonical_request()?;
+        trace!("Credential scope: {:?}", credential_scope);
+        trace!("Canonical request: {:?}", from_utf8(canonical_request.as_ref()));
 
         result.write(AWS4_HMAC_SHA256.as_bytes())?;
         result.push(b'\n');
@@ -1153,6 +1163,7 @@ where
 {
     let k_signing = signing_key.to_ksigning_key(&(req.get_request_date()?), &region, &service);
     let string_to_sign = req.get_string_to_sign(&region, &service)?;
+    trace!("String to sign: {:?}", from_utf8(string_to_sign.as_ref()));
 
     Ok(hex::encode(hmac_sha256(&k_signing.key, &string_to_sign).as_ref()))
 }
@@ -1386,7 +1397,7 @@ pub fn normalize_query_parameters(query_string: &str) -> Result<HashMap<String, 
 
 /// Split Authorization header parameters from key=value parts into a HashMap.
 pub fn split_authorization_header_parameters(parameters: &str) -> Result<HashMap<String, String>, SignatureError> {
-    debug!("split_authorization_header_parameters: parameters={:?}", parameters);
+    trace!("split_authorization_header_parameters: parameters={:?}", parameters);
     let mut result = HashMap::<String, String>::new();
     for parameter in parameters.split(',') {
         let parts: Vec<&str> = parameter.splitn(2, '=').collect();
