@@ -11,17 +11,9 @@
 //! On the other hand, if you have your own ecosystem of AWS-like credentials and are developing mock-AWS services or
 //! just really like AWS SigV4 but can't run within AWS, this library _might_ be for you.
 
-extern crate chrono;
-extern crate hex;
-extern crate lazy_static;
-extern crate regex;
-extern crate ring;
-
 mod chronoutil;
 mod hmac;
-mod principal;
 mod signature;
-pub use crate::principal::Principal;
 pub use crate::signature::{
     canonicalize_uri_path, get_signing_key_fn, normalize_query_parameters, normalize_uri_path_component,
     sigv4_get_expected_signature, sigv4_verify, sigv4_verify_at, GetSigningKey, GetSigningKeyFn, GetSigningKeyRequest,

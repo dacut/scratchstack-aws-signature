@@ -30,11 +30,11 @@ use lazy_static::lazy_static;
 use log::trace;
 use regex::Regex;
 use ring::digest::{digest, SHA256};
+use scratchstack_aws_principal::PrincipalActor;
 use tower::{BoxError, Service};
 
 use crate::chronoutil::parse_date_str;
 use crate::hmac::hmac_sha256;
-use crate::principal::Principal;
 
 /// Content-Type string for HTML forms
 const APPLICATION_X_WWW_FORM_URLENCODED: &str = "application/x-www-form-urlencoded";
@@ -516,9 +516,9 @@ pub struct GetSigningKeyRequest {
 }
 
 impl<F, E> GetSigningKey
-    for dyn Service<GetSigningKeyRequest, Response = (Principal, SigningKey), Error = E, Future = F>
+    for dyn Service<GetSigningKeyRequest, Response = (PrincipalActor, SigningKey), Error = E, Future = F>
 where
-    F: Future<Output = Result<(Principal, SigningKey), SignatureError>> + Send + Sync,
+    F: Future<Output = Result<(PrincipalActor, SigningKey), SignatureError>> + Send + Sync,
     E: Into<BoxError>,
 {
 }
@@ -532,7 +532,7 @@ pub struct GetSigningKeyFn<F> {
 ///
 /// The function signature should look like:
 /// `async fn ..(kind: SigningKeyKind, access_key: String, session_token: Option<String>, request_date: Date<Utc>,
-/// region: String, service: String) -> Result<(Principal, SigningKey), SignatureError>`
+/// region: String, service: String) -> Result<(PrincipalActor, SigningKey), SignatureError>`
 pub fn get_signing_key_fn<F>(f: F) -> GetSigningKeyFn<F> {
     GetSigningKeyFn {
         f,
@@ -548,10 +548,10 @@ impl<F> Debug for GetSigningKeyFn<F> {
 impl<F, Fut, E> Service<GetSigningKeyRequest> for GetSigningKeyFn<F>
 where
     F: FnMut(SigningKeyKind, String, Option<String>, Date<Utc>, String, String) -> Fut,
-    Fut: Future<Output = Result<(Principal, SigningKey), E>> + Send + Sync,
+    Fut: Future<Output = Result<(PrincipalActor, SigningKey), E>> + Send + Sync,
     E: Into<BoxError>,
 {
-    type Response = (Principal, SigningKey);
+    type Response = (PrincipalActor, SigningKey);
     type Error = E;
     type Future = Fut;
 

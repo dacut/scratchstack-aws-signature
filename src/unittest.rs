@@ -1,4 +1,3 @@
-use super::principal::Principal;
 use super::signature::{
     canonicalize_uri_path, normalize_query_parameters, normalize_uri_path_component, sigv4_verify, Request,
     SignatureError, SigningKey, SigningKeyKind,
@@ -11,6 +10,7 @@ use http::{
     header::{HeaderMap, HeaderValue},
     uri::{PathAndQuery, Uri},
 };
+use scratchstack_aws_principal::PrincipalActor;
 use test_env_log::{self, test};
 use tokio;
 
@@ -32,30 +32,30 @@ fn check_iso8601_error_handling() {
 
 #[test]
 fn check_principal_formats() {
-    let principal = Principal::user("aws", "123456789012", "/", "test", "AIDAIAAAAAAAAAAAAAAAA").unwrap();
+    let principal = PrincipalActor::user("aws", "123456789012", "/", "test", "AIDAAAAAAAAAAAAAAAAA").unwrap();
     let mut s = String::new();
     write!(s, "{}", principal).expect("must succeed");
     assert_eq!(s, "arn:aws:iam::123456789012:user/test");
 
-    let principal = Principal::user("aws", "123456789012", "/path/", "test", "AIDAIAAAAAAAAAAAAAAAA").unwrap();
+    let principal = PrincipalActor::user("aws", "123456789012", "/path/", "test", "AIDAAAAAAAAAAAAAAAAA").unwrap();
     let mut s = String::new();
     write!(s, "{}", principal).expect("must succeed");
     assert_eq!(s, "arn:aws:iam::123456789012:user/path/test");
 
-    let principal = Principal::group("aws", "123456789012", "/path/", "test", "AIGAIAAAAAAAAAAAAAAAA").unwrap();
+    let principal = PrincipalActor::group("aws", "123456789012", "/path/", "test", "AGPAAAAAAAAAAAAAAAAA").unwrap();
     let mut s = String::new();
     write!(s, "{}", principal).expect("must succeed");
     assert_eq!(s, "arn:aws:iam::123456789012:group/path/test");
 
-    let principal = Principal::role("aws", "123456789012", "/path/", "test", "AIGAIAAAAAAAAAAAAAAAA").unwrap();
+    let principal = PrincipalActor::role("aws", "123456789012", "/path/", "test", "AROAAAAAAAAAAAAAAAAA").unwrap();
     let mut s = String::new();
     write!(s, "{}", principal).expect("must succeed");
     assert_eq!(s, "arn:aws:iam::123456789012:role/path/test");
 
-    let principal = Principal::assumed_role("aws", "123456789012", "/path/", "test", "MyTestSession").unwrap();
+    let principal = PrincipalActor::assumed_role("aws", "123456789012", "test", "MyTestSession", 0, 3600).unwrap();
     let mut s = String::new();
     write!(s, "{}", principal).expect("must succeed");
-    assert_eq!(s, "arn:aws:sts::123456789012:assumed-role/path/test/MyTestSession");
+    assert_eq!(s, "arn:aws:sts::123456789012:assumed-role/test/MyTestSession");
 }
 
 #[test]
@@ -225,13 +225,13 @@ async fn run_auth_test_get_err_get_signing_key(
     req_date: Date<Utc>,
     region: String,
     service: String,
-) -> Result<(Principal, SigningKey), SignatureError> {
+) -> Result<(PrincipalActor, SigningKey), SignatureError> {
     let k_secret = SigningKey {
         kind: SigningKeyKind::KSecret,
         key: b"AWS4wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_vec(),
     };
 
-    let principal = Principal::user("aws", "123456789012", "/", "test", "AIDAIAAAAAAAAAAAAAAAA").unwrap();
+    let principal = PrincipalActor::user("aws", "123456789012", "/", "test", "AIDAAAAAAAAAAAAAAAAA").unwrap();
     Ok((principal, k_secret.derive(kind, &req_date, region, service)))
 }
 

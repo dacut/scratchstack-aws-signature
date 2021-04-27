@@ -1,9 +1,3 @@
-use chrono::{Date, DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc};
-use http::{
-    header::{HeaderMap, HeaderName, HeaderValue},
-    uri::{PathAndQuery, Uri},
-};
-use log::debug;
 use std::{
     env,
     fs::File,
@@ -11,9 +5,16 @@ use std::{
     path::PathBuf,
     str::from_utf8,
 };
+use chrono::{Date, DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc};
+use http::{
+    header::{HeaderMap, HeaderName, HeaderValue},
+    uri::{PathAndQuery, Uri},
+};
+use log::debug;
+use scratchstack_aws_principal::PrincipalActor;
 use tower::Service;
 
-use crate::{get_signing_key_fn, sigv4_verify_at, Principal, Request, SignatureError, SigningKey, SigningKeyKind};
+use crate::{get_signing_key_fn, sigv4_verify_at, Request, SignatureError, SigningKey, SigningKeyKind};
 use test_env_log;
 
 const TEST_REGION: &str = "us-east-1";
@@ -303,13 +304,13 @@ async fn get_signing_key(
     req_date: Date<Utc>,
     region: String,
     service: String,
-) -> Result<(Principal, SigningKey), SignatureError> {
+) -> Result<(PrincipalActor, SigningKey), SignatureError> {
     let k_secret = SigningKey {
         kind: SigningKeyKind::KSecret,
         key: b"wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY".to_vec(),
     };
 
-    let principal = Principal::user("aws", "123456789012", "/", "test", "AIDAIAAAAAAAAAAAAAAAA").unwrap();
+    let principal = PrincipalActor::user("aws", "123456789012", "/", "test", "AIDAAAAAAAAAAAAAAAAA").unwrap();
     Ok((principal, k_secret.derive(kind, &req_date, region, service)))
 }
 
