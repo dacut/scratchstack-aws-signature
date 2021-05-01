@@ -1,8 +1,6 @@
 # AWS signature verification routines for Rust
 ## Crate: [scratchstack-aws-signature](https://crates.io/crates/scratchstack-aws-signature)
 
-## Crate: [aws_sig_verify](https://crates.io/crates/aws_sig_verify)
-
 ![GitHub Actions](https://github.com/dacut/scratchstack-aws-signature/workflows/Rust/badge.svg)
 [![Coverage Status](https://coveralls.io/repos/github/dacut/scratchstack-aws-signature/badge.svg?branch=master)](https://coveralls.io/github/dacut/scratchstack-aws-signature?branch=master)
 
