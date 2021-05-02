@@ -4,8 +4,8 @@ description = "AWS SigV4 signature verification integration with Hyper"
 keywords = ["AWS", "Amazon", "Hyper"]
 version = "0.10.2"
 authors = ["David Cuthbert <dacut@kanga.org>"]
-homepage = "https://github.com/dacut/hyper-aws-sig-verify"
-repository = "https://github.com/dacut/hyper-aws-sig-verify"
+homepage = "https://github.com/dacut/scratchstack-aws-signature"
+repository = "https://github.com/dacut/scratchstack-aws-signature"
 edition = "2018"
 license = "MIT OR Apache-2.0"
 
