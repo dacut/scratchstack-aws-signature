@@ -9,7 +9,7 @@ repository = "https://github.com/dacut/scratchstack-aws-signature"
 license = "MIT OR Apache-2.0"
 edition = "2018"
 exclude = ["tests/*"]
-readme = "README.md"
+readme = "../README.md"
 
 [lib]
 name = "scratchstack_aws_signature"
