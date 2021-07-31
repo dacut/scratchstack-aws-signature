@@ -63,6 +63,24 @@ const DATE: &str = "date";
 /// Compact ISO8601 format used for the string to sign
 const ISO8601_COMPACT_FORMAT: &str = "%Y%m%dT%H%M%SZ";
 
+/// Error message: `"Authorization header requires 'Credential' parameter."`
+const MSG_AUTH_MISSING_CREDENTIAL: &str = "Authorization header requires 'Credential' parameter.";
+
+/// Error message: `"Authorization header requires 'Signature' parameter."`
+const MSG_AUTH_MISSING_SIGNATURE: &str = "Authorization header requires 'Signature' parameter.";
+
+/// Error message: `"Authorization header requires 'SignedHeaders' parameter."`
+const MSG_AUTH_MISSING_SIGNED_HEADERS: &str = "Authorization header requires 'SignedHeaders' parameter.";
+
+/// Error message: `"Illegal hex character in escape % pattern: %"`
+const MSG_ILLEGAL_HEX_CHAR: &str = "Illegal hex character in escape % pattern: %";
+
+/// Error message: `"Incomplete trailing escape % sequence"`
+const MSG_INCOMPLETE_TRAILING_ESCAPE: &str = "Incomplete trailing escape % sequence";
+
+/// Error message: `"Request is missing Authentication Token"`
+const MSG_REQUEST_MISSING_AUTH_TOKEN: &str = "Request is missing Authentication Token";
+
 /// SHA-256 of an empty string.
 const SHA256_EMPTY: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
@@ -107,80 +125,79 @@ lazy_static! {
 /// Error returned when an attempt at validating an AWS SigV4 signature fails.
 #[derive(Debug)]
 pub enum SignatureError {
+    /// The security token included with the request is expired.
+    ExpiredToken,
+
     /// Validation failed due to an underlying I/O error.
     IO(IOError),
 
     /// The request body used an unsupported character set encoding. Currently only UTF-8 is supported.
-    InvalidBodyEncoding {
-        message: String,
-    },
+    InvalidBodyEncoding(/* message */ String),
+
+    /// The AWS access key provided does not exist in our records.
+    InvalidClientTokenId,
+
+    /// The request signature does not conform to AWS standards. Sample messages:  
+    /// `Authorization header requires 'Credential' parameter. Authorization=...`  
+    /// `Authorization header requires existence of either a 'X-Amz-Date' or a 'Date' header.`  
+    /// `Date must be in ISO-8601 'basic format'. Got '...'. See http://en.wikipedia.org/wiki/ISO_8601`  
+    /// `Unsupported AWS 'algorithm': 'AWS4-HMAC-SHA512'`
+    IncompleteSignature(/* message */ String),
 
     /// The request signature specified an invalid credential -- either the access key was not specified, or the
     /// credential scope (in the form `<code>_date_/_region_/_service_/aws4_request</code>`) did not match the
     /// expected value for the server.
-    InvalidCredential {
-        message: String,
-    },
+    InvalidCredential(/* message */ String),
 
     /// The secret key contains invalid bytes.
     InvalidSecretKey,
 
-    /// The signature passed in the request did not match the calculated signature value.
-    InvalidSignature {
-        message: String,
-    },
-
     /// The type of signing key is incorrect for this operation.
-    InvalidSigningKeyKind {
-        message: String,
-    },
+    InvalidSigningKeyKind(/* message */ String),
 
     /// The URI path includes invalid components. This can be a malformed hex encoding (e.g. `%0J`), a non-absolute
     /// URI path (`foo/bar`), or a URI path that attempts to navigate above the root (`/x/../../../y`).
-    InvalidURIPath {
-        message: String,
-    },
+    InvalidURIPath(/* message */ String),
 
     /// An HTTP header was malformed -- the value could not be decoded as UTF-8, or the header was empty and this is
     /// not allowed (e.g. the `content-type` header), or the header could not be parsed (e.g., the `date` header is
     /// not a valid date).
-    MalformedHeader {
-        message: String,
-    },
+    MalformedHeader(/* message */ String),
 
     /// A query parameter was malformed -- the value could not be decoded as UTF-8, or the parameter was empty and
     /// this is not allowed (e.g. a signature parameter), or the parameter could not be parsed (e.g., the `X-Amz-Date`
-    ///  parameter is not a valid date).
-    MalformedParameter {
-        message: String,
-    },
+    /// parameter is not a valid date).
+    ///
+    /// `Incomplete trailing escape % sequence`
+    MalformedQueryString(/* message */ String),
 
     /// The AWS SigV4 signature was malformed in some way. This can include invalid timestamp formats, missing
     /// authorization components, or unparseable components.
-    MalformedSignature {
-        message: String,
-    },
+    MalformedSignature(/* message */ String),
+
+    /// The request must contain either a valid (registered) AWS access key ID or X.509 certificate. Sample messages:  
+    /// `Request is missing Authentication Token`  
+    MissingAuthenticationToken(/* message */ String),
 
     /// A required HTTP header (and its equivalent in the query string) is missing.
-    MissingHeader {
-        header: String,
-    },
+    MissingHeader(/* message */ String),
 
     /// A required query parameter is missing. This is used internally in the library; external callers only see
     /// `MissingHeader`.
-    MissingParameter {
-        parameter: String,
-    },
+    MissingParameter(/* message */ String),
 
     /// An HTTP header that can be specified only once was specified multiple times.
-    MultipleHeaderValues {
-        header: String,
-    },
+    MultipleHeaderValues(/* message */ String),
 
     /// A query parameter that can be specified only once was specified multiple times.
-    MultipleParameterValues {
-        parameter: String,
-    },
+    MultipleParameterValues(/* message */ String),
+
+    /// Signature did not match the calculated signature value.
+    /// Example messages:  
+    /// `The request signature we calculated does not match the signature you provided. Check your AWS Secret Access Key and signing method. Consult the service documentation for details.`  
+    /// `Signature expired: 20210502T144040Z is now earlier than 20210502T173143Z (20210502T174643Z - 15 min.)`  
+    /// `Signature not yet current: 20210502T183640Z is still later than 20210502T175140Z (20210502T173640Z + 15 min.)`
+    SignatureDoesNotMatch(/* message */ String),
 
     /// The timestamp in the request is out of the allowed range.
     TimestampOutOfRange {
@@ -188,60 +205,29 @@ pub enum SignatureError {
         maximum: DateTime<Utc>,
         received: DateTime<Utc>,
     },
-
-    /// The access key specified in the request is unknown.
-    UnknownAccessKey {
-        access_key: String,
-    },
-
-    /// The signature algorithm requested by the caller is unknown. This library only supports the `AWS4-HMAC-SHA256`
-    /// algorithm.
-    UnknownSignatureAlgorithm {
-        algorithm: String,
-    },
 }
 
 impl Display for SignatureError {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
+            Self::ExpiredToken => write!(f, "The security token included with the request is expired"),
             Self::IO(ref e) => Display::fmt(e, f),
-            Self::InvalidBodyEncoding {
-                message,
-            } => write!(f, "Invalid body encoding: {}", message),
-            Self::InvalidCredential {
-                message,
-            } => write!(f, "Invalid credential: {}", message),
+            Self::InvalidBodyEncoding(msg) => f.write_str(msg),
+            Self::InvalidClientTokenId => write!(f, "The security token included in the request is invalid"),
+            Self::IncompleteSignature(msg) => f.write_str(msg),
+            Self::InvalidCredential(msg) => f.write_str(msg),
             Self::InvalidSecretKey => write!(f, "Invalid secret key"),
-            Self::InvalidSignature {
-                message,
-            } => write!(f, "Invalid request signature: {}", message),
-            Self::InvalidSigningKeyKind {
-                message,
-            } => write!(f, "Invalid signing key kind: {}", message),
-            Self::InvalidURIPath {
-                message,
-            } => write!(f, "Invalid URI path: {}", message),
-            Self::MalformedHeader {
-                message,
-            } => write!(f, "Malformed header: {}", message),
-            Self::MalformedParameter {
-                message,
-            } => write!(f, "Malformed query parameter: {}", message),
-            Self::MalformedSignature {
-                message,
-            } => write!(f, "Malformed signature: {}", message),
-            Self::MissingHeader {
-                header,
-            } => write!(f, "Missing header: {}", header),
-            Self::MissingParameter {
-                parameter,
-            } => write!(f, "Missing query parameter: {}", parameter),
-            Self::MultipleHeaderValues {
-                header,
-            } => write!(f, "Multiple values for header: {}", header),
-            Self::MultipleParameterValues {
-                parameter,
-            } => write!(f, "Multiple values for query parameter: {}", parameter),
+            Self::InvalidSigningKeyKind(msg) => f.write_str(msg),
+            Self::InvalidURIPath(msg) => f.write_str(msg),
+            Self::MalformedHeader(msg) => f.write_str(msg),
+            Self::MalformedQueryString(msg) => f.write_str(msg),
+            Self::MalformedSignature(msg) => f.write_str(msg),
+            Self::MissingHeader(msg) => f.write_str(msg),
+            Self::MissingAuthenticationToken(msg) => f.write_str(msg),
+            Self::MissingParameter(msg) => f.write_str(msg),
+            Self::MultipleHeaderValues(msg) => f.write_str(msg),
+            Self::MultipleParameterValues(msg) => f.write_str(msg),
+            Self::SignatureDoesNotMatch(msg) => f.write_str(msg),
             Self::TimestampOutOfRange {
                 minimum,
                 maximum,
@@ -253,12 +239,6 @@ impl Display for SignatureError {
                     minimum, maximum, received
                 )
             }
-            Self::UnknownAccessKey {
-                access_key,
-            } => write!(f, "Unknown access key: {}", access_key),
-            Self::UnknownSignatureAlgorithm {
-                algorithm,
-            } => write!(f, "Unknown signature algorithm: {}", algorithm),
         }
     }
 }
@@ -347,10 +327,8 @@ impl SigningKey {
             SigningKeyKind::KDate => self.try_to_kdate_key(&req_date),
             SigningKeyKind::KSecret => match self.kind {
                 SigningKeyKind::KSecret => Ok(self.clone()),
-                _ => Err(SignatureError::InvalidSigningKeyKind {
-                    message: format!("Cannot derive {} key from {} key", derived_key_kind, self.kind),
-                }),
-            },
+                _ => Err(SignatureError::InvalidSigningKeyKind(format!("Cannot derive {} key from {} key", derived_key_kind, self.kind))),
+            }
         }
     }
 
@@ -371,9 +349,7 @@ impl SigningKey {
                     key: hmac_sha256(&k_region.key, service.as_ref().as_bytes()).as_ref().to_vec(),
                 })
             }
-            _ => Err(SignatureError::InvalidSigningKeyKind {
-                message: format!("Can't derive KService key from {}", self.kind),
-            }),
+            _ => Err(SignatureError::InvalidSigningKeyKind(format!("Can't derive KService key from {}", self.kind))),
         }
     }
 
@@ -393,9 +369,7 @@ impl SigningKey {
                     key: hmac_sha256(&k_date.key, region.as_ref().as_bytes()).as_ref().to_vec(),
                 })
             }
-            _ => Err(SignatureError::InvalidSigningKeyKind {
-                message: format!("Can't derive KRegion key from {}", self.kind),
-            }),
+            _ => Err(SignatureError::InvalidSigningKeyKind(format!("Can't derive KRegion key from {}", self.kind))),
         }
     }
 
@@ -421,9 +395,7 @@ impl SigningKey {
                 })
             }
 
-            _ => Err(SignatureError::InvalidSigningKeyKind {
-                message: format!("Can't derive KDate key from {}", self.kind),
-            }),
+            _ => Err(SignatureError::InvalidSigningKeyKind(format!("Can't derive KDate key from {}", self.kind))),
         }
     }
 
@@ -617,19 +589,13 @@ impl Request {
         let header = header.into();
         let mut iter = self.headers.get_all(&header).iter();
         match iter.next() {
-            None => Err(SignatureError::MissingHeader {
-                header: header.to_string(),
-            }),
+            None => Err(SignatureError::MissingHeader(header.to_string())),
             Some(value) => match iter.next() {
                 None => match from_utf8(value.as_bytes()) {
                     Ok(ref s) => Ok(s.to_string()),
-                    Err(_) => Err(SignatureError::MalformedHeader {
-                        message: format!("{} cannot does not contain valid UTF-8", header),
-                    }),
-                },
-                Some(_) => Err(SignatureError::MultipleHeaderValues {
-                    header: header.to_string(),
-                }),
+                    Err(_) => Err(SignatureError::MalformedHeader(format!("{} cannot does not contain valid UTF-8", header))),
+                }
+                Some(_) => Err(SignatureError::MultipleHeaderValues(format!("Multiple values for header {}", header))),
             },
         }
     }
@@ -645,17 +611,11 @@ impl Request {
     /// Retrieve a query parameter, requiring exactly one value be present.
     pub(crate) fn get_query_param_one(&self, parameter: &str) -> Result<String, SignatureError> {
         match self.get_query_parameters()?.get(parameter) {
-            None => Err(SignatureError::MissingParameter {
-                parameter: parameter.to_string(),
-            }),
+            None => Err(SignatureError::MissingParameter(format!("Missing parameter: {}", parameter))),
             Some(ref values) => match values.len() {
-                0 => Err(SignatureError::MissingParameter {
-                    parameter: parameter.to_string(),
-                }),
+                0 => Err(SignatureError::MissingParameter(format!("Missing parmaeter: {}", parameter))),
                 1 => Ok(values[0].to_string()),
-                _ => Err(SignatureError::MultipleParameterValues {
-                    parameter: parameter.to_string(),
-                }),
+                _ => Err(SignatureError::MultipleParameterValues(format!("Multiple values for parameter {}", parameter))),
             },
         }
     }
@@ -667,11 +627,7 @@ impl Request {
         let mut parts = content_type_opts.split(";");
         let content_type = match parts.next() {
             Some(ref s) => s.trim(),
-            None => {
-                return Err(SignatureError::MalformedHeader {
-                    message: "content-type header is empty".to_string(),
-                })
-            }
+            None => return Err(SignatureError::MalformedHeader("content-type header is empty".to_string())),
         };
 
         for option in parts {
@@ -711,9 +667,8 @@ impl Request {
         if let Ok((content_type, charset)) = self.get_content_type_and_charset() {
             if content_type == APPLICATION_X_WWW_FORM_URLENCODED {
                 if charset != "utf-8" && charset != "utf8" {
-                    return Err(SignatureError::InvalidBodyEncoding {
-                        message: format!("application/x-www-form-urlencoded body uses unsupported charset {}", charset),
-                    });
+                    return Err(SignatureError::InvalidBodyEncoding(
+                        format!("application/x-www-form-urlencoded body uses unsupported charset {}", charset)));
                 }
 
                 // Parse the body as a URL string
@@ -721,13 +676,9 @@ impl Request {
                     None => "",
                     Some(body) => match from_utf8(&body) {
                         Ok(s) => s,
-                        Err(_) => {
-                            return Err(SignatureError::InvalidBodyEncoding {
-                                message: "application/x-www-form-urlencoded body contains invalid UTF-8 characters"
-                                    .to_string(),
-                            });
-                        }
-                    },
+                        Err(_) => return Err(SignatureError::InvalidBodyEncoding(
+                            "application/x-www-form-urlencoded body contains invalid UTF-8 characters".to_string())),
+                    }
                 };
 
                 let body_normalized = normalize_query_parameters(body_utf8)?;
@@ -757,9 +708,8 @@ impl Request {
                     Ok(auth_header) => {
                         if let Some(captures) = AWS4_HMAC_SHA256_RE.captures(auth_header) {
                             if parameters_opt.is_some() {
-                                return Err(SignatureError::MultipleHeaderValues {
-                                    header: AUTHORIZATION.to_string(),
-                                });
+                                return Err(SignatureError::MultipleHeaderValues(
+                                    "Multiple value for header authorization".to_string()));
                             }
 
                             parameters_opt = Some(auth_header.split_at(captures.get(0).unwrap().end()).1);
@@ -774,31 +724,25 @@ impl Request {
         }
 
         match parameters_opt {
-            None => Err(SignatureError::MissingHeader {
-                header: AUTHORIZATION.to_string(),
-            }),
+            None => Err(SignatureError::MissingAuthenticationToken(MSG_REQUEST_MISSING_AUTH_TOKEN.to_string())),
             Some(parameters) => {
-                if parameters.len() == 0 {
-                    Err(SignatureError::MalformedSignature {
-                        message: format!("invalid Authorization header: missing parameters"),
-                    })
+                let result = split_authorization_header_parameters(&parameters)?;
+                let mut missing = Vec::<&str>::new();
+                if result.get(CREDENTIAL).is_none() {
+                    missing.push(MSG_AUTH_MISSING_CREDENTIAL);
+                }
+                if result.get(SIGNATURE).is_none() {
+                    missing.push(MSG_AUTH_MISSING_SIGNATURE);
+                }
+
+                if result.get(SIGNEDHEADERS).is_none() {
+                    missing.push(MSG_AUTH_MISSING_SIGNED_HEADERS);
+                }
+
+                if missing.len() == 0 {
+                    Ok(result)
                 } else {
-                    let result = split_authorization_header_parameters(&parameters)?;
-                    if result.get(CREDENTIAL).is_none() {
-                        Err(SignatureError::MalformedSignature {
-                            message: format!("invalid Authorization header: missing Credential"),
-                        })
-                    } else if result.get(SIGNATURE).is_none() {
-                        Err(SignatureError::MalformedSignature {
-                            message: format!("invalid Authorization header: missing Signature"),
-                        })
-                    } else if result.get(SIGNEDHEADERS).is_none() {
-                        Err(SignatureError::MalformedSignature {
-                            message: format!("invalid Authorization header: missing SignedHeaders"),
-                        })
-                    } else {
-                        Ok(result)
-                    }
+                    Err(SignatureError::IncompleteSignature(format!("{} Authorization=AWS4-HMAC-SHA256", missing.join(" "))))
                 }
             }
         }
@@ -823,11 +767,8 @@ impl Request {
                         Ok(ref ahp) => {
                             ah_signedheaders = ahp.get(SIGNEDHEADERS);
                             match ah_signedheaders {
-                                None => {
-                                    return Err(SignatureError::MalformedSignature {
-                                        message: "invalid Authorization header: missing SignedHeaders".to_string(),
-                                    })
-                                }
+                                None => return Err(SignatureError::MalformedSignature(
+                                    "invalid Authorization header: missing SignedHeaders".to_string())),
                                 Some(headers) => headers,
                             }
                         }
@@ -845,9 +786,7 @@ impl Request {
         canonicalized.sort_unstable_by(|a, b| a.to_lowercase().partial_cmp(&b.to_lowercase()).unwrap());
 
         if parts != canonicalized {
-            return Err(SignatureError::MalformedSignature {
-                message: "SignedHeaders is not canonicalized".to_string(),
-            });
+            return Err(SignatureError::MalformedSignature("SignedHeaders is not canonicalized".to_string()));
         }
 
         let mut result = BTreeMap::<String, Vec<Vec<u8>>>::new();
@@ -858,17 +797,13 @@ impl Request {
             while let Some(ref value) = v_iter.next() {
                 match from_utf8(value.as_bytes()) {
                     Ok(value) => header_values.push(value.as_bytes().to_vec()),
-                    Err(_) => {
-                        return Err(SignatureError::MalformedHeader {
-                            message: format!("Header {} contains invalid UTF-8 characters", header),
-                        })
-                    }
+                    Err(_) => return Err(SignatureError::MalformedHeader(
+                        format!("Header {} contains invalid UTF-8 characters", header))),
                 }
             }
+
             if header_values.len() == 0 {
-                return Err(SignatureError::MissingHeader {
-                    header: header.to_string(),
-                });
+                return Err(SignatureError::MissingHeader(format!("Missing header: {}", header)));
             }
 
             result.insert(header.to_string(), header_values);
@@ -902,9 +837,11 @@ impl Request {
         match self.get_query_param_one(X_AMZ_DATE) {
             Ok(date_str) => parse_date_str(
                 &date_str,
-                SignatureError::MalformedParameter {
-                    message: "X-Amz-Date is not a valid timestamp".to_string(),
-                },
+                SignatureError::IncompleteSignature(
+                    format!(
+                        "Date must be in ISO-8601 'basic format'. Got '{}'. See http://en.wikipedia.org/wiki/ISO_8601",
+                        date_str)
+                    ),
             ),
             Err(e) => match e {
                 SignatureError::MissingParameter {
@@ -912,21 +849,24 @@ impl Request {
                 } => match self.get_header_one(X_AMZ_DATE_LOWER) {
                     Ok(date_str) => parse_date_str(
                         &date_str,
-                        SignatureError::MalformedHeader {
-                            message: "X-Amz-Date is not a valid timestamp".to_string(),
-                        },
-                    ),
+                        SignatureError::IncompleteSignature(
+                            format!(
+                                "Date must be in ISO-8601 'basic format'. Got '{}'. See http://en.wikipedia.org/wiki/ISO_8601",
+                                date_str)
+                            ),
+                        ),
                     Err(e) => match e {
-                        SignatureError::MissingHeader {
-                            ..
-                        } => match self.get_header_one(DATE) {
+                        SignatureError::MissingHeader(_) => match self.get_header_one(DATE) {
                             Ok(date_str) => parse_date_str(
                                 &date_str,
-                                SignatureError::MalformedHeader {
-                                    message: "Date is not a valid timestamp".to_string(),
-                                },
+                                SignatureError::IncompleteSignature(
+                                    format!(
+                                        "Date must be in ISO-8601 'basic format'. Got '{}'. See http://en.wikipedia.org/wiki/ISO_8601",
+                                        date_str)
+                                    ),
                             ),
-                            Err(e) => Err(e),
+                            Err(SignatureError::MissingHeader(m)) => Err(SignatureError::IncompleteSignature(m)),
+                            Err(e) => Err(e)
                         },
                         _ => Err(e),
                     },
@@ -972,9 +912,8 @@ impl Request {
                         Some(c) => c,
                         None => {
                             trace!("auth_headers={:?}", auth_headers);
-                            return Err(SignatureError::MalformedSignature {
-                                message: "invalid Authorization header: missing Credential".to_string(),
-                            });
+                            return Err(SignatureError::MalformedSignature(
+                                "invalid Authorization header: missing Credential".to_string()));
                         }
                     }
                 }
@@ -984,9 +923,7 @@ impl Request {
 
         let parts: Vec<&str> = credential.splitn(2, '/').collect();
         if parts.len() != 2 {
-            return Err(SignatureError::InvalidCredential {
-                message: "Malformed credential".to_string(),
-            });
+            return Err(SignatureError::InvalidCredential("Malformed credential".to_string()));
         }
 
         let access_key = parts[0];
@@ -995,9 +932,8 @@ impl Request {
         if request_scope == server_scope {
             Ok(access_key.to_string())
         } else {
-            Err(SignatureError::InvalidCredential {
-                message: format!("Invalid credential scope: Expected {} instead of {}", server_scope, request_scope),
-            })
+            Err(SignatureError::InvalidCredential(
+                format!("Invalid credential scope: Expected {} instead of {}", server_scope, request_scope)))
         }
     }
 
@@ -1016,9 +952,7 @@ impl Request {
                 } => match self.get_header_one(X_AMZ_SECURITY_TOKEN_LOWER) {
                     Ok(token) => Ok(Some(token)),
                     Err(e) => match e {
-                        SignatureError::MissingHeader {
-                            ..
-                        } => Ok(None),
+                        SignatureError::MissingHeader(_) => Ok(None),
                         _ => Err(e),
                     },
                 },
@@ -1038,9 +972,9 @@ impl Request {
                     let ah: HashMap<String, String> = self.get_authorization_header_parameters()?;
                     match ah.get(SIGNATURE) {
                         Some(c) => Ok(c.to_string()),
-                        None => Err(SignatureError::MalformedSignature {
-                            message: "invalid Authorization header: missing Signature".to_string(),
-                        }),
+                        None => Err(SignatureError::MalformedSignature(
+                            "invalid Authorization header: missing Signature".to_string(),
+                        ))
                     }
                 }
                 _ => Err(e),
@@ -1203,9 +1137,8 @@ where
     let expected_sig = sigv4_get_expected_signature(&req, &signing_key, &region, &service)?;
 
     if expected_sig != request_sig {
-        Err(SignatureError::InvalidSignature {
-            message: format!("Expected {} instead of {}", expected_sig, request_sig),
-        })
+        Err(SignatureError::SignatureDoesNotMatch(
+            "The request signature we calculated does not match the signature you provided. Check your AWS Secret Access Key and signing method. Consult the service documentation for details.".to_string()))
     } else {
         Ok(())
     }
@@ -1255,9 +1188,7 @@ pub fn normalize_uri_path_component(path_component: &str) -> Result<String, Sign
         } else if c == b'%' {
             if i + 2 >= path_component.len() {
                 // % encoding would go beyond end of string; return an error.
-                return Err(SignatureError::InvalidURIPath {
-                    message: "Incomplete hex encoding".to_string(),
-                });
+                return Err(SignatureError::InvalidURIPath(MSG_INCOMPLETE_TRAILING_ESCAPE.to_string()));
             }
 
             let hex_digits = &path_component[i + 1..i + 3];
@@ -1275,9 +1206,7 @@ pub fn normalize_uri_path_component(path_component: &str) -> Result<String, Sign
                     i += 3;
                 }
                 Err(_) => {
-                    return Err(SignatureError::InvalidURIPath {
-                        message: format!("Invalid hex encoding: {:?}", hex_digits),
-                    })
+                    return Err(SignatureError::InvalidURIPath(format!("{}{:?}", MSG_ILLEGAL_HEX_CHAR, hex_digits)));
                 }
             }
         } else if c == b'+' {
@@ -1303,9 +1232,7 @@ pub fn canonicalize_uri_path(uri_path: &str) -> Result<String, SignatureError> {
 
     // All other paths must be abolute.
     if !uri_path.starts_with("/") {
-        return Err(SignatureError::InvalidURIPath {
-            message: format!("Path is not absolute: {}", uri_path),
-        });
+        return Err(SignatureError::InvalidURIPath(format!("Path is not absolute: {}", uri_path)));
     }
 
     // Replace double slashes; this makes it easier to handle slashes at the end.
@@ -1327,9 +1254,8 @@ pub fn canonicalize_uri_path(uri_path: &str) -> Result<String, SignatureError> {
 
             if i <= 1 {
                 // This isn't allowed at the beginning!
-                return Err(SignatureError::InvalidURIPath {
-                    message: format!("Relative path entry '..' navigates above root: {}", uri_path),
-                });
+                return Err(SignatureError::InvalidURIPath(
+                    format!("Relative path entry '..' navigates above root: {}", uri_path)));
             }
 
             components.remove(i - 1);
@@ -1402,18 +1328,15 @@ pub fn split_authorization_header_parameters(parameters: &str) -> Result<HashMap
     for parameter in parameters.split(',') {
         let parts: Vec<&str> = parameter.splitn(2, '=').collect();
         if parts.len() != 2 {
-            return Err(SignatureError::MalformedSignature {
-                message: "invalid Authorization header: missing '='".to_string(),
-            });
+            return Err(SignatureError::MalformedSignature("invalid Authorization header: missing '='".to_string()));
         }
 
         let key = parts[0].trim_start().to_string();
         let value = parts[1].trim_end().to_string();
 
         if result.contains_key(&key) {
-            return Err(SignatureError::MalformedSignature {
-                message: format!("invalid Authorization header: duplicate field {}", key),
-            });
+            return Err(SignatureError::MalformedSignature(
+                format!("invalid Authorization header: duplicate field {}", key)));
         }
 
         result.insert(key, value);

@@ -209,10 +209,7 @@ mod tests {
             let principal = PrincipalActor::user("aws", "123456789012", "/", "test", "AIDAAAAAAAAAAAAAAAAA").unwrap();
             Ok((principal, k_secret.derive(signing_key_kind, &request_date, region, service)))
         } else {
-            Err(SignatureError::UnknownAccessKey {
-                access_key: access_key,
-            }
-            .into())
+            Err(SignatureError::InvalidClientTokenId.into())
         }
     }
 
@@ -264,10 +261,7 @@ mod tests {
                     debug!("derived key: {:?} {:02x?}", derived, &derived.key);
                     Ok((principal, derived))
                 } else {
-                    Err(SignatureError::UnknownAccessKey {
-                        access_key: req.access_key,
-                    }
-                    .into())
+                    Err(SignatureError::InvalidClientTokenId.into())
                 }
             })
         }

@@ -123,7 +123,7 @@ fn canonicalize_valid() {
 #[test]
 fn canonicalize_invalid() {
     let e = expect_err!(canonicalize_uri_path(&"hello/world"), InvalidURIPath);
-    assert!(format!("{}", e).starts_with("Invalid URI path:"));
+    assert_eq!(e.to_string(), "Path is not absolute: hello/world");
 
     expect_err!(canonicalize_uri_path(&"/hello/../../world"), InvalidURIPath);
 }
@@ -480,6 +480,6 @@ fn invalid_date() {
         body: None,
     };
 
-    let e = expect_err!(request.get_request_timestamp(), MalformedParameter);
+    let e = expect_err!(request.get_request_timestamp(), MalformedQueryString);
     assert_eq!(format!("{}", e), "Malformed query parameter: X-Amz-Date is not a valid timestamp");
 }
