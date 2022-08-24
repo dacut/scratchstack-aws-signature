@@ -29,7 +29,7 @@ pub trait ParseISO8601<T> {
 
 impl ParseISO8601<DateTime<FixedOffset>> for DateTime<FixedOffset> {
     fn parse_from_iso8601(s: &str) -> ParseResult<DateTime<FixedOffset>> {
-        if let Some(cap) = ISO_8601_REGEX.captures(&s) {
+        if let Some(cap) = ISO_8601_REGEX.captures(s) {
             let year_match = cap.name("year").unwrap();
             let year_str: &str = year_match.as_str();
             let year = i32::from_str(year_str).unwrap();
@@ -60,7 +60,7 @@ impl ParseISO8601<DateTime<FixedOffset>> for DateTime<FixedOffset> {
                 Some(frac_match) => {
                     let mut frac_str = frac_match.as_str().to_string();
                     while frac_str.len() < 9 {
-                        frac_str.push_str("0");
+                        frac_str.push('0');
                     }
 
                     frac_str.truncate(9);
@@ -102,11 +102,11 @@ pub(crate) fn parse_date_str<E>(date_str: &str, e: E) -> Result<DateTime<Utc>, E
 where
     E: Error + 'static,
 {
-    if let Ok(ref d) = DateTime::parse_from_rfc2822(&date_str) {
+    if let Ok(ref d) = DateTime::parse_from_rfc2822(date_str) {
         Ok(d.with_timezone(&Utc))
-    } else if let Ok(ref d) = DateTime::parse_from_rfc3339(&date_str) {
+    } else if let Ok(ref d) = DateTime::parse_from_rfc3339(date_str) {
         Ok(d.with_timezone(&Utc))
-    } else if let Ok(ref d) = DateTime::parse_from_iso8601(&date_str) {
+    } else if let Ok(ref d) = DateTime::parse_from_iso8601(date_str) {
         Ok(d.with_timezone(&Utc))
     } else {
         Err(e)

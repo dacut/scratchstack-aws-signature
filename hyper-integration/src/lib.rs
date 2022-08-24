@@ -75,7 +75,7 @@ mod tests {
                                 None => break,
                             }
                         }
-                        eprint!("\n");
+                        eprintln!();
                         assert_eq!(r.status, StatusCode::OK);
                     }
                     Err(e) => panic!("Error from server: {:?}", e),
@@ -128,7 +128,7 @@ mod tests {
                                 None => break,
                             }
                         }
-                        eprint!("\n");
+                        eprintln!();
                         status = r.status;
                     }
                     Err(e) => panic!("Error from server: {:?}", e),
@@ -177,7 +177,7 @@ mod tests {
                                 None => break,
                             }
                         }
-                        eprint!("\n");
+                        eprintln!();
                         assert_eq!(r.status, StatusCode::UNAUTHORIZED);
                     }
                     Err(e) => panic!("Error from server: {:?}", e),

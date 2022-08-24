@@ -20,7 +20,6 @@ use std::{
 };
 
 use chrono::{Date, DateTime, Duration, Utc};
-use hex;
 use http::{
     header::{HeaderMap, HeaderValue},
     request::Parts,
@@ -321,10 +320,10 @@ impl SigningKey {
         S: AsRef<str>,
     {
         match derived_key_kind {
-            SigningKeyKind::KSigning => Ok(self.to_ksigning_key(&req_date, &region, &service)),
-            SigningKeyKind::KService => self.try_to_kservice_key(&req_date, &region, &service),
-            SigningKeyKind::KRegion => self.try_to_kregion_key(&req_date, &region),
-            SigningKeyKind::KDate => self.try_to_kdate_key(&req_date),
+            SigningKeyKind::KSigning => Ok(self.to_ksigning_key(req_date, &region, &service)),
+            SigningKeyKind::KService => self.try_to_kservice_key(req_date, &region, &service),
+            SigningKeyKind::KRegion => self.try_to_kregion_key(req_date, &region),
+            SigningKeyKind::KDate => self.try_to_kdate_key(req_date),
             SigningKeyKind::KSecret => match self.kind {
                 SigningKeyKind::KSecret => Ok(self.clone()),
                 _ => Err(SignatureError::InvalidSigningKeyKind(format!("Cannot derive {} key from {} key", derived_key_kind, self.kind))),
@@ -343,7 +342,7 @@ impl SigningKey {
         match self.kind {
             SigningKeyKind::KService => Ok(self.clone()),
             SigningKeyKind::KRegion | SigningKeyKind::KDate | SigningKeyKind::KSecret => {
-                let k_region = self.to_kregion_key(&req_date, &region);
+                let k_region = self.to_kregion_key(req_date, &region);
                 Ok(Self {
                     kind: SigningKeyKind::KService,
                     key: hmac_sha256(&k_region.key, service.as_ref().as_bytes()).as_ref().to_vec(),
@@ -408,7 +407,7 @@ impl SigningKey {
         R: AsRef<str>,
         S: AsRef<str>,
     {
-        match self.try_derive(derived_key_kind, &req_date, &region, &service) {
+        match self.try_derive(derived_key_kind, req_date, &region, &service) {
             Ok(s) => s,
             Err(e) => panic!("{}", e),
         }
@@ -425,7 +424,7 @@ impl SigningKey {
         match self.kind {
             SigningKeyKind::KSigning => self.clone(),
             _ => {
-                let k_service = self.to_kservice_key(&req_date, &region, &service);
+                let k_service = self.to_kservice_key(req_date, &region, &service);
                 Self {
                     kind: SigningKeyKind::KSigning,
                     key: hmac_sha256(&k_service.key, AWS4_REQUEST.as_bytes()).as_ref().to_vec(),
@@ -442,7 +441,7 @@ impl SigningKey {
         R: AsRef<str>,
         S: AsRef<str>,
     {
-        match self.try_to_kservice_key(&req_date, &region, &service) {
+        match self.try_to_kservice_key(req_date, &region, &service) {
             Ok(s) => s,
             Err(e) => panic!("{}", e),
         }
@@ -456,7 +455,7 @@ impl SigningKey {
     where
         R: AsRef<str>,
     {
-        match self.try_to_kregion_key(&req_date, &region) {
+        match self.try_to_kregion_key(req_date, &region) {
             Ok(s) => s,
             Err(e) => panic!("{}", e),
         }
@@ -467,7 +466,7 @@ impl SigningKey {
     /// This function panics if given a KRegion, KSigning, or KService key. Use `try_to_kdate_key` for a non-panicking
     /// version.
     pub fn to_kdate_key(&self, req_date: &Date<Utc>) -> Self {
-        match self.try_to_kdate_key(&req_date) {
+        match self.try_to_kdate_key(req_date) {
             Ok(s) => s,
             Err(e) => panic!("{}", e),
         }
@@ -560,7 +559,7 @@ impl Request {
             request_method: parts.method.as_str().to_string(),
             uri: parts.uri.clone(),
             headers: parts.headers.clone(),
-            body: body,
+            body,
         }
     }
 
@@ -575,7 +574,7 @@ impl Request {
         A2: AsRef<str>,
     {
         Ok(GetSigningKeyRequest {
-            signing_key_kind: signing_key_kind,
+            signing_key_kind,
             access_key: self.get_access_key(&region, &service)?,
             session_token: self.get_session_token()?,
             request_date: self.get_request_date()?,
@@ -612,7 +611,7 @@ impl Request {
     pub(crate) fn get_query_param_one(&self, parameter: &str) -> Result<String, SignatureError> {
         match self.get_query_parameters()?.get(parameter) {
             None => Err(SignatureError::MissingParameter(format!("Missing parameter: {}", parameter))),
-            Some(ref values) => match values.len() {
+            Some(values) => match values.len() {
                 0 => Err(SignatureError::MissingParameter(format!("Missing parmaeter: {}", parameter))),
                 1 => Ok(values[0].to_string()),
                 _ => Err(SignatureError::MultipleParameterValues(format!("Multiple values for parameter {}", parameter))),
@@ -624,27 +623,27 @@ impl Request {
     pub(crate) fn get_content_type_and_charset(&self) -> Result<(String, String), SignatureError> {
         let content_type_opts = self.get_header_one(CONTENT_TYPE)?;
 
-        let mut parts = content_type_opts.split(";");
+        let mut parts = content_type_opts.split(';');
         let content_type = match parts.next() {
-            Some(ref s) => s.trim(),
+            Some(s) => s.trim(),
             None => return Err(SignatureError::MalformedHeader("content-type header is empty".to_string())),
         };
 
         for option in parts {
             let opt_trim = option.trim();
-            let opt_parts: Vec<&str> = opt_trim.splitn(2, "=").collect();
+            let opt_parts: Vec<&str> = opt_trim.splitn(2, '=').collect();
 
             if opt_parts.len() == 2 && opt_parts[0] == CHARSET {
                 return Ok((content_type.to_string(), opt_parts[1].trim().to_lowercase()));
             }
         }
 
-        return Ok((content_type.to_string(), "utf-8".to_string()));
+        Ok((content_type.to_string(), "utf-8".to_string()))
     }
 
     /// The canonicalized URI path for a request.
     pub(crate) fn get_canonical_uri_path(&self) -> Result<String, SignatureError> {
-        canonicalize_uri_path(&self.uri.path())
+        canonicalize_uri_path(self.uri.path())
     }
 
     /// The canonical query string from the query parameters.
@@ -674,7 +673,7 @@ impl Request {
                 // Parse the body as a URL string
                 let body_utf8 = match &self.body {
                     None => "",
-                    Some(body) => match from_utf8(&body) {
+                    Some(body) => match from_utf8(body) {
                         Ok(s) => s,
                         Err(_) => return Err(SignatureError::InvalidBodyEncoding(
                             "application/x-www-form-urlencoded body contains invalid UTF-8 characters".to_string())),
@@ -691,7 +690,7 @@ impl Request {
         }
 
         results.sort_unstable();
-        Ok(results.join("&").to_string())
+        Ok(results.join("&"))
     }
 
     /// The parameters from the Authorization header (only -- not the query parameter). If the Authorization header is not present
@@ -704,8 +703,8 @@ impl Request {
         loop {
             match auth_iter.next() {
                 None => break,
-                Some(auth_header) => match auth_header.to_str() {
-                    Ok(auth_header) => {
+                Some(auth_header) => {
+                    if let Ok(auth_header) = auth_header.to_str() {
                         if let Some(captures) = AWS4_HMAC_SHA256_RE.captures(auth_header) {
                             if parameters_opt.is_some() {
                                 return Err(SignatureError::MultipleHeaderValues(
@@ -718,8 +717,7 @@ impl Request {
                             trace!("Not SigV4: {:?}", auth_header);
                         }
                     }
-                    Err(_) => (),
-                },
+                }
             }
         }
 
@@ -792,9 +790,9 @@ impl Request {
         let mut result = BTreeMap::<String, Vec<Vec<u8>>>::new();
         for header in canonicalized.iter() {
             let mut header_values = Vec::new();
-            let mut v_iter = self.headers.get_all(header).iter();
+            let v_iter = self.headers.get_all(header).iter();
 
-            while let Some(ref value) = v_iter.next() {
+            for value in v_iter {
                 match from_utf8(value.as_bytes()) {
                     Ok(value) => header_values.push(value.as_bytes().to_vec()),
                     Err(_) => return Err(SignatureError::MalformedHeader(
@@ -802,7 +800,7 @@ impl Request {
                 }
             }
 
-            if header_values.len() == 0 {
+            if header_values.is_empty() {
                 return Err(SignatureError::MissingHeader(format!("Missing header: {}", header)));
             }
 
@@ -1000,11 +998,11 @@ impl Request {
         let canonical_query_string = self.get_canonical_query_string()?;
         let body_hex_digest = self.get_body_digest()?;
 
-        result.write(self.request_method.as_bytes())?;
+        result.write_all(self.request_method.as_bytes())?;
         result.push(b'\n');
-        result.write(canonical_uri_path.as_bytes())?;
+        result.write_all(canonical_uri_path.as_bytes())?;
         result.push(b'\n');
-        result.write(canonical_query_string.as_bytes())?;
+        result.write_all(canonical_query_string.as_bytes())?;
         result.push(b'\n');
 
         let mut is_first_key = true;
@@ -1012,7 +1010,7 @@ impl Request {
         for (key, values) in self.get_signed_headers()? {
             let key_bytes = key.as_bytes();
 
-            result.write(key_bytes)?;
+            result.write_all(key_bytes)?;
             result.push(b':');
 
             let mut is_first_value = true;
@@ -1024,7 +1022,7 @@ impl Request {
                 }
 
                 let value_collapsed_space = MULTISPACE.replace_all(from_utf8(value).unwrap(), " ");
-                result.write(value_collapsed_space.as_bytes())?;
+                result.write_all(value_collapsed_space.as_bytes())?;
             }
             result.push(b'\n');
 
@@ -1034,7 +1032,7 @@ impl Request {
                 header_keys.push(b';');
             }
 
-            header_keys.write(key_bytes)?;
+            header_keys.write_all(key_bytes)?;
         }
 
         result.push(b'\n');
@@ -1055,7 +1053,7 @@ impl Request {
     pub(crate) fn get_body_digest(&self) -> Result<String, SignatureError> {
         match &self.body {
             None => Ok(SHA256_EMPTY.to_string()),
-            Some(body) => Ok(hex::encode(digest(&SHA256, &body).as_ref())),
+            Some(body) => Ok(hex::encode(digest(&SHA256, body).as_ref())),
         }
     }
 
@@ -1072,13 +1070,13 @@ impl Request {
         trace!("Credential scope: {:?}", credential_scope);
         trace!("Canonical request: {:?}", from_utf8(canonical_request.as_ref()));
 
-        result.write(AWS4_HMAC_SHA256.as_bytes())?;
+        result.write_all(AWS4_HMAC_SHA256.as_bytes())?;
         result.push(b'\n');
         write!(&mut result, "{}", timestamp.format(ISO8601_COMPACT_FORMAT))?;
         result.push(b'\n');
-        result.write(credential_scope.as_bytes())?;
+        result.write_all(credential_scope.as_bytes())?;
         result.push(b'\n');
-        result.write(hex::encode(digest(&SHA256, &canonical_request).as_ref()).as_bytes())?;
+        result.write_all(hex::encode(digest(&SHA256, &canonical_request).as_ref()).as_bytes())?;
 
         Ok(result)
     }
@@ -1134,7 +1132,7 @@ where
     }
 
     let request_sig = req.get_request_signature()?;
-    let expected_sig = sigv4_get_expected_signature(&req, &signing_key, &region, &service)?;
+    let expected_sig = sigv4_get_expected_signature(req, signing_key, &region, &service)?;
 
     if expected_sig != request_sig {
         Err(SignatureError::SignatureDoesNotMatch(
@@ -1177,7 +1175,7 @@ pub fn is_rfc3986_unreserved(c: u8) -> bool {
 pub fn normalize_uri_path_component(path_component: &str) -> Result<String, SignatureError> {
     let path_component = path_component.as_bytes();
     let mut i = 0;
-    let ref mut result = Vec::<u8>::new();
+    let result = &mut Vec::<u8>::new();
 
     while i < path_component.len() {
         let c = path_component[i];
@@ -1211,7 +1209,7 @@ pub fn normalize_uri_path_component(path_component: &str) -> Result<String, Sign
             }
         } else if c == b'+' {
             // Plus-encoded space. Convert this to %20.
-            result.write(b"%20")?;
+            result.write_all(b"%20")?;
             i += 1;
         } else {
             // Character should have been encoded.
@@ -1226,12 +1224,12 @@ pub fn normalize_uri_path_component(path_component: &str) -> Result<String, Sign
 /// Normalizes the specified URI path, removing redundant slashes and relative path components.
 pub fn canonicalize_uri_path(uri_path: &str) -> Result<String, SignatureError> {
     // Special case: empty path is converted to '/'; also short-circuit the usual '/' path here.
-    if uri_path == "" || uri_path == "/" {
+    if uri_path.is_empty() || uri_path == "/" {
         return Ok("/".to_string());
     }
 
     // All other paths must be abolute.
-    if !uri_path.starts_with("/") {
+    if !uri_path.starts_with('/') {
         return Err(SignatureError::InvalidURIPath(format!("Path is not absolute: {}", uri_path)));
     }
 
@@ -1239,7 +1237,7 @@ pub fn canonicalize_uri_path(uri_path: &str) -> Result<String, SignatureError> {
     let uri_path = MULTISLASH.replace_all(uri_path, "/");
 
     // Examine each path component for relative directories.
-    let mut components: Vec<String> = uri_path.split("/").map(|s| s.to_string()).collect();
+    let mut components: Vec<String> = uri_path.split('/').map(|s| s.to_string()).collect();
     let mut i = 1; // Ignore the leading "/"
     while i < components.len() {
         let component = normalize_uri_path_component(&components[i])?;
@@ -1270,7 +1268,7 @@ pub fn canonicalize_uri_path(uri_path: &str) -> Result<String, SignatureError> {
         }
     }
 
-    assert!(components.len() > 0);
+    assert!(!components.is_empty());
     match components.len() {
         1 => Ok("/".to_string()),
         _ => Ok(components.join("/")),
@@ -1283,22 +1281,22 @@ pub fn canonicalize_uri_path(uri_path: &str) -> Result<String, SignatureError> {
 /// The order of the values matches the order that they appeared in the query string -- this is important for SigV4
 /// validation.
 pub fn normalize_query_parameters(query_string: &str) -> Result<HashMap<String, Vec<String>>, SignatureError> {
-    if query_string.len() == 0 {
+    if query_string.is_empty() {
         return Ok(HashMap::new());
     }
 
     // Split the query string into parameters on '&' boundaries.
-    let components = query_string.split("&");
+    let components = query_string.split('&');
     let mut result = HashMap::<String, Vec<String>>::new();
 
     for component in components {
-        if component.len() == 0 {
+        if component.is_empty() {
             // Empty component; skip it.
             continue;
         }
 
         // Split the parameter into key and value portions on the '='
-        let parts: Vec<&str> = component.splitn(2, "=").collect();
+        let parts: Vec<&str> = component.splitn(2, '=').collect();
         let key = parts[0];
         let value = if parts.len() > 1 {
             parts[1]
