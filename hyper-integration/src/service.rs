@@ -126,11 +126,11 @@ where
                 Ok(()) => match self.implementation.poll_ready(c) {
                     Poll::Ready(r) => match r {
                         Ok(()) => Poll::Ready(Ok(())),
-                        Err(e) => Poll::Ready(Err(e.into())),
+                        Err(e) => Poll::Ready(Err(e)),
                     },
                     Poll::Pending => Poll::Pending,
                 },
-                Err(e) => Poll::Ready(Err(e.into())),
+                Err(e) => Poll::Ready(Err(e)),
             },
             Poll::Pending => Poll::Pending,
         }
@@ -138,10 +138,10 @@ where
 
     fn call(&mut self, req: Request<Body>) -> Self::Future {
         let (parts, body) = req.into_parts();
-        let allowed_mismatch = self.allowed_mismatch.clone();
+        let allowed_mismatch = self.allowed_mismatch;
         let region = self.region.clone();
         let service = self.service.clone();
-        let signing_key_kind = self.signing_key_kind.clone();
+        let signing_key_kind = self.signing_key_kind;
         let get_signing_key = self.get_signing_key.clone();
         let implementation = self.implementation.clone();
 
@@ -158,6 +158,7 @@ where
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_call<G, S>(
     mut parts: Parts,
     body: Body,
@@ -179,11 +180,7 @@ where
     debug!("Request: {} {}", parts.method, parts.uri);
     debug!("Request headers:");
     for (key, value) in &parts.headers {
-        let value_disp = match value.to_str() {
-            Ok(v) => v,
-            Err(_) => "<INVALID>",
-        };
-
+        let value_disp = value.to_str().unwrap_or("<INVALID>");
         debug!("{}: {}", key, value_disp);
     }
 
@@ -219,7 +216,7 @@ where
             let new_req = Request::from_parts(parts, Body::from(new_body));
             match implementation.oneshot(new_req).await {
                 Ok(r) => Ok(r),
-                Err(e) => Err(e.into()),
+                Err(e) => Err(e),
             }
         }
     }
