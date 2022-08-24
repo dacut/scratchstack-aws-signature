@@ -483,3 +483,15 @@ fn invalid_date() {
     let e = expect_err!(request.get_request_timestamp(), MalformedParameter);
     assert_eq!(format!("{}", e), "Malformed query parameter: X-Amz-Date is not a valid timestamp");
 }
+
+/// Check for query parameters without a value, e.g. ?Key2&
+/// https://github.com/dacut/scratchstack-aws-signature/issues/2
+#[test]
+fn normalize_query_parameters_missing_value() {
+    let result = normalize_query_parameters("Key1=Value1&Key2&Key3=Value3");
+    assert!(result.is_ok());
+    let result = result.unwrap();
+    assert_eq!(result["Key1"], vec!["Value1"]);
+    assert_eq!(result["Key2"], vec![""]);
+    assert_eq!(result["Key3"], vec!["Value3"]);
+}

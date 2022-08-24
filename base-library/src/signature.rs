@@ -1374,7 +1374,7 @@ pub fn normalize_query_parameters(query_string: &str) -> Result<HashMap<String, 
         // Split the parameter into key and value portions on the '='
         let parts: Vec<&str> = component.splitn(2, "=").collect();
         let key = parts[0];
-        let value = if parts.len() > 0 {
+        let value = if parts.len() > 1 {
             parts[1]
         } else {
             ""
