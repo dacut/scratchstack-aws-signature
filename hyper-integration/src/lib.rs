@@ -1,3 +1,5 @@
+#![warn(clippy::all)]
+
 mod service;
 pub use crate::service::AwsSigV4VerifierService;
 
@@ -29,8 +31,6 @@ mod tests {
         task::{Context, Poll},
         time::Duration,
     };
-    use test_env_log;
-    use tokio;
     use tower::{BoxError, Service};
 
     #[test_env_log::test(tokio::test)]
@@ -63,16 +63,13 @@ mod tests {
                         eprintln!("Response from server: {:?}", r.status);
 
                         let mut body = r.body;
-                        loop {
-                            match body.next().await {
-                                Some(b_result) => match b_result {
-                                    Ok(bytes) => eprint!("{:?}", bytes),
-                                    Err(e) => {
-                                        eprintln!("Error while ready body: {:?}", e);
-                                        break;
-                                    }
-                                },
-                                None => break,
+                        while let Some(b_result) = body.next().await {
+                            match b_result {
+                                Ok(bytes) => eprint!("{:?}", bytes),
+                                Err(e) => {
+                                    eprintln!("Error while ready body: {:?}", e);
+                                    break;
+                                }
                             }
                         }
                         eprintln!();
@@ -80,8 +77,6 @@ mod tests {
                     }
                     Err(e) => panic!("Error from server: {:?}", e),
                 };
-
-                ()
             })
             .await
         {
@@ -116,16 +111,13 @@ mod tests {
                         eprintln!("Response from server: {:?}", r.status);
 
                         let mut body = r.body;
-                        loop {
-                            match body.next().await {
-                                Some(b_result) => match b_result {
-                                    Ok(bytes) => eprint!("{:?}", bytes),
-                                    Err(e) => {
-                                        eprintln!("Error while ready body: {:?}", e);
-                                        break;
-                                    }
-                                },
-                                None => break,
+                        while let Some(b_result) = body.next().await {
+                            match b_result {
+                                Ok(bytes) => eprint!("{:?}", bytes),
+                                Err(e) => {
+                                    eprintln!("Error while ready body: {:?}", e);
+                                    break;
+                                }
                             }
                         }
                         eprintln!();
@@ -133,8 +125,6 @@ mod tests {
                     }
                     Err(e) => panic!("Error from server: {:?}", e),
                 };
-
-                ()
             })
             .await
         {
@@ -165,16 +155,13 @@ mod tests {
                         eprintln!("Response from server: {:?}", r.status);
 
                         let mut body = r.body;
-                        loop {
-                            match body.next().await {
-                                Some(b_result) => match b_result {
-                                    Ok(bytes) => eprint!("{:?}", bytes),
-                                    Err(e) => {
-                                        eprintln!("Error while ready body: {:?}", e);
-                                        break;
-                                    }
-                                },
-                                None => break,
+                        while let Some(b_result) = body.next().await {
+                            match b_result {
+                                Ok(bytes) => eprint!("{:?}", bytes),
+                                Err(e) => {
+                                    eprintln!("Error while ready body: {:?}", e);
+                                    break;
+                                }
                             }
                         }
                         eprintln!();
@@ -182,8 +169,6 @@ mod tests {
                     }
                     Err(e) => panic!("Error from server: {:?}", e),
                 };
-
-                ()
             })
             .await
         {
@@ -209,7 +194,7 @@ mod tests {
             let principal = PrincipalActor::user("aws", "123456789012", "/", "test", "AIDAAAAAAAAAAAAAAAAA").unwrap();
             Ok((principal, k_secret.derive(signing_key_kind, &request_date, region, service)))
         } else {
-            Err(SignatureError::InvalidClientTokenId.into())
+            Err(SignatureError::InvalidClientTokenId)
         }
     }
 

@@ -1,3 +1,5 @@
+#![warn(clippy::all)]
+
 //! The `aws_sig_verify` crate provides AWS SigV4 _verification_ routines. This *is not* the library you want if you
 //! just want to call AWS services or other services that use AWS SigV4 signatures.
 //! [Rusoto](https://github.com/rusoto/rusoto) already has a library,
