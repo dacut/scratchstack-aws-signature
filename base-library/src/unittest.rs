@@ -12,7 +12,6 @@ use http::{
 };
 use scratchstack_aws_principal::PrincipalActor;
 use test_env_log::{self, test};
-use tokio;
 
 const TEST_REGION: &str = "us-east-1";
 const TEST_SERVICE: &str = "service";
@@ -104,28 +103,27 @@ macro_rules! expect_err {
 
 #[test]
 fn canonicalize_uri_path_empty() {
-    assert_eq!(canonicalize_uri_path(&"").unwrap(), "/".to_string());
-    assert_eq!(canonicalize_uri_path(&"/").unwrap(), "/".to_string());
+    assert_eq!(canonicalize_uri_path("").unwrap(), "/".to_string());
+    assert_eq!(canonicalize_uri_path("/").unwrap(), "/".to_string());
 }
 
 #[test]
 fn canonicalize_valid() {
-    assert_eq!(canonicalize_uri_path(&"/hello/world").unwrap(), "/hello/world".to_string());
-    assert_eq!(canonicalize_uri_path(&"/hello///world").unwrap(), "/hello/world".to_string());
-    assert_eq!(canonicalize_uri_path(&"/hello/./world").unwrap(), "/hello/world".to_string());
-    assert_eq!(canonicalize_uri_path(&"/hello/foo/../world").unwrap(), "/hello/world".to_string());
-    assert_eq!(canonicalize_uri_path(&"/hello/%77%6F%72%6C%64").unwrap(), "/hello/world".to_string());
-    assert_eq!(canonicalize_uri_path(&"/hello/w*rld").unwrap(), "/hello/w%2Arld".to_string());
-    assert_eq!(canonicalize_uri_path(&"/hello/w%2arld").unwrap(), "/hello/w%2Arld".to_string());
-    assert_eq!(canonicalize_uri_path(&"/hello/w+rld").unwrap(), "/hello/w%20rld".to_string());
+    assert_eq!(canonicalize_uri_path("/hello/world").unwrap(), "/hello/world".to_string());
+    assert_eq!(canonicalize_uri_path("/hello///world").unwrap(), "/hello/world".to_string());
+    assert_eq!(canonicalize_uri_path("/hello/./world").unwrap(), "/hello/world".to_string());
+    assert_eq!(canonicalize_uri_path("/hello/foo/../world").unwrap(), "/hello/world".to_string());
+    assert_eq!(canonicalize_uri_path("/hello/%77%6F%72%6C%64").unwrap(), "/hello/world".to_string());
+    assert_eq!(canonicalize_uri_path("/hello/w*rld").unwrap(), "/hello/w%2Arld".to_string());
+    assert_eq!(canonicalize_uri_path("/hello/w%2arld").unwrap(), "/hello/w%2Arld".to_string());
+    assert_eq!(canonicalize_uri_path("/hello/w+rld").unwrap(), "/hello/w%20rld".to_string());
 }
 
 #[test]
 fn canonicalize_invalid() {
-    let e = expect_err!(canonicalize_uri_path(&"hello/world"), InvalidURIPath);
+    let e = expect_err!(canonicalize_uri_path("hello/world"), InvalidURIPath);
     assert_eq!(e.to_string(), "Path is not absolute: hello/world");
-
-    expect_err!(canonicalize_uri_path(&"/hello/../../world"), InvalidURIPath);
+    expect_err!(canonicalize_uri_path("/hello/../../world"), InvalidURIPath);
 }
 
 #[test]
@@ -165,14 +163,10 @@ fn normalize_empty() {
 #[test]
 fn normalize_invalid_hex() {
     let e = expect_err!(normalize_uri_path_component("abcd%yy"), InvalidURIPath);
-    assert!(format!("{}", e).starts_with("Invalid URI path:"));
-
+    assert!(e.starts_with("Invalid URI path:"));
     expect_err!(normalize_uri_path_component("abcd%yy"), InvalidURIPath);
-
     expect_err!(normalize_uri_path_component("abcd%0"), InvalidURIPath);
-
     expect_err!(normalize_uri_path_component("abcd%"), InvalidURIPath);
-
     assert_eq!(normalize_uri_path_component("abcd%65").unwrap(), "abcde");
 }
 
@@ -191,8 +185,8 @@ fn duplicate_headers() {
     let uri = Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap();
     let request = Request {
         request_method: "GET".to_string(),
-        uri: uri,
-        headers: headers,
+        uri,
+        headers,
         body: None,
     };
 
@@ -244,8 +238,8 @@ async fn run_auth_test_get_err(auth_str: &str) -> SignatureError {
     let uri = Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap();
     let request = Request {
         request_method: "GET".to_string(),
-        uri: uri,
-        headers: headers,
+        uri,
+        headers,
         body: None,
     };
 
@@ -379,8 +373,8 @@ async fn test_multiple_algorithms() {
     let uri = Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap();
     let request = Request {
         request_method: "GET".to_string(),
-        uri: uri,
-        headers: headers,
+        uri,
+        headers,
         body: None,
     };
 
@@ -401,7 +395,7 @@ async fn duplicate_query_parameter() {
             .path_and_query(PathAndQuery::from_static("/?X-Amz-Signature=1234&X-Amz-Signature=1234"))
             .build()
             .unwrap(),
-        headers: headers,
+        headers,
         body: None,
     };
 
@@ -418,7 +412,7 @@ fn missing_header() {
     let request = Request {
         request_method: "GET".to_string(),
         uri: Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap(),
-        headers: headers,
+        headers,
         body: None,
     };
 
@@ -435,7 +429,7 @@ fn missing_date() {
     let request = Request {
         request_method: "GET".to_string(),
         uri: Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap(),
-        headers: headers,
+        headers,
         body: None,
     };
 
@@ -453,7 +447,7 @@ fn invalid_date() {
     let request = Request {
         request_method: "GET".to_string(),
         uri: Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap(),
-        headers: headers,
+        headers,
         body: None,
     };
 
@@ -466,7 +460,7 @@ fn invalid_date() {
     let request = Request {
         request_method: "GET".to_string(),
         uri: Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap(),
-        headers: headers,
+        headers,
         body: None,
     };
 
@@ -476,7 +470,7 @@ fn invalid_date() {
     let request = Request {
         request_method: "GET".to_string(),
         uri: Uri::builder().path_and_query(PathAndQuery::from_static("/?X-Amz-Date=zzzz")).build().unwrap(),
-        headers: headers,
+        headers,
         body: None,
     };
 

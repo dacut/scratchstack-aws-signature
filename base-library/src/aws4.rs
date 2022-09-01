@@ -15,7 +15,6 @@ use std::{
 use tower::Service;
 
 use crate::{get_signing_key_fn, sigv4_verify_at, Request, SignatureError, SigningKey, SigningKeyKind};
-use test_env_log;
 
 const TEST_REGION: &str = "us-east-1";
 const TEST_SERVICE: &str = "service";
@@ -215,6 +214,7 @@ async fn post_x_www_form_urlencoded_post_x_www_form_urlencoded() {
 }
 */
 
+#[allow(clippy::expect_fun_call)]
 async fn run(basename: &str) {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let mut req_path = PathBuf::new();
@@ -314,17 +314,18 @@ async fn get_signing_key(
     Ok((principal, k_secret.derive(kind, &req_date, region, service)))
 }
 
+#[allow(clippy::expect_fun_call)]
 fn parse_file(f: File, filename: &PathBuf) -> Request {
     let mut reader = BufReader::new(f);
 
     let mut method_line_full: String = String::new();
     reader.read_line(&mut method_line_full).expect(&format!("No method line in {:?}", filename));
     let method_line: String = method_line_full.trim_end().to_string();
-    let muq_and_ver: Vec<&str> = method_line.rsplitn(2, " ").collect();
+    let muq_and_ver: Vec<&str> = method_line.rsplitn(2, ' ').collect();
     assert_eq!(muq_and_ver.len(), 2, "muq_and_ver.len() != 2, method_line={}, {:?}", method_line, filename);
     let muq = muq_and_ver[1].to_string();
 
-    let muq_parts: Vec<&str> = muq.splitn(2, " ").collect();
+    let muq_parts: Vec<&str> = muq.splitn(2, ' ').collect();
     assert_eq!(
         muq_parts.len(),
         2,
@@ -349,18 +350,14 @@ fn parse_file(f: File, filename: &PathBuf) -> Request {
     let mut line_full: String = String::new();
     let mut current: Option<(String, Vec<u8>)> = None;
 
-    while let Ok(n_read) = reader.read_line(&mut line_full) {
+    while let Ok(_n_read) = reader.read_line(&mut line_full) {
         debug!("Considering line: {:#?}", line_full);
-        if n_read <= 0 {
-            break;
-        }
-
         let line = line_full.trim_end();
-        if line.len() == 0 {
+        if line.is_empty() {
             break;
         }
 
-        if line.starts_with(" ") || line.starts_with("\t") {
+        if line.starts_with(' ') || line.starts_with('\t') {
             // Continuation of previous header.
             debug!("Line continues existing header: {:?}", current);
             assert!(current.is_some());
@@ -371,7 +368,7 @@ fn parse_file(f: File, filename: &PathBuf) -> Request {
             current = Some((key, value));
         } else {
             debug!("Line is a new header: current={:?}", current);
-            let parts: Vec<&str> = line.splitn(2, ":").collect();
+            let parts: Vec<&str> = line.splitn(2, ':').collect();
             assert_eq!(parts.len(), 2, "Malformed header line: {} in {:?}", line, filename);
 
             // New header line. If there's an existing header line (looking for a continuation), append it to the
@@ -405,9 +402,9 @@ fn parse_file(f: File, filename: &PathBuf) -> Request {
     reader.read_to_end(&mut body).unwrap();
 
     Request {
-        request_method: method.to_string(),
-        uri: uri,
-        headers: headers,
+        request_method: method,
+        uri,
+        headers,
         body: Some(body),
     }
 }
