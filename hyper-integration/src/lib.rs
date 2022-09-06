@@ -33,7 +33,7 @@ mod tests {
     use tokio;
     use tower::{BoxError, Service};
 
-    #[test_env_log::test(tokio::test)]
+    #[test_log::test(tokio::test)]
     async fn test_fn_wrapper() {
         let sigfn = get_signing_key_fn(get_creds_fn);
         let wrapped = service_fn(hello_response);
@@ -90,7 +90,7 @@ mod tests {
         }
     }
 
-    #[test_env_log::test(tokio::test)]
+    #[test_log::test(tokio::test)]
     async fn test_svc_wrapper() {
         let make_svc = SpawnDummyHelloService {};
         let server = Server::bind(&SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 5938, 0, 0))).serve(make_svc);
@@ -145,7 +145,7 @@ mod tests {
         assert_eq!(status, StatusCode::OK);
     }
 
-    #[test_env_log::test(tokio::test)]
+    #[test_log::test(tokio::test)]
     async fn test_svc_wrapper_bad_creds() {
         let make_svc = SpawnDummyHelloService {};
         let server = Server::bind(&SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 5939, 0, 0))).serve(make_svc);
