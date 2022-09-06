@@ -326,8 +326,11 @@ impl SigningKey {
             SigningKeyKind::KDate => self.try_to_kdate_key(req_date),
             SigningKeyKind::KSecret => match self.kind {
                 SigningKeyKind::KSecret => Ok(self.clone()),
-                _ => Err(SignatureError::InvalidSigningKeyKind(format!("Cannot derive {} key from {} key", derived_key_kind, self.kind))),
-            }
+                _ => Err(SignatureError::InvalidSigningKeyKind(format!(
+                    "Cannot derive {} key from {} key",
+                    derived_key_kind, self.kind
+                ))),
+            },
         }
     }
 
@@ -592,8 +595,10 @@ impl Request {
             Some(value) => match iter.next() {
                 None => match from_utf8(value.as_bytes()) {
                     Ok(ref s) => Ok(s.to_string()),
-                    Err(_) => Err(SignatureError::MalformedHeader(format!("{} cannot does not contain valid UTF-8", header))),
-                }
+                    Err(_) => {
+                        Err(SignatureError::MalformedHeader(format!("{} cannot does not contain valid UTF-8", header)))
+                    }
+                },
                 Some(_) => Err(SignatureError::MultipleHeaderValues(format!("Multiple values for header {}", header))),
             },
         }
@@ -614,7 +619,9 @@ impl Request {
             Some(values) => match values.len() {
                 0 => Err(SignatureError::MissingParameter(format!("Missing parmaeter: {}", parameter))),
                 1 => Ok(values[0].to_string()),
-                _ => Err(SignatureError::MultipleParameterValues(format!("Multiple values for parameter {}", parameter))),
+                _ => {
+                    Err(SignatureError::MultipleParameterValues(format!("Multiple values for parameter {}", parameter)))
+                }
             },
         }
     }
@@ -666,8 +673,10 @@ impl Request {
         if let Ok((content_type, charset)) = self.get_content_type_and_charset() {
             if content_type == APPLICATION_X_WWW_FORM_URLENCODED {
                 if charset != "utf-8" && charset != "utf8" {
-                    return Err(SignatureError::InvalidBodyEncoding(
-                        format!("application/x-www-form-urlencoded body uses unsupported charset {}", charset)));
+                    return Err(SignatureError::InvalidBodyEncoding(format!(
+                        "application/x-www-form-urlencoded body uses unsupported charset {}",
+                        charset
+                    )));
                 }
 
                 // Parse the body as a URL string
@@ -675,9 +684,12 @@ impl Request {
                     None => "",
                     Some(body) => match from_utf8(body) {
                         Ok(s) => s,
-                        Err(_) => return Err(SignatureError::InvalidBodyEncoding(
-                            "application/x-www-form-urlencoded body contains invalid UTF-8 characters".to_string())),
-                    }
+                        Err(_) => {
+                            return Err(SignatureError::InvalidBodyEncoding(
+                                "application/x-www-form-urlencoded body contains invalid UTF-8 characters".to_string(),
+                            ))
+                        }
+                    },
                 };
 
                 let body_normalized = normalize_query_parameters(body_utf8)?;
@@ -708,7 +720,8 @@ impl Request {
                         if let Some(captures) = AWS4_HMAC_SHA256_RE.captures(auth_header) {
                             if parameters_opt.is_some() {
                                 return Err(SignatureError::MultipleHeaderValues(
-                                    "Multiple value for header authorization".to_string()));
+                                    "Multiple value for header authorization".to_string(),
+                                ));
                             }
 
                             parameters_opt = Some(auth_header.split_at(captures.get(0).unwrap().end()).1);
@@ -740,7 +753,10 @@ impl Request {
                 if missing.len() == 0 {
                     Ok(result)
                 } else {
-                    Err(SignatureError::IncompleteSignature(format!("{} Authorization=AWS4-HMAC-SHA256", missing.join(" "))))
+                    Err(SignatureError::IncompleteSignature(format!(
+                        "{} Authorization=AWS4-HMAC-SHA256",
+                        missing.join(" ")
+                    )))
                 }
             }
         }
@@ -765,8 +781,11 @@ impl Request {
                         Ok(ref ahp) => {
                             ah_signedheaders = ahp.get(SIGNEDHEADERS);
                             match ah_signedheaders {
-                                None => return Err(SignatureError::MalformedSignature(
-                                    "invalid Authorization header: missing SignedHeaders".to_string())),
+                                None => {
+                                    return Err(SignatureError::MalformedSignature(
+                                        "invalid Authorization header: missing SignedHeaders".to_string(),
+                                    ))
+                                }
                                 Some(headers) => headers,
                             }
                         }
@@ -795,8 +814,12 @@ impl Request {
             for value in v_iter {
                 match from_utf8(value.as_bytes()) {
                     Ok(value) => header_values.push(value.as_bytes().to_vec()),
-                    Err(_) => return Err(SignatureError::MalformedHeader(
-                        format!("Header {} contains invalid UTF-8 characters", header))),
+                    Err(_) => {
+                        return Err(SignatureError::MalformedHeader(format!(
+                            "Header {} contains invalid UTF-8 characters",
+                            header
+                        )))
+                    }
                 }
             }
 
@@ -911,7 +934,8 @@ impl Request {
                         None => {
                             trace!("auth_headers={:?}", auth_headers);
                             return Err(SignatureError::MalformedSignature(
-                                "invalid Authorization header: missing Credential".to_string()));
+                                "invalid Authorization header: missing Credential".to_string(),
+                            ));
                         }
                     }
                 }
@@ -930,8 +954,10 @@ impl Request {
         if request_scope == server_scope {
             Ok(access_key.to_string())
         } else {
-            Err(SignatureError::InvalidCredential(
-                format!("Invalid credential scope: Expected {} instead of {}", server_scope, request_scope)))
+            Err(SignatureError::InvalidCredential(format!(
+                "Invalid credential scope: Expected {} instead of {}",
+                server_scope, request_scope
+            )))
         }
     }
 
@@ -972,7 +998,7 @@ impl Request {
                         Some(c) => Ok(c.to_string()),
                         None => Err(SignatureError::MalformedSignature(
                             "invalid Authorization header: missing Signature".to_string(),
-                        ))
+                        )),
                     }
                 }
                 _ => Err(e),
@@ -1252,8 +1278,10 @@ pub fn canonicalize_uri_path(uri_path: &str) -> Result<String, SignatureError> {
 
             if i <= 1 {
                 // This isn't allowed at the beginning!
-                return Err(SignatureError::InvalidURIPath(
-                    format!("Relative path entry '..' navigates above root: {}", uri_path)));
+                return Err(SignatureError::InvalidURIPath(format!(
+                    "Relative path entry '..' navigates above root: {}",
+                    uri_path
+                )));
             }
 
             components.remove(i - 1);
@@ -1333,8 +1361,10 @@ pub fn split_authorization_header_parameters(parameters: &str) -> Result<HashMap
         let value = parts[1].trim_end().to_string();
 
         if result.contains_key(&key) {
-            return Err(SignatureError::MalformedSignature(
-                format!("invalid Authorization header: duplicate field {}", key)));
+            return Err(SignatureError::MalformedSignature(format!(
+                "invalid Authorization header: duplicate field {}",
+                key
+            )));
         }
 
         result.insert(key, value);
