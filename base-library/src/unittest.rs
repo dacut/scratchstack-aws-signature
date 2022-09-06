@@ -11,7 +11,7 @@ use http::{
     uri::{PathAndQuery, Uri},
 };
 use scratchstack_aws_principal::PrincipalActor;
-use test_env_log::{self, test};
+use test_log::{self, test};
 
 const TEST_REGION: &str = "us-east-1";
 const TEST_SERVICE: &str = "service";
@@ -259,7 +259,7 @@ async fn run_auth_test_get_err(auth_str: &str) -> SignatureError {
 }
 
 #[tokio::test]
-#[test_env_log::test]
+#[test_log::test]
 async fn test_missing_auth_parameters() {
     assert_eq!(
         run_auth_test!("AWS4-HMAC-SHA256 "),
@@ -268,7 +268,7 @@ async fn test_missing_auth_parameters() {
 }
 
 #[tokio::test]
-#[test_env_log::test]
+#[test_log::test]
 async fn test_missing_auth_signed_headers() {
     assert_eq!(
         run_auth_test!(
@@ -282,7 +282,7 @@ Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea"
 }
 
 #[tokio::test]
-#[test_env_log::test]
+#[test_log::test]
 async fn test_missing_auth_credential() {
     assert_eq!(
         run_auth_test!(
@@ -296,7 +296,7 @@ Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea"
 }
 
 #[tokio::test]
-#[test_env_log::test]
+#[test_log::test]
 async fn test_duplicate_auth_credential() {
     assert_eq!(
         run_auth_test!(
@@ -312,7 +312,7 @@ Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea"
 }
 
 #[tokio::test]
-#[test_env_log::test]
+#[test_log::test]
 async fn test_missing_auth_signature() {
     assert_eq!(
         run_auth_test!(
@@ -326,7 +326,7 @@ SignedHeaders=host;x-amz-date"
 }
 
 #[tokio::test]
-#[test_env_log::test]
+#[test_log::test]
 async fn test_missing_auth_eq() {
     assert_eq!(
         run_auth_test!(
@@ -341,7 +341,7 @@ Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea"
 }
 
 #[tokio::test]
-#[test_env_log::test]
+#[test_log::test]
 async fn test_noncanonical_signed_headers() {
     assert_eq!(
         run_auth_test!(
@@ -355,13 +355,13 @@ Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea"
 }
 
 #[tokio::test]
-#[test_env_log::test]
+#[test_log::test]
 async fn test_wrong_auth_algorithm() {
     assert_eq!(run_auth_test_expect_kind!("AWS3-ZZZ Credential=12345", MissingHeader), "Missing header: authorization");
 }
 
 #[tokio::test]
-#[test_env_log::test]
+#[test_log::test]
 async fn test_multiple_algorithms() {
     let mut headers = HeaderMap::<HeaderValue>::with_capacity(2);
     headers.append("authorization", HeaderValue::from_static("Basic foobar"));
@@ -385,7 +385,7 @@ async fn test_multiple_algorithms() {
 }
 
 #[tokio::test]
-#[test_env_log::test]
+#[test_log::test]
 async fn duplicate_query_parameter() {
     let headers = HeaderMap::new();
 
@@ -404,7 +404,7 @@ async fn duplicate_query_parameter() {
 }
 
 #[test]
-#[test_env_log::test]
+#[test_log::test]
 fn missing_header() {
     let mut headers = HeaderMap::<HeaderValue>::with_capacity(1);
     headers.insert("authorization", HeaderValue::from_static(""));
@@ -420,7 +420,7 @@ fn missing_header() {
 }
 
 #[test]
-#[test_env_log::test]
+#[test_log::test]
 fn missing_date() {
     let mut headers = HeaderMap::<HeaderValue>::with_capacity(2);
     headers.insert("authorization", HeaderValue::from_static(_AUTH_HEADER1));
@@ -438,7 +438,7 @@ fn missing_date() {
 }
 
 #[test]
-#[test_env_log::test]
+#[test_log::test]
 fn invalid_date() {
     let mut headers = HeaderMap::<HeaderValue>::with_capacity(2);
     headers.insert("authorization", HeaderValue::from_static(_AUTH_HEADER1));
