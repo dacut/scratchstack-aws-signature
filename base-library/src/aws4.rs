@@ -1,4 +1,5 @@
 use {
+    crate::{get_signing_key_fn, sigv4_verify_at, Request, SignatureError, SigningKey, SigningKeyKind},
     chrono::{Date, DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc},
     http::{
         header::{HeaderMap, HeaderName, HeaderValue},
@@ -15,8 +16,6 @@ use {
     },
     tower::Service,
 };
-
-use crate::{get_signing_key_fn, sigv4_verify_at, Request, SignatureError, SigningKey, SigningKeyKind};
 
 const TEST_REGION: &str = "us-east-1";
 const TEST_SERVICE: &str = "service";

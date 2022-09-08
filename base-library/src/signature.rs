@@ -7,19 +7,8 @@
 //! and [SigV4S3](https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-authenticating-requests.html)
 //! algorithms.
 //!
-use std::{
-    any::type_name,
-    collections::{BTreeMap, HashMap},
-    convert::{From, Into},
-    error::Error,
-    fmt::{Debug, Display, Formatter, Result as FmtResult},
-    future::Future,
-    io::{Error as IOError, Write},
-    str::from_utf8,
-    task::{Context, Poll},
-};
-
 use {
+    crate::{chronoutil::parse_date_str, hmac::hmac_sha256},
     chrono::{Date, DateTime, Duration, Utc},
     http::{
         header::{HeaderMap, HeaderValue},
@@ -31,10 +20,19 @@ use {
     regex::Regex,
     ring::digest::{digest, SHA256},
     scratchstack_aws_principal::PrincipalActor,
+    std::{
+        any::type_name,
+        collections::{BTreeMap, HashMap},
+        convert::{From, Into},
+        error::Error,
+        fmt::{Debug, Display, Formatter, Result as FmtResult},
+        future::Future,
+        io::{Error as IOError, Write},
+        str::from_utf8,
+        task::{Context, Poll},
+    },
     tower::{BoxError, Service},
 };
-
-use crate::{chronoutil::parse_date_str, hmac::hmac_sha256};
 
 /// Content-Type string for HTML forms
 const APPLICATION_X_WWW_FORM_URLENCODED: &str = "application/x-www-form-urlencoded";

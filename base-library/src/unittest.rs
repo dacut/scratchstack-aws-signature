@@ -1,19 +1,18 @@
 use {
-    super::signature::{
-        canonicalize_uri_path, normalize_query_parameters, normalize_uri_path_component, sigv4_verify, Request,
-        SignatureError, SigningKey, SigningKeyKind,
+    super::{
+        chronoutil::ParseISO8601,
+        signature::{
+            canonicalize_uri_path, normalize_query_parameters, normalize_uri_path_component, sigv4_verify, Request,
+            SignatureError, SigningKey, SigningKeyKind,
+        },
     },
-    std::fmt::Write,
-};
-
-use {
-    super::chronoutil::ParseISO8601,
     chrono::{Date, DateTime, Datelike, NaiveDate, Timelike, Utc},
     http::{
         header::{HeaderMap, HeaderValue},
         uri::{PathAndQuery, Uri},
     },
     scratchstack_aws_principal::PrincipalActor,
+    std::fmt::Write,
     test_log::{self, test},
 };
 

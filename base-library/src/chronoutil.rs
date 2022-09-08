@@ -1,5 +1,3 @@
-use std::{error::Error, str::FromStr};
-
 use {
     chrono::{
         format::{ParseError, ParseResult},
@@ -8,6 +6,7 @@ use {
     },
     lazy_static::lazy_static,
     regex::Regex,
+    std::{error::Error, str::FromStr},
 };
 
 lazy_static! {
