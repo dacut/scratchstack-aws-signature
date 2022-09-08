@@ -1,23 +1,25 @@
-use chrono::Duration;
-use futures::stream::StreamExt;
-use http::request::Parts;
-use hyper::{
-    body::{Body, Bytes},
-    Error as HyperError, Request, Response,
+use {
+    chrono::Duration,
+    futures::stream::StreamExt,
+    http::request::Parts,
+    hyper::{
+        body::{Body, Bytes},
+        Error as HyperError, Request, Response,
+    },
+    log::{debug, warn},
+    scratchstack_aws_principal::PrincipalActor,
+    scratchstack_aws_signature::{
+        sigv4_verify, GetSigningKeyRequest, Request as AwsSigVerifyRequest, SigningKey, SigningKeyKind,
+    },
+    std::{
+        any::type_name,
+        fmt::{Debug, Display, Formatter, Result as FmtResult},
+        future::Future,
+        pin::Pin,
+        task::{Context, Poll},
+    },
+    tower::{buffer::Buffer, BoxError, Service, ServiceExt},
 };
-use log::{debug, warn};
-use scratchstack_aws_principal::PrincipalActor;
-use scratchstack_aws_signature::{
-    sigv4_verify, GetSigningKeyRequest, Request as AwsSigVerifyRequest, SigningKey, SigningKeyKind,
-};
-use std::{
-    any::type_name,
-    fmt::{Debug, Display, Formatter, Result as FmtResult},
-    future::Future,
-    pin::Pin,
-    task::{Context, Poll},
-};
-use tower::{buffer::Buffer, BoxError, Service, ServiceExt};
 
 /// AWSSigV4VerifierService implements a Hyper service that authenticates a request against AWS SigV4 signing protocol.
 #[derive(Clone)]

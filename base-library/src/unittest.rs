@@ -1,17 +1,21 @@
-use super::signature::{
-    canonicalize_uri_path, normalize_query_parameters, normalize_uri_path_component, sigv4_verify, Request,
-    SignatureError, SigningKey, SigningKeyKind,
+use {
+    super::signature::{
+        canonicalize_uri_path, normalize_query_parameters, normalize_uri_path_component, sigv4_verify, Request,
+        SignatureError, SigningKey, SigningKeyKind,
+    },
+    std::fmt::Write,
 };
-use std::fmt::Write;
 
-use super::chronoutil::ParseISO8601;
-use chrono::{Date, DateTime, Datelike, NaiveDate, Timelike, Utc};
-use http::{
-    header::{HeaderMap, HeaderValue},
-    uri::{PathAndQuery, Uri},
+use {
+    super::chronoutil::ParseISO8601,
+    chrono::{Date, DateTime, Datelike, NaiveDate, Timelike, Utc},
+    http::{
+        header::{HeaderMap, HeaderValue},
+        uri::{PathAndQuery, Uri},
+    },
+    scratchstack_aws_principal::PrincipalActor,
+    test_log::{self, test},
 };
-use scratchstack_aws_principal::PrincipalActor;
-use test_log::{self, test};
 
 const TEST_REGION: &str = "us-east-1";
 const TEST_SERVICE: &str = "service";

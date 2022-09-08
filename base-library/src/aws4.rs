@@ -1,18 +1,20 @@
-use chrono::{Date, DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc};
-use http::{
-    header::{HeaderMap, HeaderName, HeaderValue},
-    uri::{PathAndQuery, Uri},
+use {
+    chrono::{Date, DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc},
+    http::{
+        header::{HeaderMap, HeaderName, HeaderValue},
+        uri::{PathAndQuery, Uri},
+    },
+    log::debug,
+    scratchstack_aws_principal::PrincipalActor,
+    std::{
+        env,
+        fs::File,
+        io::{BufRead, BufReader, Read},
+        path::PathBuf,
+        str::from_utf8,
+    },
+    tower::Service,
 };
-use log::debug;
-use scratchstack_aws_principal::PrincipalActor;
-use std::{
-    env,
-    fs::File,
-    io::{BufRead, BufReader, Read},
-    path::PathBuf,
-    str::from_utf8,
-};
-use tower::Service;
 
 use crate::{get_signing_key_fn, sigv4_verify_at, Request, SignatureError, SigningKey, SigningKeyKind};
 

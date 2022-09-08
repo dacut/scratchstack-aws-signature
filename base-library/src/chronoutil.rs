@@ -1,10 +1,14 @@
 use std::{error::Error, str::FromStr};
 
-use chrono::format::{ParseError, ParseResult};
-use chrono::offset::{FixedOffset, TimeZone};
-use chrono::{DateTime, Utc};
-use lazy_static::lazy_static;
-use regex::Regex;
+use {
+    chrono::{
+        format::{ParseError, ParseResult},
+        offset::{FixedOffset, TimeZone},
+        DateTime, Utc,
+    },
+    lazy_static::lazy_static,
+    regex::Regex,
+};
 
 lazy_static! {
     /// ISO 8601 timestamp format
