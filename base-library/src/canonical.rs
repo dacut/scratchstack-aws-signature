@@ -1,0 +1,890 @@
+use {
+    crate::{
+        chronoutil::ParseISO8601, crypto::sha256_hex, SigV4Authenticator, SigV4AuthenticatorBuilder, SignatureError,
+    },
+    bytes::Bytes,
+    chrono::{offset::FixedOffset, DateTime, Utc},
+    encoding::{all::UTF_8, label::encoding_from_whatwg_label, types::DecoderTrap},
+    http::{
+        header::{HeaderMap, HeaderValue},
+        request::Parts,
+        uri::Uri,
+    },
+    lazy_static::lazy_static,
+    log::debug,
+    regex::Regex,
+    ring::digest::{digest, SHA256, SHA256_OUTPUT_LEN},
+    std::{collections::HashMap, io::Write, str::from_utf8},
+};
+
+/// Content-Type string for HTML forms
+const APPLICATION_X_WWW_FORM_URLENCODED: &str = "application/x-www-form-urlencoded";
+
+/// Header parameter for the authorization
+const AUTHORIZATION: &str = "authorization";
+
+/// Algorithm for AWS SigV4
+const AWS4_HMAC_SHA256: &str = "AWS4-HMAC-SHA256";
+
+/// Algorithm for AWS SigV4 (bytes)
+const AWS4_HMAC_SHA256_BYTES: &[u8] = b"AWS4-HMAC-SHA256";
+
+/// Content-Type parameter for specifying the character set
+const CHARSET: &str = "charset";
+
+/// Header field for the content type
+const CONTENT_TYPE: &str = "content-type";
+
+/// Signature field for the access key
+const CREDENTIAL: &[u8] = b"Credential";
+
+/// Header parameter for the date
+const DATE: &str = "date";
+
+/// Error message: `"Authorization header requires 'Credential' parameter."`
+const MSG_AUTH_HEADER_REQ_CREDENTIAL: &str = "Authorization header requires 'Credential' parameter.";
+
+/// Error message: `"Authorization header requires existence of either a 'X-Amz-Date' or a 'Date' header."`
+const MSG_AUTH_HEADER_REQ_DATE: &str =
+    "Authorization header requires existence of either a 'X-Amz-Date' or a 'Date' header.";
+
+/// Error message: `"Authorization header requires 'Signature' parameter."`
+const MSG_AUTH_HEADER_REQ_SIGNATURE: &str = "Authorization header requires 'Signature' parameter.";
+
+/// Error message: `"Authorization header requires 'SignedHeaders' parameter."`
+const MSG_AUTH_HEADER_REQ_SIGNED_HEADERS: &str = "Authorization header requires 'SignedHeaders' parameter.";
+
+/// Error message: `"Illegal hex character in escape % pattern: %"`
+const MSG_ILLEGAL_HEX_CHAR: &str = "Illegal hex character in escape % pattern: %";
+
+/// Error message: `"Incomplete trailing escape % sequence"`
+const MSG_INCOMPLETE_TRAILING_ESCAPE: &str = "Incomplete trailing escape % sequence";
+
+/// Error message: `"AWS query-string parameters must include 'X-Amz-Credential'"`
+const MSG_QUERY_STRING_MUST_INCLUDE_CREDENTIAL: &str = "AWS query-string parameters must include 'X-Amz-Credential'.";
+
+/// Error message: `"AWS query-string parameters must include 'X-Amz-Sigature'"`
+const MSG_QUERY_STRING_MUST_INCLUDE_SIGNATURE: &str = "AWS query-string parameters must include 'X-Amz-Signature'.";
+
+/// Error message: `"AWS query-string parameters must include 'X-Amz-SignedHeaders'"`
+const MSG_QUERY_STRING_MUST_INCLUDE_SIGNED_HEADERS: &str =
+    "AWS query-string parameters must include 'X-Amz-SignedHeaders'.";
+
+/// Error message: `"AWS query-string parameters must include 'X-Amz-Date'"`
+const MSG_QUERY_STRING_MUST_INCLUDE_DATE: &str = "AWS query-string parameters must include 'X-Amz-Date'.";
+
+/// Error message: `"Re-examine the query-string parameters."`
+const MSG_REEXAMINE_QUERY_STRING_PARAMS: &str = "Re-examine the query-string parameters.";
+
+/// Error message: `"Request is missing Authentication Token"`
+const MSG_REQUEST_MISSING_AUTH_TOKEN: &str = "Request is missing Authentication Token";
+
+/// Error message: `"Unsupported AWS 'algorithm': "`
+const MSG_UNSUPPORTED_ALGORITHM: &str = "Unsupported AWS 'algorithm': ";
+
+/// Signature field for the signature itself
+const SIGNATURE: &[u8] = b"Signature";
+
+/// Authorization header parameter specifying the signed headers
+const SIGNED_HEADERS: &[u8] = b"SignedHeaders";
+
+/// Query parameter for the signature algorithm
+const X_AMZ_ALGORITHM: &str = "X-Amz-Algorithm";
+
+/// Query parameter for delivering the access key
+const X_AMZ_CREDENTIAL: &str = "X-Amz-Credential";
+
+/// Query parameter for delivering the date
+const X_AMZ_DATE: &str = "X-Amz-Date";
+
+/// Header for delivering the alternate date
+const X_AMZ_DATE_LOWER: &str = "x-amz-date";
+
+/// Query parameter for delivering the session token
+const X_AMZ_SECURITY_TOKEN: &str = "X-Amz-Security-Token";
+
+/// Header for delivering the session token
+const X_AMZ_SECURITY_TOKEN_LOWER: &str = "x-amz-security-token";
+
+/// Query parameter for delivering the signature
+const X_AMZ_SIGNATURE: &str = "X-Amz-Signature";
+
+/// Query parameter specifying the signed headers
+const X_AMZ_SIGNED_HEADERS: &str = "X-Amz-SignedHeaders";
+
+lazy_static! {
+    /// Multiple slash pattern for condensing URIs
+    static ref MULTISLASH: Regex = Regex::new("//+").unwrap();
+
+    /// Multiple space pattern for condensing header values
+    static ref MULTISPACE: Regex = Regex::new("  +").unwrap();
+
+    /// Pattern for the start of an AWS4 signature Authorization header.
+    static ref AWS4_HMAC_SHA256_RE: Regex = Regex::new(r"\s*AWS4-HMAC-SHA256(?:\s+|$)").unwrap();
+}
+
+/// A canonicalized request for AWS SigV4.
+pub struct CanonicalRequest {
+    /// The HTTP method for the request (e.g., "GET", "POST", etc.)
+    request_method: String,
+
+    /// The canonicalized path from the HTTP request. This is guaranteed to be ASCII.
+    canonical_path: String,
+
+    /// Query parameters from the HTTP request. Values are ordered as they appear in the URL. If a request body is
+    /// present and of type `application/x-www-form-urlencoded`, the request body is parsed and added as query
+    /// parameters.
+    query_parameters: HashMap<String, Vec<String>>,
+
+    /// Headers from the HTTP request. Values are ordered as they appear in the HTTP request.
+    ///
+    /// The encoding of header values is Latin 1 (ISO 8859-1), apart from a few oddities like Content-Disposition.
+    headers: HashMap<String, Vec<Vec<u8>>>,
+
+    /// The SHA-256 hash of the body.
+    body_sha256: String,
+}
+
+/// Authentication parameters extracted from the header or query string.
+pub(crate) struct AuthParams {
+    pub(crate) builder: SigV4AuthenticatorBuilder,
+    pub(crate) signed_headers: Vec<String>,
+    pub(crate) timestamp_str: String,
+}
+
+/// The Content-Type header value, along with the character set (if specified).
+#[derive(Debug)]
+struct ContentTypeCharset {
+    content_type: String,
+    charset: Option<String>,
+}
+
+impl CanonicalRequest {
+    /// Create a CanonicalRequest from an HTTP request [Parts] and a body of [Bytes].
+    pub fn from_request_parts(mut parts: Parts, mut body: Bytes) -> Result<(Self, Parts, Bytes), SignatureError> {
+        let canonical_path = canonicalize_uri_path(&parts.uri.path())?;
+        let content_type = get_content_type_and_charset(&parts.headers)?;
+        let mut query_parameters = query_string_to_normalized_map(&parts.uri.query().unwrap_or(""))?;
+
+        debug!("canonical_path: {}", canonical_path);
+        debug!("query_parameters (before content-type check): {:?}", query_parameters);
+        debug!("content_type: {:?}", content_type);
+
+        // Treat requests with application/x-www-form-urlencoded bodies as if they were passed into the query string.
+        if let Some(content_type) = content_type {
+            if content_type.content_type == APPLICATION_X_WWW_FORM_URLENCODED {
+                let encoding = match &content_type.charset {
+                    Some(charset) => match encoding_from_whatwg_label(charset.as_str()) {
+                        Some(encoding) => encoding,
+                        None => {
+                            return Err(SignatureError::InvalidBodyEncoding(format!(
+                                "application/x-www-form-urlencoded body uses unsupported charset '{}'",
+                                charset
+                            )))
+                        }
+                    },
+                    None => UTF_8,
+                };
+
+                let body_query = match encoding.decode(&body, DecoderTrap::Strict) {
+                    Ok(body) => body,
+                    Err(_) => {
+                        return Err(SignatureError::InvalidBodyEncoding(format!(
+                            "Invalid body data encountered parsing application/x-www-form-urlencoded with charset '{}'",
+                            encoding.whatwg_name().unwrap_or(encoding.name())
+                        )))
+                    }
+                };
+
+                query_parameters.extend(query_string_to_normalized_map(body_query.as_str())?.into_iter());
+                // Rebuild the parts URI with the new query string.
+                let qs = canonicalize_query_to_string(&query_parameters);
+                let mut pq = canonical_path.clone();
+                if !qs.is_empty() {
+                    pq.push('?');
+                    pq.push_str(&qs);
+                }
+                parts.uri =
+                    Uri::builder().path_and_query(pq).build().expect("failed to rebuild URI with new query string");
+                body = Bytes::from("");
+            }
+        }
+        debug!("query_parameters (after content-type check): {:?}", query_parameters);
+
+        let headers = normalize_headers(&parts.headers)?;
+        let body_sha256 = sha256_hex(body.as_ref());
+
+        debug!("headers: {}", debug_headers(&headers));
+        debug!("body_sha256: {}", body_sha256);
+
+        Ok((
+            CanonicalRequest {
+                request_method: parts.method.to_string(),
+                canonical_path,
+                query_parameters,
+                headers,
+                body_sha256,
+            },
+            parts,
+            body,
+        ))
+    }
+
+    /// Retrieve the HTTP request method.
+    #[inline]
+    pub fn request_method(&self) -> &str {
+        &self.request_method
+    }
+
+    /// Retrieve the canonicalized URI path from the request.
+    #[inline]
+    pub fn canonical_path(&self) -> &str {
+        &self.canonical_path
+    }
+
+    /// Retrieve the query parameters from the request. Values are ordered as they appear in the URL, followed by any
+    /// values in the request body if the request body is of type `application/x-www-form-urlencoded`. Values are
+    /// normalized to be percent-encoded.
+    #[inline]
+    pub fn query_parameters(&self) -> &HashMap<String, Vec<String>> {
+        &self.query_parameters
+    }
+
+    /// Retrieve the headers from the request. Values are ordered as they appear in the HTTP request.
+    #[inline]
+    pub fn headers(&self) -> &HashMap<String, Vec<Vec<u8>>> {
+        &self.headers
+    }
+
+    /// Retrieve the SHA-256 hash of the request body.
+    #[inline]
+    pub fn body_sha256(&self) -> &str {
+        &self.body_sha256
+    }
+
+    /// Get the canonical query string from the request.
+    pub fn canonical_query_string(&self) -> String {
+        canonicalize_query_to_string(&self.query_parameters)
+    }
+
+    /// Get the [canonical request to hash](https://docs.aws.amazon.com/general/latest/gr/sigv4-create-canonical-request.html)
+    /// for the request.
+    pub fn canonical_request(&self, signed_headers: &Vec<String>) -> Vec<u8> {
+        let mut result = Vec::with_capacity(1024);
+        result.extend(self.request_method.as_bytes());
+        result.push(b'\n');
+        result.extend(self.canonical_path.as_bytes());
+        result.push(b'\n');
+        result.extend(self.canonical_query_string().as_bytes());
+        result.push(b'\n');
+
+        for header in signed_headers {
+            let values = self.headers.get(header);
+            if let Some(values) = values {
+                for (i, value) in values.iter().enumerate() {
+                    if i == 0 {
+                        result.extend(header.as_bytes());
+                        result.push(b':');
+                    } else {
+                        result.push(b',');
+                    }
+                    result.extend(value);
+                }
+                result.push(b'\n')
+            }
+        }
+
+        result.push(b'\n');
+        result.extend(signed_headers.join(";").as_bytes());
+        result.push(b'\n');
+        result.extend(self.body_sha256.as_bytes());
+
+        result
+    }
+
+    /// Get the SHA-256 hash of the [canonical request](https://docs.aws.amazon.com/general/latest/gr/sigv4-create-canonical-request.html).
+    pub fn canonical_request_sha256(&self, signed_headers: &Vec<String>) -> [u8; SHA256_OUTPUT_LEN] {
+        let canonical_request = self.canonical_request(&signed_headers);
+        debug!("canonical_request: {:?}", String::from_utf8_lossy(&canonical_request));
+        let result_digest = digest(&SHA256, canonical_request.as_ref());
+        let result_slice = result_digest.as_ref();
+        assert!(result_slice.len() == SHA256_OUTPUT_LEN);
+        let mut result: [u8; SHA256_OUTPUT_LEN] = [0; SHA256_OUTPUT_LEN];
+        result.as_mut_slice().clone_from_slice(&result_slice);
+        result
+    }
+
+    /// Create a [SigV4Authenticator] for the request. This performs steps 1-8 from the AWS Auth Error Ordering
+    /// workflow.
+    pub fn get_authenticator(&self) -> Result<SigV4Authenticator, SignatureError> {
+        let auth_params = self.get_auth_parameters()?;
+        self.get_authenticator_from_auth_parameters(auth_params)
+    }
+
+    pub(crate) fn get_authenticator_from_auth_parameters(
+        &self,
+        auth_params: AuthParams,
+    ) -> Result<SigV4Authenticator, SignatureError> {
+        // Rule 8: The date must be in ISO 8601 format.
+        let timestamp_str = auth_params.timestamp_str.as_str();
+        let timestamp = DateTime::<FixedOffset>::parse_from_iso8601(timestamp_str)
+            .map_err(|_| {
+                SignatureError::IncompleteSignature(format!(
+                    "Date must be in ISO-8601 'basic format'. Got '{}'. See http://en.wikipedia.org/wiki/ISO_8601",
+                    auth_params.timestamp_str
+                ))
+            })?
+            .with_timezone(&Utc);
+        let mut builder = auth_params.builder;
+        builder.request_timestamp(timestamp);
+
+        let signed_headers = auth_params.signed_headers;
+
+        // Create the canonical request.
+        builder.canonical_request_sha256(self.canonical_request_sha256(&signed_headers));
+
+        Ok(builder.build().expect("all fields should be set"))
+    }
+
+    /// Create an [AuthParams] structure, either from the `Authorization` header or the query strings as appropriate.
+    /// This performs step 5 and either performs steps 6a-6d or 7a-7d from the AWS Auth Error Ordering workflow.
+    pub(crate) fn get_auth_parameters(&self) -> Result<AuthParams, SignatureError> {
+        let auth_header = self.headers.get(AUTHORIZATION);
+        let sig_algs = self.query_parameters.get(X_AMZ_ALGORITHM);
+
+        // Rule 5: Either the Authorization header or X-Amz-Algorithm query parameter must be present, not both.
+        match (auth_header, sig_algs) {
+            // Use first header (per rule 6a).
+            (Some(auth_header), None) => self.get_auth_parameters_from_auth_header(&auth_header[0]),
+            // Use first algorithm (per rule 7a).
+            (None, Some(sig_algs)) => self.get_auth_parameters_from_query_parameters(&sig_algs[0]),
+            (Some(_), Some(_)) => Err(SignatureError::SignatureDoesNotMatch(None)),
+            (None, None) => Err(SignatureError::MissingAuthenticationToken(MSG_REQUEST_MISSING_AUTH_TOKEN.to_string())),
+        }
+    }
+
+    /// Create an [AuthParams] structure from the `Authorization` header. This performs steps 6a-6d of the AWS Auth
+    /// Error Ordering workflow.
+    fn get_auth_parameters_from_auth_header<'a>(&'a self, auth_header: &'a [u8]) -> Result<AuthParams, SignatureError> {
+        // Interpret the header as Latin-1, trimmed.
+        let auth_header = trim_ascii(auth_header);
+
+        // Rule 6a: Make sure the Authorization header starts with "AWS4-HMAC-SHA256".
+        let parts = auth_header.splitn(2, |c| *c == b' ').collect::<Vec<&'a [u8]>>();
+        let algorithm = parts[0];
+        if algorithm != AWS4_HMAC_SHA256_BYTES {
+            return Err(SignatureError::IncompleteSignature(format!(
+                "{}'{}'",
+                MSG_UNSUPPORTED_ALGORITHM,
+                String::from_utf8_lossy(algorithm)
+            )));
+        }
+
+        let parameters = if parts.len() > 1 {
+            parts[1]
+        } else {
+            b""
+        };
+
+        // Split the parameters by commas; trim each one; then split into key=value pairs.
+        let mut parameter_map = HashMap::new();
+        for parameter_untrimmed in parameters.split(|c| *c == b',') {
+            let parameter = trim_ascii(parameter_untrimmed);
+            let parts = parameter.splitn(2, |c| *c == b'=').collect::<Vec<&'a [u8]>>();
+
+            // Rule 6b: All parameters must be in key=value format.
+            if parts.len() != 2 {
+                return Err(SignatureError::IncompleteSignature(format!(
+                    "'{}' not a valid key=value pair (missing equal-sign) in Authorizaiton Header: '{}'",
+                    latin1_to_string(parameter_untrimmed),
+                    latin1_to_string(auth_header)
+                )));
+            }
+
+            // Rule 6c: Use the last value for each key; overwriting is ok.
+            parameter_map.insert(parts[0], parts[1]);
+        }
+
+        // Rule 6d: ensure all authorization header parameters/headers are present.
+        let mut missing_messages = Vec::new();
+        let mut builder = SigV4Authenticator::builder();
+
+        if let Some(credential) = parameter_map.get(CREDENTIAL) {
+            builder.credential(latin1_to_string(credential));
+        } else {
+            missing_messages.push(MSG_AUTH_HEADER_REQ_CREDENTIAL);
+        }
+
+        if let Some(signature) = parameter_map.get(SIGNATURE) {
+            builder.signature(latin1_to_string(signature));
+        } else {
+            missing_messages.push(MSG_AUTH_HEADER_REQ_SIGNATURE);
+        }
+
+        let signed_headers = if let Some(signed_headers) = parameter_map.get(SIGNED_HEADERS) {
+            signed_headers.split(|c| *c == b';').map(|s| latin1_to_string(s)).collect()
+        } else {
+            missing_messages.push(MSG_AUTH_HEADER_REQ_SIGNED_HEADERS);
+            Vec::new()
+        };
+
+        let mut timestamp_str = None;
+
+        if let Some(date) = self.headers.get(X_AMZ_DATE_LOWER) {
+            // Rule 6e: Use the first X-Amz-Date header (per rule 6a).
+            timestamp_str = Some(latin1_to_string(&date[0]));
+        } else if let Some(date) = self.headers.get(DATE) {
+            // Rule 6e: Use the first Date header (per rule 6a).
+            timestamp_str = Some(latin1_to_string(&date[0]));
+        } else {
+            missing_messages.push(MSG_AUTH_HEADER_REQ_DATE);
+        }
+
+        if !missing_messages.is_empty() {
+            return Err(SignatureError::IncompleteSignature(format!(
+                "{} Authorization={}",
+                missing_messages.join(", "),
+                latin1_to_string(algorithm)
+            )));
+        }
+
+        // Get the session token if present.
+        if let Some(token) = self.headers.get(X_AMZ_SECURITY_TOKEN_LOWER) {
+            builder.session_token(latin1_to_string(&token[0]));
+        }
+
+        // Return the builder and the date.
+        let timestamp_str = timestamp_str.expect("date_str should be set");
+        Ok(AuthParams {
+            builder,
+            signed_headers,
+            timestamp_str,
+        })
+    }
+
+    /// Create an [AuthParams] structure from the query parameters. This performs steps 7a-7d of the AWS Auth
+    /// Error Ordering workflow.
+    fn get_auth_parameters_from_query_parameters(&self, query_alg: &str) -> Result<AuthParams, SignatureError> {
+        // Rule 7a: Make sure the X-Amz-Algorithm query parameter is "AWS4-HMAC-SHA256".
+        if query_alg != AWS4_HMAC_SHA256 {
+            return Err(SignatureError::MissingAuthenticationToken(MSG_REQUEST_MISSING_AUTH_TOKEN.to_string()));
+        }
+
+        let mut missing_messages = Vec::new();
+        let mut builder = SigV4Authenticator::builder();
+
+        // Rule 7c: Use the first value for each key.
+        if let Some(credential) = self.query_parameters.get(X_AMZ_CREDENTIAL) {
+            builder.credential(credential[0].clone());
+        } else {
+            missing_messages.push(MSG_QUERY_STRING_MUST_INCLUDE_CREDENTIAL);
+        }
+
+        if let Some(signature) = self.query_parameters.get(X_AMZ_SIGNATURE) {
+            builder.signature(signature[0].clone());
+        } else {
+            missing_messages.push(MSG_QUERY_STRING_MUST_INCLUDE_SIGNATURE);
+        }
+
+        let signed_headers = if let Some(signed_headers) = self.query_parameters.get(X_AMZ_SIGNED_HEADERS) {
+            signed_headers[0].split(';').map(|s| s.to_string()).collect::<Vec<String>>()
+        } else {
+            missing_messages.push(MSG_QUERY_STRING_MUST_INCLUDE_SIGNED_HEADERS);
+            Vec::new()
+        };
+
+        let timestamp_str = self.query_parameters.get(X_AMZ_DATE);
+        if timestamp_str.is_none() {
+            missing_messages.push(MSG_QUERY_STRING_MUST_INCLUDE_DATE);
+        }
+
+        if !missing_messages.is_empty() {
+            return Err(SignatureError::IncompleteSignature(format!(
+                "{} {}",
+                missing_messages.join(", "),
+                MSG_REEXAMINE_QUERY_STRING_PARAMS
+            )));
+        }
+
+        // Get the session token if present.
+        if let Some(token) = self.query_parameters.get(X_AMZ_SECURITY_TOKEN) {
+            builder.session_token(token[0].clone());
+        }
+
+        let timestamp_str = timestamp_str.expect("date_str should be set")[0].clone();
+        Ok(AuthParams {
+            builder,
+            signed_headers,
+            timestamp_str,
+        })
+    }
+}
+
+/// Convert a [HashMap] of query parameters to a string for the canonical request.
+pub fn canonicalize_query_to_string(query_parameters: &HashMap<String, Vec<String>>) -> String {
+    let mut results = Vec::new();
+
+    for (key, values) in query_parameters.iter() {
+        // Don't include the signature itself.
+        if key != X_AMZ_SIGNATURE {
+            for value in values.iter() {
+                results.push(format!("{}={}", key, value));
+            }
+        }
+    }
+
+    results.sort_unstable();
+    results.join("&")
+}
+
+/// Normalizes the specified URI path, removing redundant slashes and relative path components.
+fn canonicalize_uri_path(uri_path: &str) -> Result<String, SignatureError> {
+    // Special case: empty path is converted to '/'; also short-circuit the usual '/' path here.
+    if uri_path.is_empty() || uri_path == "/" {
+        return Ok("/".to_string());
+    }
+
+    // All other paths must be abolute.
+    if !uri_path.starts_with('/') {
+        return Err(SignatureError::InvalidURIPath(format!("Path is not absolute: {}", uri_path)));
+    }
+
+    // Replace double slashes; this makes it easier to handle slashes at the end.
+    let uri_path = MULTISLASH.replace_all(uri_path, "/");
+
+    // Examine each path component for relative directories.
+    let mut components: Vec<String> = uri_path.split('/').map(|s| s.to_string()).collect();
+    let mut i = 1; // Ignore the leading "/"
+    while i < components.len() {
+        let component = normalize_uri_path_component(&components[i])?;
+
+        if component == "." {
+            // Relative path: current directory; remove this.
+            components.remove(i);
+
+            // Don't increment i; with the deletion, we're now pointing to the next element in the path.
+        } else if component == ".." {
+            // Relative path: parent directory.  Remove this and the previous component.
+
+            if i <= 1 {
+                // This isn't allowed at the beginning!
+                return Err(SignatureError::InvalidURIPath(format!(
+                    "Relative path entry '..' navigates above root: {}",
+                    uri_path
+                )));
+            }
+
+            components.remove(i - 1);
+            components.remove(i - 1);
+
+            // Since we've deleted two components, we need to back up one to examine what's now the next component.
+            i -= 1;
+        } else {
+            // Leave it alone; proceed to the next component.
+            components[i] = component;
+            i += 1;
+        }
+    }
+
+    assert!(!components.is_empty());
+    match components.len() {
+        1 => Ok("/".to_string()),
+        _ => Ok(components.join("/")),
+    }
+}
+
+/// Get the content type and character set used in the body
+fn get_content_type_and_charset(
+    headers: &HeaderMap<HeaderValue>,
+) -> Result<Option<ContentTypeCharset>, SignatureError> {
+    let content_type_opts = match headers.get(CONTENT_TYPE) {
+        Some(value) => value.as_ref(),
+        None => return Ok(None),
+    };
+
+    let mut parts = content_type_opts.split(|c| *c == b';').map(|s| trim_ascii(s));
+    let content_type = match parts.next() {
+        Some(s) => latin1_to_string(s),
+        None => return Err(SignatureError::MalformedHeader("content-type header is empty".to_string())),
+    };
+
+    for option in parts {
+        let opt_trim = trim_ascii(option);
+        let mut opt_parts = opt_trim.splitn(2, |c| *c == b'=');
+
+        let opt_name = opt_parts.next().unwrap();
+        if latin1_to_string(opt_name).to_lowercase() == CHARSET {
+            if let Some(opt_value) = opt_parts.next() {
+                return Ok(Some(ContentTypeCharset {
+                    content_type,
+                    charset: Some(latin1_to_string(opt_value)),
+                }));
+            }
+        }
+    }
+
+    Ok(Some(ContentTypeCharset {
+        content_type,
+        charset: None,
+    }))
+}
+
+/// Indicates whether the specified byte is RFC3986 unreserved -- i.e., can be represented without being
+/// percent-encoded, e.g. '?' -> '%3F'.
+#[inline]
+pub fn is_rfc3986_unreserved(c: u8) -> bool {
+    c.is_ascii_alphanumeric() || c == b'-' || c == b'.' || c == b'_' || c == b'~'
+}
+
+/// Returns a sorted dictionary containing the header names and their values.
+pub fn normalize_headers(headers: &HeaderMap<HeaderValue>) -> Result<HashMap<String, Vec<Vec<u8>>>, SignatureError> {
+    let mut result = HashMap::<String, Vec<Vec<u8>>>::new();
+    for (key, value) in headers.iter() {
+        let key = key.as_str().to_lowercase();
+        let value = normalize_header_value(value.as_bytes());
+        result.entry(key).or_insert_with(Vec::new).push(value);
+    }
+
+    Ok(result)
+}
+
+/// Normalizes a header value by trimming whitespace and converting multiple spaces to a single space.
+fn normalize_header_value(value: &[u8]) -> Vec<u8> {
+    let mut result = Vec::with_capacity(value.len());
+
+    // Remove leading whitespace and reduce multiple spaces to a single space.
+    let mut last_was_space = true;
+
+    for c in value {
+        if *c == b' ' {
+            if !last_was_space {
+                result.push(' ' as u8);
+                last_was_space = true;
+            }
+        } else {
+            result.push(*c);
+            last_was_space = false;
+        }
+    }
+
+    if last_was_space {
+        // Remove trailing spaces.
+        while result.last() == Some(&(' ' as u8)) {
+            result.pop();
+        }
+    }
+
+    result
+}
+
+/// Indicates whether we are normalizing a URI path element or a query string element. This is used to create the
+/// correct error message.
+enum UriElement {
+    Path,
+    Query,
+}
+
+/// Normalize a single element (key or value from key=value) of a query string.
+fn normalize_query_string_element(element: &str) -> Result<String, SignatureError> {
+    normalize_uri_element(element, UriElement::Query)
+}
+
+/// Normalizes a path element of a URI.
+fn normalize_uri_path_component(path: &str) -> Result<String, SignatureError> {
+    normalize_uri_element(path, UriElement::Path)
+}
+
+/// Normalize the URI or query string according to RFC 3986.  This performs the following operations:
+/// * Alpha, digit, and the symbols `-`, `.`, `_`, and `~` (unreserved characters) are left alone.
+/// * Characters outside this range are percent-encoded.
+/// * Percent-encoded values are upper-cased (`%2a` becomes `%2A`)
+/// * Percent-encoded values in the unreserved space (`%41`-`%5A`, `%61`-`%7A`, `%30`-`%39`, `%2D`, `%2E`, `%5F`,
+///   `%7E`) are converted to normal characters.
+///
+/// If a percent encoding is incomplete, an error is returned.
+fn normalize_uri_element(uri_el: &str, uri_el_type: UriElement) -> Result<String, SignatureError> {
+    let path_component = uri_el.as_bytes();
+    let mut i = 0;
+    let result = &mut Vec::<u8>::new();
+
+    while i < path_component.len() {
+        let c = path_component[i];
+
+        if is_rfc3986_unreserved(c) {
+            result.push(c);
+            i += 1;
+        } else if c == b'%' {
+            if i + 2 >= path_component.len() {
+                // % encoding would go beyond end of string.
+                return Err(match uri_el_type {
+                    UriElement::Path => {
+                        // AWS Auth Error Ordering Rule 1.
+                        SignatureError::InvalidURIPath(MSG_INCOMPLETE_TRAILING_ESCAPE.to_string())
+                    }
+                    UriElement::Query => {
+                        // AWS Auth Error Ordering Rule 4.
+                        SignatureError::MalformedQueryString(MSG_INCOMPLETE_TRAILING_ESCAPE.to_string())
+                    }
+                });
+            }
+
+            let hex_digits = &path_component[i + 1..i + 3];
+            match hex::decode(hex_digits) {
+                Ok(value) => {
+                    assert_eq!(value.len(), 1);
+                    let c = value[0];
+
+                    if is_rfc3986_unreserved(c) {
+                        result.push(c);
+                    } else {
+                        // Rewrite the hex-escape so it's always upper-cased.
+                        write!(result, "%{:02X}", c)?;
+                    }
+                    i += 3;
+                }
+                Err(_) => {
+                    let message = format!("{}{}{}", MSG_ILLEGAL_HEX_CHAR, hex_digits[0] as char, hex_digits[1] as char);
+                    return Err(match uri_el_type {
+                        // AWS Auth Error Ordering Rule 1.
+                        UriElement::Path => SignatureError::InvalidURIPath(message),
+                        // AWS Auth Error Ordering Rule 4.
+                        UriElement::Query => SignatureError::MalformedQueryString(message),
+                    });
+                }
+            }
+        } else if c == b'+' {
+            // Plus-encoded space. Convert this to %20.
+            result.write_all(b"%20")?;
+            i += 1;
+        } else {
+            // Character should have been encoded.
+            write!(result, "%{:02X}", c)?;
+            i += 1;
+        }
+    }
+
+    Ok(from_utf8(result.as_slice()).unwrap().to_string())
+}
+
+/// Normalize the query parameters by normalizing the keys and values of each parameter and return a `HashMap` mapping
+/// each key to a *vector* of values (since it is valid for a query parameters to appear multiple times).
+///
+/// The order of the values matches the order that they appeared in the query string -- this is important for SigV4
+/// validation.
+pub fn query_string_to_normalized_map(query_string: &str) -> Result<HashMap<String, Vec<String>>, SignatureError> {
+    if query_string.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    // Split the query string into parameters on '&' boundaries.
+    let components = query_string.split('&');
+    let mut result = HashMap::<String, Vec<String>>::new();
+
+    for component in components {
+        if component.is_empty() {
+            // Empty component; skip it.
+            continue;
+        }
+
+        // Split the parameter into key and value portions on the '='
+        let parts: Vec<&str> = component.splitn(2, '=').collect();
+        let key = parts[0];
+        let value = if parts.len() > 1 {
+            parts[1]
+        } else {
+            ""
+        };
+
+        // Normalize the key and value.
+        let norm_key = normalize_query_string_element(key)?;
+        let norm_value = normalize_query_string_element(value)?;
+
+        // If we already have a value for this key, append to it; otherwise, create a new vector containing the value.
+        if let Some(result_value) = result.get_mut(&norm_key) {
+            result_value.push(norm_value);
+        } else {
+            result.insert(norm_key, vec![norm_value]);
+        }
+    }
+
+    Ok(result)
+}
+
+/// Convert a Latin-1 slice of bytes to a UTF-8 string.
+fn latin1_to_string(bytes: &[u8]) -> String {
+    let mut result = String::new();
+    for b in bytes {
+        result.push(*b as char);
+    }
+    result
+}
+
+/// Returns a byte slice with leading ASCII whitespace bytes removed.
+///
+/// ‘Whitespace’ refers to the definition used by u8::is_ascii_whitespace.
+///
+/// This is copied from the Rust standard library source until the
+/// [`byte_slice_trim_ascii` feature](https://github.com/rust-lang/rust/issues/94035) is stabilized.
+const fn trim_ascii_start(bytes: &[u8]) -> &[u8] {
+    let mut bytes = bytes;
+    // Note: A pattern matching based approach (instead of indexing) allows
+    // making the function const.
+    while let [first, rest @ ..] = bytes {
+        if first.is_ascii_whitespace() {
+            bytes = rest;
+        } else {
+            break;
+        }
+    }
+    bytes
+}
+
+/// Returns a byte slice with trailing ASCII whitespace bytes removed.
+///
+/// ‘Whitespace’ refers to the definition used by u8::is_ascii_whitespace.
+///
+/// This is copied from the Rust standard library source until the
+/// [`byte_slice_trim_ascii` feature](https://github.com/rust-lang/rust/issues/94035) is stabilized.
+const fn trim_ascii_end(bytes: &[u8]) -> &[u8] {
+    let mut bytes = bytes;
+    // Note: A pattern matching based approach (instead of indexing) allows
+    // making the function const.
+    while let [rest @ .., last] = bytes {
+        if last.is_ascii_whitespace() {
+            bytes = rest;
+        } else {
+            break;
+        }
+    }
+    bytes
+}
+
+/// Returns a byte slice with leading and trailing ASCII whitespace bytes removed.
+///
+/// ‘Whitespace’ refers to the definition used by u8::is_ascii_whitespace.
+///
+/// This is copied from the Rust standard library source until the
+/// [`byte_slice_trim_ascii` feature](https://github.com/rust-lang/rust/issues/94035) is stabilized.
+const fn trim_ascii(bytes: &[u8]) -> &[u8] {
+    trim_ascii_end(trim_ascii_start(bytes))
+}
+
+fn debug_headers(headers: &HashMap<String, Vec<Vec<u8>>>) -> String {
+    let mut result = Vec::new();
+    for (key, values) in headers.iter() {
+        for value in values {
+            match String::from_utf8(value.clone()) {
+                Ok(s) => writeln!(result, "{}: {}", key, s).unwrap(),
+                Err(_) => writeln!(result, "{}: {:?}", key, value).unwrap(),
+            }
+        }
+    }
+
+    if result.is_empty() {
+        return String::new();
+    }
+
+    // Remove the last newline.
+    let result_except_last = &result[..result.len() - 1];
+    String::from_utf8_lossy(result_except_last).to_string()
+}

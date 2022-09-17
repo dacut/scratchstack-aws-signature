@@ -3,7 +3,7 @@
 mod service;
 pub use crate::service::AwsSigV4VerifierService;
 
-#[cfg(test)]
+#[cfg(test2)]
 mod tests {
     use {
         crate::AwsSigV4VerifierService,

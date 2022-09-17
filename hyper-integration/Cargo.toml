@@ -19,7 +19,7 @@ log = "^0.4"
 http = "^0.2"
 http-body = "^0.4"
 hyper = { version = "^0.14", features = [ "server", "stream", "tcp", "http1", "http2" ] }
-scratchstack-aws-principal = "^0.3"
+scratchstack-aws-principal = { version = "^0.4", path = "../../scratchstack-core/principal" }
 scratchstack-aws-signature = { version = "^0.10", path = "../base-library/" }
 tokio = { version = "^1.4", features = [ "macros", "rt" ] }
 tower = { version = "^0.4", features = [ "buffer" ]}

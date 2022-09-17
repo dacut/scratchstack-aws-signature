@@ -2,11 +2,11 @@ use {
     chrono::{
         format::{ParseError, ParseResult},
         offset::{FixedOffset, TimeZone},
-        DateTime, Utc,
+        DateTime,
     },
     lazy_static::lazy_static,
     regex::Regex,
-    std::{error::Error, str::FromStr},
+    std::str::FromStr,
 };
 
 lazy_static! {
@@ -101,17 +101,54 @@ impl ParseISO8601<DateTime<FixedOffset>> for DateTime<FixedOffset> {
     }
 }
 
-pub(crate) fn parse_date_str<E>(date_str: &str, e: E) -> Result<DateTime<Utc>, E>
-where
-    E: Error + 'static,
-{
-    if let Ok(ref d) = DateTime::parse_from_rfc2822(date_str) {
-        Ok(d.with_timezone(&Utc))
-    } else if let Ok(ref d) = DateTime::parse_from_rfc3339(date_str) {
-        Ok(d.with_timezone(&Utc))
-    } else if let Ok(ref d) = DateTime::parse_from_iso8601(date_str) {
-        Ok(d.with_timezone(&Utc))
-    } else {
-        Err(e)
+#[cfg(test)]
+mod tests {
+    use {
+        super::ParseISO8601,
+        chrono::{DateTime, Datelike, Timelike},
+    };
+
+    #[test]
+    fn check_iso8601_error_handling() {
+        match DateTime::parse_from_iso8601("blatantly-wrong") {
+            Ok(_) => panic!("Expected a ParseError"),
+            Err(_) => 1,
+        };
+
+        match DateTime::parse_from_iso8601("2001-01-001T00:00:00Z") {
+            Ok(_) => panic!("Expected a ParseError"),
+            Err(_) => 1,
+        };
+    }
+
+    #[test]
+    fn check_iso8601_tz_formats() {
+        let dt = DateTime::parse_from_iso8601("2001-02-03T15:16:17.000123456Z").unwrap();
+        assert_eq!((dt.year(), dt.month(), dt.day()), (2001, 2, 3));
+        assert_eq!((dt.hour(), dt.minute(), dt.second()), (15, 16, 17));
+        assert_eq!(dt.nanosecond(), 123456);
+        assert_eq!(dt.timezone().utc_minus_local(), 0);
+
+        let dt = DateTime::parse_from_iso8601("2001-02-03T15:16:17.123Z").unwrap();
+        assert_eq!((dt.year(), dt.month(), dt.day()), (2001, 2, 3));
+        assert_eq!((dt.hour(), dt.minute(), dt.second()), (15, 16, 17));
+        assert_eq!(dt.nanosecond(), 123000000);
+        assert_eq!(dt.timezone().utc_minus_local(), 0);
+
+        let dt = DateTime::parse_from_iso8601("2001-02-03T15:16:17.123456789123Z").unwrap();
+        assert_eq!((dt.year(), dt.month(), dt.day()), (2001, 2, 3));
+        assert_eq!((dt.hour(), dt.minute(), dt.second()), (15, 16, 17));
+        assert_eq!(dt.nanosecond(), 123456789);
+        assert_eq!(dt.timezone().utc_minus_local(), 0);
+
+        let dt = DateTime::parse_from_iso8601("2001-02-03T15:16:17-02:45").unwrap();
+        assert_eq!((dt.year(), dt.month(), dt.day()), (2001, 2, 3));
+        assert_eq!((dt.hour(), dt.minute(), dt.second()), (15, 16, 17));
+        assert_eq!(dt.timezone().utc_minus_local(), ((2 * 60) + 45) * 60);
+
+        let dt = DateTime::parse_from_iso8601("20010203T151617-0245").unwrap();
+        assert_eq!((dt.year(), dt.month(), dt.day()), (2001, 2, 3));
+        assert_eq!((dt.hour(), dt.minute(), dt.second()), (15, 16, 17));
+        assert_eq!(dt.timezone().utc_minus_local(), ((2 * 60) + 45) * 60);
     }
 }
