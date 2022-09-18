@@ -2,7 +2,7 @@
 ## Crate: [scratchstack-aws-signature](https://crates.io/crates/scratchstack-aws-signature)
 
 ![GitHub Actions](https://github.com/dacut/scratchstack-aws-signature/workflows/Rust/badge.svg)
-[![Coverage Status](https://coveralls.io/repos/github/dacut/scratchstack-aws-signature/badge.svg?branch=master)](https://coveralls.io/github/dacut/scratchstack-aws-signature?branch=master)
+[![Coverage Status](https://coveralls.io/repos/github/dacut/scratchstack-aws-signature/badge.svg?branch=main)](https://coveralls.io/github/dacut/scratchstack-aws-signature?branch=main)
 
 The `scratchstack-aws-signature` crate (formerly known as `aws_sig_verify`) provides
 AWS SigV4 _verification_ routines.
