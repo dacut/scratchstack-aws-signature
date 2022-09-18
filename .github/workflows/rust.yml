@@ -1,10 +1,16 @@
 name: Rust
 
-on: [push]
+on:
+  push:
+    branches:
+      - main
+  pull_request_target:
+    branches:
+      - main
 env:
   CARGO_INCREMENTAL: '0'
-  RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
-  RUSTDOCFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
+  RUSTFLAGS: '-Ccodegen-units=1 -Cinstrument-coverage -Copt-level=0 -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests -Zprofile'
+  RUSTDOCFLAGS: '-Ccodegen-units=1 -Cinstrument-coverage -Copt-level=0 -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests -Zprofile'
 
 jobs:
   build:
@@ -22,13 +28,21 @@ jobs:
       run: cargo build --verbose
     - name: Run tests
       run: cargo test --verbose
+    - name: Show directory hierarchy
+      run: ls -lR
     - name: Build documentation
       run: cargo doc --verbose
     - name: Generate coverage report
       id: coverage
       uses: actions-rs/grcov@v0.1
+    - name: Fix up coverage report
+      run: ./coverage-fixup.py ${{ steps.coverage.outputs.report }}
     - name: Upload coverage report to Coveralls
       uses: coverallsapp/github-action@master
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         path-to-lcov: ${{ steps.coverage.outputs.report }}
+    - uses: actions-rs/clippy-check@v1
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        args: --all-features

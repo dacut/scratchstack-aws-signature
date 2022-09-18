@@ -27,19 +27,10 @@ use {
 const TEST_REGION: &str = "us-east-1";
 const TEST_SERVICE: &str = "service";
 
-macro_rules! aws4_test {
-    {$func_name:ident $body:block } => {
-        #[test]
-        fn $func_name() {
-            let _ = env_logger::try_init();
-            tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap().block_on(async {$body});
-        }
-    };
-}
-
-aws4_test! {get_header_key_duplicate_get_header_key_duplicate {
+#[test_log::test(tokio::test)]
+async fn get_header_key_duplicate_get_header_key_duplicate() {
     run("get-header-key-duplicate/get-header-key-duplicate").await;
-}}
+}
 
 // Canonical request is contrary to RFC 2616
 // #[tokio::test]
@@ -48,171 +39,145 @@ aws4_test! {get_header_key_duplicate_get_header_key_duplicate {
 //     run("get-header-value-multiline/get-header-value-multiline").await;
 // }
 
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn get_header_value_order_get_header_value_order() {
     run("get-header-value-order/get-header-value-order").await;
 }
 
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn get_header_value_trim_get_header_value_trim() {
     run("get-header-value-trim/get-header-value-trim").await;
 }
 
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn get_unreserved_get_unreserved() {
     run("get-unreserved/get-unreserved").await;
 }
 
 // This encoding issue is taken care of by the frontend.
-// #[tokio::test]
-// #[test_log::test]
+// #[test_log::test(tokio::test)]
 // async fn get_utf8_get_utf8() {
 //     run("get-utf8/get-utf8").await;
 // }
 
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn get_vanilla_empty_query_key_get_vanilla_empty_query_key() {
     run("get-vanilla-empty-query-key/get-vanilla-empty-query-key").await;
 }
 
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn get_vanilla_query_order_key_case_get_vanilla_query_order_key_case() {
     run("get-vanilla-query-order-key-case/get-vanilla-query-order-key-case").await;
 }
 
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn get_vanilla_query_order_key_get_vanilla_query_order_key() {
     run("get-vanilla-query-order-key/get-vanilla-query-order-key").await;
 }
 
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn get_vanilla_query_order_value_get_vanilla_query_order_value() {
     run("get-vanilla-query-order-value/get-vanilla-query-order-value").await;
 }
 
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn get_vanilla_query_unreserved_get_vanilla_query_unreserved() {
     run("get-vanilla-query-unreserved/get-vanilla-query-unreserved").await;
 }
 
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn get_vanilla_query_get_vanilla_query() {
     run("get-vanilla-query/get-vanilla-query").await;
 }
 
 // This encoding issue is taken care of/rejected by the frontend.
-// #[tokio::test]
-// #[test_log::test]
+// #[test_log::test(tokio::test)]
 // async fn get_vanilla_utf8_query_get_vanilla_utf8_query() {
 //     run("get-vanilla-utf8-query/get-vanilla-utf8-query").await;
 // }
 
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn get_vanilla_get_vanilla() {
     run("get-vanilla/get-vanilla").await;
 }
 
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn normalize_path_get_relative_relative_get_relative_relative() {
     run("normalize-path/get-relative-relative/get-relative-relative").await;
 }
 
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn normalize_path_get_relative_get_relative() {
     run("normalize-path/get-relative/get-relative").await;
 }
 
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn normalize_path_get_slash_dot_slash_get_slash_dot_slash() {
     run("normalize-path/get-slash-dot-slash/get-slash-dot-slash").await;
 }
 
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn normalize_path_get_slash_pointless_dot_get_slash_pointless_dot() {
     run("normalize-path/get-slash-pointless-dot/get-slash-pointless-dot").await;
 }
 
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn normalize_path_get_slash_get_slash() {
     run("normalize-path/get-slash/get-slash").await;
 }
 
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn normalize_path_get_slashes_get_slashes() {
     run("normalize-path/get-slashes/get-slashes").await;
 }
 
 // This encoding issue is taken care of by the HTTP frontend.
-// #[tokio::test]
-// #[test_log::test]
+// #[test_log::test(tokio::test)]
 // async fn normalize_path_get_space_get_space() {
 //     run("normalize-path/get-space/get-space").await;
 // }
 
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn post_header_key_case_post_header_key_case() {
     run("post-header-key-case/post-header-key-case").await;
 }
 
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn post_header_key_sort_post_header_key_sort() {
     run("post-header-key-sort/post-header-key-sort").await;
 }
 
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn post_header_value_case_post_header_value_case() {
     run("post-header-value-case/post-header-value-case").await;
 }
 
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn post_sts_token_post_sts_header_after_post_sts_header_after() {
     run("post-sts-token/post-sts-header-after/post-sts-header-after").await;
 }
 
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn post_sts_token_post_sts_header_before_post_sts_header_before() {
     run("post-sts-token/post-sts-header-before/post-sts-header-before").await;
 }
 
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn post_vanilla_empty_query_value_post_vanilla_empty_query_value() {
     run("post-vanilla-empty-query-value/post-vanilla-empty-query-value").await;
 }
 
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn post_vanilla_query_post_vanilla_query() {
     run("post-vanilla-query/post-vanilla-query").await;
 }
 
-aws4_test! {post_vanilla_post_vanilla {
+#[test_log::test(tokio::test)]
+async fn post_vanilla_post_vanilla() {
     run("post-vanilla/post-vanilla").await;
-}}
+}
 
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn post_x_www_form_urlencoded_parameters_post_x_www_form_urlencoded_parameters() {
     run("post-x-www-form-urlencoded-parameters/post-x-www-form-urlencoded-parameters").await;
 }
@@ -221,8 +186,7 @@ async fn post_x_www_form_urlencoded_parameters_post_x_www_form_urlencoded_parame
 This test is disabled for now -- it does not seem to encode the signed request
 properly.
 
-#[tokio::test]
-#[test_log::test]
+#[test_log::test(tokio::test)]
 async fn post_x_www_form_urlencoded_post_x_www_form_urlencoded() {
     run("post-x-www-form-urlencoded/post-x-www-form-urlencoded").await;
 }

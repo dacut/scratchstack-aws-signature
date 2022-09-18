@@ -2,7 +2,7 @@ use {
     chrono::Utc,
     hyper::{body::Body, Request, Response},
     scratchstack_aws_principal::Principal,
-    scratchstack_aws_signature::{sigv4_validate_request_hyper_stream, GetSigningKeyRequest, KSigningKey},
+    scratchstack_aws_signature::{sigv4_validate_request_hyper_stream, GetSigningKeyRequest, KSigningKey, SignatureError},
     std::{
         any::type_name,
         fmt::{Debug, Display, Formatter, Result as FmtResult},
@@ -132,7 +132,35 @@ where
 {
     let mut gsk = get_signing_key.ready().await?;
     let (mut parts, body, principal) =
-        sigv4_validate_request_hyper_stream(request, region.as_str(), service.as_str(), &mut gsk, Utc::now()).await?;
+        match sigv4_validate_request_hyper_stream(request, region.as_str(), service.as_str(), &mut gsk, Utc::now()).await {
+            Ok((parts, body, principal)) => (parts, body, principal),
+            Err(e) => {
+                // FIXME: The error document should NOT be hardcoded here.
+                match e.downcast::<SignatureError>() {
+                    Ok(e) => {
+                        let status = e.http_status();
+                        let error_code = e.error_code();
+                        let msg = e.to_string();
+                        let error_type = if status.is_server_error() { "Reciever" } else { "Sender" };
+                        let mut body = format!("<ErrorResponse xmlns=\"https://sts.amazonaws.com/doc/2011-06-15/\">\n  <Error>\n    <Type>{error_type}</Type>\n    <Code>{error_code}</Code>\n");
+
+                        if !msg.is_empty() {
+                            body.push_str(format!("    <Message>{msg}</Message>").as_str());
+                        }
+
+                        body.push_str("  </Error>\n</ErrorResponse>\n");
+
+                        let response = Response::builder()
+                            .status(status)
+                            .header("Content-Type", "text/xml")
+                            .body(Body::from(body))?;
+
+                        return Ok(response);
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+        };
     let body = Body::from(body);
     parts.extensions.insert(principal);
     let req = Request::from_parts(parts, body);

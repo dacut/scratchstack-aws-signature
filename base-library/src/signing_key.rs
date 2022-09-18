@@ -232,12 +232,20 @@ impl KServiceKey {
 }
 
 /// A request for a signing key of a given kind for the specified request.
+#[derive(Clone, Debug)]
 pub struct GetSigningKeyRequest {
     pub access_key: String,
     pub session_token: Option<String>,
     pub request_date: Date<Utc>,
     pub region: String,
     pub service: String,
+}
+
+/// A response from the signing key provider.
+#[derive(Clone, Debug)]
+pub struct GetSigningKeyResponse {
+    pub signing_key: KSigningKey,
+    pub principal: Principal,
 }
 
 // A trait alias that describes how we obtain a signing key of a given type given a request. If you need to encapsulate

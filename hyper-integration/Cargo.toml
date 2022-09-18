@@ -11,15 +11,18 @@ license = "MIT OR Apache-2.0"
 readme = "../README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "scratchstack_aws_signature_hyper"
 
 [dependencies]
+bytes = "^1.2"
 chrono = "^0.4"
 futures = "^0.3"
 log = "^0.4"
 http = "^0.2"
 http-body = "^0.4"
 hyper = { version = "^0.14", features = [ "server", "stream", "tcp", "http1", "http2" ] }
-scratchstack-aws-principal = { version = "^0.4", path = "../../scratchstack-core/principal" }
+scratchstack-aws-principal = { git = "https://github.com/dacut/scratchstack-core", branch = "main" }
 scratchstack-aws-signature = { version = "^0.10", path = "../base-library/" }
 tokio = { version = "^1.4", features = [ "macros", "rt" ] }
 tower = { version = "^0.4", features = [ "buffer" ]}
@@ -27,7 +30,7 @@ tower = { version = "^0.4", features = [ "buffer" ]}
 [dev-dependencies]
 env_logger = "^0.8"
 hyper = { version = "^0.14", features = [ "client", "server", "stream", "tcp", "http1", "http2" ] }
-rusoto_core = "^0.46"
-rusoto_credential = "^0.46"
-rusoto_signature = "^0.46"
+rusoto_core = "^0.47"
+rusoto_credential = "^0.47"
+rusoto_signature = "^0.47"
 test-log = "^0.2"

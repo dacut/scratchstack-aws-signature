@@ -1,9 +1,11 @@
 branch: true
-ignore-not-existing: true
-llvm: true
+excl-start: "#\[cfg\(test\)\]"
+excl-end: "end tests"
 filter: covered
-output-type: lcov
-output-path: ./lcov.info
 ignore:
   - "**/.cargo/registry/**/*"
   - "/rustc/**/*"
+ignore-not-existing: true
+llvm: true
+output-type: lcov
+output-path: ./lcov.info
