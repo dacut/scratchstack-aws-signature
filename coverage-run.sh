@@ -18,17 +18,17 @@ done
 rm -f *.profdata *.profraw
 
 export CARGO_INCREMENTAL=0
-export LLVM_PROFILE_FILE="$ROOT/scratchstack-core-%m.profraw"
+export LLVM_PROFILE_FILE="$ROOT/scratchstack-aws-signature-%m.profraw"
 export RUSTFLAGS="-Cinstrument-coverage"
 if [[ $CLEAN -ne 0 ]]; then
     cargo clean
     cargo build
 fi
 cargo test
-llvm-profdata merge -sparse scratchstack-core-*.profraw -o scratchstack-core.profdata
-llvm-cov export -format lcov -Xdemangler=rustfilt -ignore-filename-regex='/.cargo/registry|.*thread/local.rs' \
-    -instr-profile=scratchstack-core.profdata \
-    target/debug/deps/scratchstack_arn-[a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9] \
-    -object target/debug/deps/scratchstack_aws_principal-[a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9] \
+llvm-profdata merge -sparse scratchstack-aws-signature-*.profraw -o scratchstack-aws-signature.profdata
+llvm-cov export -format lcov -Xdemangler=rustfilt -ignore-filename-regex='/.cargo/|.*thread/local.rs' \
+    -instr-profile=scratchstack-aws-signature.profdata \
+    target/debug/deps/scratchstack_aws_signature-[a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9] \
+    -object target/debug/deps/scratchstack_aws_signature_hyper-[a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9][a-z0-9] \
     > "$ROOT/lcov.info"
 "$ROOT/coverage-fixup.py" "$ROOT/lcov.info"

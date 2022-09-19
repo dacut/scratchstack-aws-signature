@@ -1,13 +1,13 @@
 [package]
 name = "scratchstack-aws-signature"
-version = "0.10.2"
+version = "0.11.0"
 authors = ["David Cuthbert <dacut@kanga.org>"]
 description = "AWS SigV4 signature verification"
 keywords = ["AWS", "Amazon"]
 homepage = "https://github.com/dacut/scratchstack-aws-signature"
 repository = "https://github.com/dacut/scratchstack-aws-signature"
-license = "MIT OR Apache-2.0"
-edition = "2018"
+license = "MIT"
+edition = "2021"
 exclude = ["tests/*"]
 readme = "../README.md"
 
@@ -27,13 +27,13 @@ hyper = { version = "^0.14", features = ["stream"] }
 lazy_static = "^1.4"
 log = "^0.4"
 regex = "^1.6"
-ring = "^0.16.20"
+ring = "^0.16"
 scratchstack-arn = { git = "https://github.com/dacut/scratchstack-core", branch = "main" }
 scratchstack-aws-principal = { git = "https://github.com/dacut/scratchstack-core", branch = "main" }
 subtle = "^2.4"
 tower = { version = "^0.4", features = [ "util" ] }
 
 [dev-dependencies]
-env_logger = "0.9.0"
-tokio = { version = "1.21.1", features = [ "macros", "rt" ] }
-test-log = "0.2.11"
+env_logger = "^0.9"
+tokio = { version = "^1.21", features = [ "macros", "rt" ] }
+test-log = "0.2"

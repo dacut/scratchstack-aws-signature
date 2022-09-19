@@ -2,12 +2,12 @@
 name = "scratchstack-aws-signature-hyper"
 description = "AWS SigV4 signature verification integration with Hyper"
 keywords = ["AWS", "Amazon", "Hyper"]
-version = "0.10.2"
+version = "0.11.0"
 authors = ["David Cuthbert <dacut@kanga.org>"]
 homepage = "https://github.com/dacut/scratchstack-aws-signature"
 repository = "https://github.com/dacut/scratchstack-aws-signature"
-edition = "2018"
-license = "MIT OR Apache-2.0"
+edition = "2021"
+license = "MIT"
 readme = "../README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -23,14 +23,14 @@ http = "^0.2"
 http-body = "^0.4"
 hyper = { version = "^0.14", features = [ "server", "stream", "tcp", "http1", "http2" ] }
 scratchstack-aws-principal = { git = "https://github.com/dacut/scratchstack-core", branch = "main" }
-scratchstack-aws-signature = { version = "^0.10", path = "../base-library/" }
+scratchstack-aws-signature = { version = "^0.11", path = "../base-library/" }
 tokio = { version = "^1.4", features = [ "macros", "rt" ] }
 tower = { version = "^0.4", features = [ "buffer" ]}
 
 [dev-dependencies]
-env_logger = "^0.8"
+env_logger = "^0.9"
 hyper = { version = "^0.14", features = [ "client", "server", "stream", "tcp", "http1", "http2" ] }
-rusoto_core = "^0.47"
-rusoto_credential = "^0.47"
-rusoto_signature = "^0.47"
+rusoto_core = "^0.48"
+rusoto_credential = "^0.48"
+rusoto_signature = "^0.48"
 test-log = "^0.2"
