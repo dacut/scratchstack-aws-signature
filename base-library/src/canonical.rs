@@ -538,7 +538,7 @@ pub fn canonicalize_query_to_string(query_parameters: &HashMap<String, Vec<Strin
 }
 
 /// Normalizes the specified URI path, removing redundant slashes and relative path components.
-fn canonicalize_uri_path(uri_path: &str) -> Result<String, SignatureError> {
+pub(crate) fn canonicalize_uri_path(uri_path: &str) -> Result<String, SignatureError> {
     // Special case: empty path is converted to '/'; also short-circuit the usual '/' path here.
     if uri_path.is_empty() || uri_path == "/" {
         return Ok("/".to_string());
@@ -690,7 +690,7 @@ fn normalize_query_string_element(element: &str) -> Result<String, SignatureErro
 }
 
 /// Normalizes a path element of a URI.
-fn normalize_uri_path_component(path: &str) -> Result<String, SignatureError> {
+pub(crate) fn normalize_uri_path_component(path: &str) -> Result<String, SignatureError> {
     normalize_uri_element(path, UriElement::Path)
 }
 
@@ -888,3 +888,143 @@ fn debug_headers(headers: &HashMap<String, Vec<Vec<u8>>>) -> String {
     let result_except_last = &result[..result.len() - 1];
     String::from_utf8_lossy(result_except_last).to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use {
+        crate::{
+            canonical::{canonicalize_uri_path, normalize_uri_path_component, query_string_to_normalized_map},
+            CanonicalRequest, SignatureError,
+        },
+        bytes::Bytes,
+        http::{
+            method::Method,
+            request::Request,
+            uri::{PathAndQuery, Uri},
+        },
+    };
+
+    macro_rules! expect_err {
+        ($test:expr, $expected:ident) => {
+            match $test {
+                Ok(ref v) => panic!("Expected Err({}); got Ok({:?})", stringify!($expected), v),
+                Err(ref e) => match e {
+                    SignatureError::$expected(_) => e.to_string(),
+                    _ => panic!("Expected {}; got {:#?}: {}", stringify!($expected), &e, &e),
+                },
+            }
+        };
+    }
+
+    #[test_log::test]
+    fn canonicalize_uri_path_empty() {
+        assert_eq!(canonicalize_uri_path("").unwrap(), "/".to_string());
+        assert_eq!(canonicalize_uri_path("/").unwrap(), "/".to_string());
+    }
+
+    #[test_log::test]
+    fn canonicalize_valid() {
+        assert_eq!(canonicalize_uri_path("/hello/world").unwrap(), "/hello/world".to_string());
+        assert_eq!(canonicalize_uri_path("/hello///world").unwrap(), "/hello/world".to_string());
+        assert_eq!(canonicalize_uri_path("/hello/./world").unwrap(), "/hello/world".to_string());
+        assert_eq!(canonicalize_uri_path("/hello/foo/../world").unwrap(), "/hello/world".to_string());
+        assert_eq!(canonicalize_uri_path("/hello/%77%6F%72%6C%64").unwrap(), "/hello/world".to_string());
+        assert_eq!(canonicalize_uri_path("/hello/w*rld").unwrap(), "/hello/w%2Arld".to_string());
+        assert_eq!(canonicalize_uri_path("/hello/w%2arld").unwrap(), "/hello/w%2Arld".to_string());
+        assert_eq!(canonicalize_uri_path("/hello/w+rld").unwrap(), "/hello/w%20rld".to_string());
+    }
+
+    #[test_log::test]
+    fn canonicalize_invalid() {
+        let e = expect_err!(canonicalize_uri_path("hello/world"), InvalidURIPath);
+        assert_eq!(e.to_string(), "Path is not absolute: hello/world");
+        expect_err!(canonicalize_uri_path("/hello/../../world"), InvalidURIPath);
+    }
+
+    #[test_log::test]
+    fn normalize_valid1() {
+        let result = query_string_to_normalized_map("Hello=World&foo=bar&baz=bomb&foo=2");
+        let v = result.unwrap();
+        let hello = v.get("Hello").unwrap();
+        assert_eq!(hello.len(), 1);
+        assert_eq!(hello[0], "World");
+
+        let foo = v.get("foo").unwrap();
+        assert_eq!(foo.len(), 2);
+        assert_eq!(foo[0], "bar");
+        assert_eq!(foo[1], "2");
+
+        let baz = v.get("baz").unwrap();
+        assert_eq!(baz.len(), 1);
+        assert_eq!(baz[0], "bomb");
+    }
+
+    #[test_log::test]
+    fn normalize_empty() {
+        let result = query_string_to_normalized_map("Hello=World&&foo=bar");
+        let v = result.unwrap();
+        let hello = v.get("Hello").unwrap();
+
+        assert_eq!(hello.len(), 1);
+        assert_eq!(hello[0], "World");
+
+        let foo = v.get("foo").unwrap();
+        assert_eq!(foo.len(), 1);
+        assert_eq!(foo[0], "bar");
+
+        assert!(v.get("").is_none());
+    }
+
+    #[test_log::test]
+    fn normalize_invalid_hex() {
+        let e = expect_err!(normalize_uri_path_component("abcd%yy"), InvalidURIPath);
+        assert_eq!(e.as_str(), "Illegal hex character in escape % pattern: %yy");
+        expect_err!(normalize_uri_path_component("abcd%yy"), InvalidURIPath);
+        expect_err!(normalize_uri_path_component("abcd%0"), InvalidURIPath);
+        expect_err!(normalize_uri_path_component("abcd%"), InvalidURIPath);
+        assert_eq!(normalize_uri_path_component("abcd%65").unwrap(), "abcde");
+    }
+
+    /// Check for query parameters without a value, e.g. ?Key2&
+    /// https://github.com/dacut/scratchstack-aws-signature/issues/2
+    #[test_log::test]
+    fn normalize_query_parameters_missing_value() {
+        let result = query_string_to_normalized_map("Key1=Value1&Key2&Key3=Value3");
+        assert!(result.is_ok());
+        let result = result.unwrap();
+        assert_eq!(result["Key1"], vec!["Value1"]);
+        assert_eq!(result["Key2"], vec![""]);
+        assert_eq!(result["Key3"], vec!["Value3"]);
+    }
+
+    #[test_log::test]
+    fn test_multiple_algorithms() {
+        let uri = Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap();
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri(uri)
+            .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
+            .header("authorization", "Basic foobar")
+            .header("x-amz-date", "20150830T123600Z")
+            .body(Bytes::new())
+            .unwrap();
+        let (parts, body) = request.into_parts();
+
+        let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
+
+        assert_eq!(cr.request_method(), "GET");
+        assert_eq!(cr.canonical_path(), "/");
+        assert!(cr.query_parameters().is_empty());
+        assert_eq!(cr.headers().len(), 2);
+        assert_eq!(cr.headers().get("authorization").unwrap().len(), 2);
+        assert_eq!(
+            cr.headers().get("authorization").unwrap()[0],
+            b"AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678"
+        );
+        assert_eq!(cr.body_sha256(), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+
+        let params = cr.get_auth_parameters().unwrap();
+        assert_eq!(params.signed_headers, vec!["date", "host"]);
+    }
+}
+// end tests -- do not delete; needed for coverage.

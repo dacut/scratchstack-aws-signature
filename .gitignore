@@ -14,6 +14,7 @@ Cargo.lock
 # Ignore coverage data
 *.profdata
 *.profraw
+*.lcov
 coverage-html
 lcov.info
 lcov-html/
