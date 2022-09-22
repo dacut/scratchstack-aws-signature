@@ -46,7 +46,8 @@ const SHA256_EMPTY: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495
 const SHA256_HEX_LENGTH: usize = SHA256_EMPTY.len();
 
 /// Low-level structure for performing AWS SigV4 authentication after a canonical request has been generated.
-#[derive(Builder, Clone, Default)]
+#[derive(Builder, Clone, Debug, Default)]
+#[builder(derive(Debug))]
 pub struct SigV4Authenticator {
     /// The SHA-256 hash of the canonical request.
     canonical_request_sha256: [u8; SHA256_OUTPUT_LEN],
@@ -116,7 +117,7 @@ impl SigV4Authenticator {
         let min_ts = server_timestamp.checked_sub_signed(allowed_mismatch).unwrap_or(server_timestamp);
         let max_ts = server_timestamp.checked_add_signed(allowed_mismatch).unwrap_or(server_timestamp);
 
-        // Rule 9: Make sure date isn't expired...
+        // Rule 10: Make sure date isn't expired...
         if req_ts < min_ts {
             return Err(SignatureError::SignatureDoesNotMatch(Some(format!(
                 "Signature expired: {} is now earlier than {} ({} - {}.)",
@@ -127,7 +128,7 @@ impl SigV4Authenticator {
             ))));
         }
 
-        // Rule 10: ... or too far into the future.
+        // Rule 11: ... or too far into the future.
         if req_ts > max_ts {
             return Err(SignatureError::SignatureDoesNotMatch(Some(format!(
                 "Signature expired: {} is now later than {} ({} + {}.)",
@@ -138,7 +139,7 @@ impl SigV4Authenticator {
             ))));
         }
 
-        // Rule 11: Credential scope must have exactly five elements.
+        // Rule 12: Credential scope must have exactly five elements.
         let credential_parts = self.credential.split('/').collect::<Vec<&str>>();
         if credential_parts.len() != 5 {
             return Err(SignatureError::IncompleteSignature(format!(
@@ -152,7 +153,7 @@ impl SigV4Authenticator {
         let cscope_service = credential_parts[3];
         let cscope_term = credential_parts[4];
 
-        // Rule 12: Credential scope must be correct for the region/service/date.
+        // Rule 13: Credential scope must be correct for the region/service/date.
         let mut cscope_errors = Vec::new();
         if cscope_region != region {
             cscope_errors.push(format!("Credential should be scoped to a valid region not '{}'", region));
@@ -259,6 +260,25 @@ impl SigV4Authenticator {
         } else {
             Ok(principal)
         }
+    }
+}
+
+#[allow(dead_code)] // used in tests
+impl SigV4AuthenticatorBuilder {
+    pub(crate) fn get_credential(&self) -> &Option<String> {
+        &self.credential
+    }
+
+    pub(crate) fn get_signature(&self) -> &Option<String> {
+        &self.signature
+    }
+
+    pub(crate) fn get_session_token(&self) -> &Option<Option<String>> {
+        &self.session_token
+    }
+
+    pub(crate) fn get_request_timestamp(&self) -> &Option<DateTime<Utc>> {
+        &self.request_timestamp
     }
 }
 

@@ -110,15 +110,8 @@ mod tests {
 
     #[test]
     fn check_iso8601_error_handling() {
-        match DateTime::parse_from_iso8601("blatantly-wrong") {
-            Ok(_) => panic!("Expected a ParseError"),
-            Err(_) => 1,
-        };
-
-        match DateTime::parse_from_iso8601("2001-01-001T00:00:00Z") {
-            Ok(_) => panic!("Expected a ParseError"),
-            Err(_) => 1,
-        };
+        let _ = DateTime::parse_from_iso8601("blatantly-wrong").unwrap_err();
+        let _ = DateTime::parse_from_iso8601("2001-01-001T00:00:00Z").unwrap_err();
     }
 
     #[test]
@@ -150,5 +143,11 @@ mod tests {
         assert_eq!((dt.year(), dt.month(), dt.day()), (2001, 2, 3));
         assert_eq!((dt.hour(), dt.minute(), dt.second()), (15, 16, 17));
         assert_eq!(dt.timezone().utc_minus_local(), ((2 * 60) + 45) * 60);
+
+        let dt = DateTime::parse_from_iso8601("20010203T151617+0245").unwrap();
+        assert_eq!((dt.year(), dt.month(), dt.day()), (2001, 2, 3));
+        assert_eq!((dt.hour(), dt.minute(), dt.second()), (15, 16, 17));
+        assert_eq!(dt.timezone().local_minus_utc(), ((2 * 60) + 45) * 60);
     }
 }
+// end tests -- do not delete; needed for coverage.
