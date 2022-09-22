@@ -2,7 +2,7 @@ use {
     crate::crypto::hmac_sha256,
     chrono::{Date, Utc},
     ring::digest::SHA256_OUTPUT_LEN,
-    scratchstack_aws_principal::Principal,
+    scratchstack_aws_principal::{FederatedUser, Principal},
     std::{
         fmt::{Debug, Display, Formatter, Result as FmtResult},
         future::Future,
@@ -248,6 +248,17 @@ pub struct GetSigningKeyResponse {
     pub principal: Principal,
 }
 
+impl Default for GetSigningKeyResponse {
+    fn default() -> Self {
+        Self {
+            signing_key: KSigningKey {
+                key: [0; SHA256_OUTPUT_LEN],
+            },
+            principal: Principal::FederatedUser(FederatedUser::new("unknown", "000000000000", "unknown").unwrap()),
+        }
+    }
+}
+
 // A trait alias that describes how we obtain a signing key of a given type given a request. If you need to encapsulate
 // additional data (e.g. a database connection) to look up a key, use this to implement a struct.
 //
@@ -262,7 +273,7 @@ pub struct GetSigningKeyResponse {
 pub fn service_for_signing_key_fn<F, Fut>(f: F) -> ServiceFn<F>
 where
     F: FnOnce(GetSigningKeyRequest) -> Fut + Send + 'static,
-    Fut: Future<Output = Result<(Principal, KSigningKey), BoxError>> + Send + 'static,
+    Fut: Future<Output = Result<GetSigningKeyResponse, BoxError>> + Send + 'static,
 {
     service_fn(f)
 }
@@ -270,7 +281,7 @@ where
 #[cfg(test)]
 mod tests {
     use {
-        crate::{KSecretKey, GetSigningKeyRequest, GetSigningKeyResponse},
+        crate::{GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey},
         chrono::{Date, NaiveDate, Utc},
         scratchstack_aws_principal::AssumedRole,
     };
@@ -310,7 +321,14 @@ mod tests {
         let kregion1a = kdate1a.to_kregion("us-east-1");
         let kregion1b = kdate1b.to_kregion("us-east-1");
         let kregion2 = kdate2.to_kregion("us-east-1");
-        assert_eq!(kregion1a.as_ref(), &[0xf3u8, 0x3du8, 0x58u8, 0x08u8, 0x50u8, 0x4bu8, 0xf3u8, 0x48u8, 0x12u8, 0xe5u8, 0xfau8, 0xdeu8, 0x63u8, 0x30u8, 0x8bu8, 0x42u8, 0x4bu8, 0x24u8, 0x4cu8, 0x59u8, 0x18u8, 0x9bu8, 0xe2u8, 0xa5u8, 0x91u8, 0xddu8, 0x22u8, 0x82u8, 0xc7u8, 0xcbu8, 0x56u8, 0x3fu8]);
+        assert_eq!(
+            kregion1a.as_ref(),
+            &[
+                0xf3u8, 0x3du8, 0x58u8, 0x08u8, 0x50u8, 0x4bu8, 0xf3u8, 0x48u8, 0x12u8, 0xe5u8, 0xfau8, 0xdeu8, 0x63u8,
+                0x30u8, 0x8bu8, 0x42u8, 0x4bu8, 0x24u8, 0x4cu8, 0x59u8, 0x18u8, 0x9bu8, 0xe2u8, 0xa5u8, 0x91u8, 0xddu8,
+                0x22u8, 0x82u8, 0xc7u8, 0xcbu8, 0x56u8, 0x3fu8
+            ]
+        );
         assert_eq!(kregion1a, kregion1b);
         assert_eq!(kregion1a, kregion1a.clone());
         assert_ne!(kregion1a, kregion2);
@@ -320,7 +338,14 @@ mod tests {
         let kservice1a = kregion1a.to_kservice("example");
         let kservice1b = kregion1b.to_kservice("example");
         let kservice2 = kregion2.to_kservice("example");
-        assert_eq!(kservice1a.as_ref(), &[0xc6u8, 0x0cu8, 0xc4u8, 0xb1u8, 0xd0u8, 0x34u8, 0xc7u8, 0x57u8, 0x34u8, 0x8fu8, 0x2cu8, 0x67u8, 0x30u8, 0x04u8, 0xc1u8, 0x89u8, 0x08u8, 0xbbu8, 0xa9u8, 0xa4u8, 0x6fu8, 0xa1u8, 0xdbu8, 0x87u8, 0xa9u8, 0x83u8, 0x50u8, 0xf2u8, 0x7eu8, 0x7bu8, 0x2du8, 0xf6u8]);
+        assert_eq!(
+            kservice1a.as_ref(),
+            &[
+                0xc6u8, 0x0cu8, 0xc4u8, 0xb1u8, 0xd0u8, 0x34u8, 0xc7u8, 0x57u8, 0x34u8, 0x8fu8, 0x2cu8, 0x67u8, 0x30u8,
+                0x04u8, 0xc1u8, 0x89u8, 0x08u8, 0xbbu8, 0xa9u8, 0xa4u8, 0x6fu8, 0xa1u8, 0xdbu8, 0x87u8, 0xa9u8, 0x83u8,
+                0x50u8, 0xf2u8, 0x7eu8, 0x7bu8, 0x2du8, 0xf6u8
+            ]
+        );
         assert_eq!(kservice1a, kservice1b);
         assert_eq!(kservice1a, kservice1a.clone());
         assert_ne!(kservice1a, kservice2);
@@ -330,7 +355,14 @@ mod tests {
         let ksigning1a = kservice1a.to_ksigning();
         let ksigning1b = kservice1b.to_ksigning();
         let ksigning2 = kservice2.to_ksigning();
-        assert_eq!(ksigning1a.as_ref(), &[0x43u8, 0x1cu8, 0xc9u8, 0xefu8, 0x58u8, 0x76u8, 0x28u8, 0x7du8, 0xbbu8, 0x92u8, 0x5du8, 0x4bu8, 0xa4u8, 0x62u8, 0x9fu8, 0x45u8, 0x90u8, 0x02u8, 0xadu8, 0x1du8, 0x26u8, 0xb7u8, 0xc7u8, 0x51u8, 0x60u8, 0x1bu8, 0xb2u8, 0x04u8, 0xe1u8, 0x17u8, 0x18u8, 0xb8u8]);
+        assert_eq!(
+            ksigning1a.as_ref(),
+            &[
+                0x43u8, 0x1cu8, 0xc9u8, 0xefu8, 0x58u8, 0x76u8, 0x28u8, 0x7du8, 0xbbu8, 0x92u8, 0x5du8, 0x4bu8, 0xa4u8,
+                0x62u8, 0x9fu8, 0x45u8, 0x90u8, 0x02u8, 0xadu8, 0x1du8, 0x26u8, 0xb7u8, 0xc7u8, 0x51u8, 0x60u8, 0x1bu8,
+                0xb2u8, 0x04u8, 0xe1u8, 0x17u8, 0x18u8, 0xb8u8
+            ]
+        );
         assert_eq!(ksigning1a, ksigning1b);
         assert_eq!(ksigning1a, ksigning1a.clone());
         assert_ne!(ksigning1a, ksigning2);
@@ -371,7 +403,11 @@ mod tests {
         assert_eq!(gsk_req1a.service, gsk_req1b.service);
 
         let gsk_resp1a = GetSigningKeyResponse {
-            signing_key: KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY").to_ksigning(date, "us-east-1", "example"),
+            signing_key: KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY").to_ksigning(
+                date,
+                "us-east-1",
+                "example",
+            ),
             principal: AssumedRole::new("aws", "123456789012", "role", "session").unwrap().into(),
         };
 

@@ -1,5 +1,5 @@
 use {
-    crate::{CanonicalRequest, GetSigningKeyRequest, KSigningKey, SignatureError},
+    crate::{CanonicalRequest, GetSigningKeyRequest, GetSigningKeyResponse, SignatureError},
     bytes::{Bytes, BytesMut},
     chrono::{DateTime, Duration, Utc},
     futures::stream::{Stream, StreamExt},
@@ -22,8 +22,8 @@ pub async fn sigv4_validate_request_empty<S, F>(
     server_timestamp: DateTime<Utc>,
 ) -> Result<(Parts, (), Principal), SignatureError>
 where
-    S: Service<GetSigningKeyRequest, Response = (Principal, KSigningKey), Error = BoxError, Future = F> + Send,
-    F: Future<Output = Result<(Principal, KSigningKey), BoxError>> + Send,
+    S: Service<GetSigningKeyRequest, Response = GetSigningKeyResponse, Error = BoxError, Future = F> + Send,
+    F: Future<Output = Result<GetSigningKeyResponse, BoxError>> + Send,
 {
     let (parts, _) = request.into_parts();
     let body = Bytes::new();
@@ -51,8 +51,8 @@ pub async fn sigv4_validate_request_bytes<S, F>(
     server_timestamp: DateTime<Utc>,
 ) -> Result<(Parts, Bytes, Principal), SignatureError>
 where
-    S: Service<GetSigningKeyRequest, Response = (Principal, KSigningKey), Error = BoxError, Future = F> + Send,
-    F: Future<Output = Result<(Principal, KSigningKey), BoxError>> + Send,
+    S: Service<GetSigningKeyRequest, Response = GetSigningKeyResponse, Error = BoxError, Future = F> + Send,
+    F: Future<Output = Result<GetSigningKeyResponse, BoxError>> + Send,
 {
     let (parts, body) = request.into_parts();
     let (canonical_request, parts, body) = CanonicalRequest::from_request_parts(parts, body)?;
@@ -79,8 +79,8 @@ pub async fn sigv4_validate_request_hyper_stream<S, F>(
     server_timestamp: DateTime<Utc>,
 ) -> Result<(Parts, Bytes, Principal), Box<dyn Error + Send + Sync>>
 where
-    S: Service<GetSigningKeyRequest, Response = (Principal, KSigningKey), Error = BoxError, Future = F> + Send,
-    F: Future<Output = Result<(Principal, KSigningKey), BoxError>> + Send,
+    S: Service<GetSigningKeyRequest, Response = GetSigningKeyResponse, Error = BoxError, Future = F> + Send,
+    F: Future<Output = Result<GetSigningKeyResponse, BoxError>> + Send,
 {
     let (parts, mut body) = request.into_parts();
     let size_hint = Stream::size_hint(&body);
@@ -109,7 +109,7 @@ where
 mod tests {
     use {
         crate::{
-            service_for_signing_key_fn, sigv4_validate_request_empty, GetSigningKeyRequest, KSecretKey, KSigningKey,
+            service_for_signing_key_fn, sigv4_validate_request_empty, GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey,
             SignatureError,
         },
         chrono::{DateTime, NaiveDate, Utc},
@@ -160,12 +160,12 @@ mod tests {
     SignedHeaders=host;x-amz-date, \
     Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea";
 
-    async fn get_signing_key(req: GetSigningKeyRequest) -> Result<(Principal, KSigningKey), BoxError> {
+    async fn get_signing_key(req: GetSigningKeyRequest) -> Result<GetSigningKeyResponse, BoxError> {
         let k_secret = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
         let k_sigining = k_secret.to_ksigning(req.request_date, req.region.as_str(), req.service.as_str());
 
         let principal = Principal::from(User::new("aws", "123456789012", "/", "test").unwrap());
-        Ok((principal, k_sigining))
+        Ok(GetSigningKeyResponse{principal, signing_key: k_sigining})
     }
 
     async fn run_auth_test_get_err(auth_str: &str) -> SignatureError {

@@ -1,7 +1,7 @@
 use {
     crate::{
-        service_for_signing_key_fn, sigv4_validate_request_bytes, CanonicalRequest, GetSigningKeyRequest, KSecretKey,
-        KSigningKey,
+        service_for_signing_key_fn, sigv4_validate_request_bytes, CanonicalRequest, GetSigningKeyRequest,
+        GetSigningKeyResponse, KSecretKey,
     },
     bytes::{Bytes, BytesMut},
     chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc},
@@ -276,11 +276,16 @@ async fn run(basename: &str) {
         .expect(&format!("Failed to validate request: {:?}", sreq_path));
 }
 
-async fn get_signing_key(request: GetSigningKeyRequest) -> Result<(Principal, KSigningKey), BoxError> {
+async fn get_signing_key(request: GetSigningKeyRequest) -> Result<GetSigningKeyResponse, BoxError> {
     let principal = Principal::from(User::new("aws", "123456789012", "/", "test").unwrap());
     let k_secret = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
     let k_signing = k_secret.to_ksigning(request.request_date, request.region.as_str(), request.service.as_str());
-    Ok((principal, k_signing))
+
+    let response = GetSigningKeyResponse {
+        principal,
+        signing_key: k_signing,
+    };
+    Ok(response)
 }
 
 #[allow(clippy::expect_fun_call)]

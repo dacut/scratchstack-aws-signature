@@ -11,7 +11,7 @@ use {
 #[derive(Debug)]
 pub enum SignatureError {
     /// The security token included with the request is expired.
-    ExpiredToken,
+    ExpiredToken(/* message */ String),
 
     /// Validation failed due to an underlying I/O error.
     IO(IOError),
@@ -68,7 +68,7 @@ pub enum SignatureError {
 impl SignatureError {
     pub fn error_code(&self) -> &'static str {
         match self {
-            Self::ExpiredToken => "ExpiredToken",
+            Self::ExpiredToken(_) => "ExpiredToken",
             Self::IO(_) | Self::InternalServiceError(_) => "InternalServiceError",
             Self::InvalidBodyEncoding(_) => "InvalidBodyEncoding",
             Self::InvalidClientTokenId(_) => "InvalidClientTokenId",
@@ -96,7 +96,7 @@ impl SignatureError {
 impl Display for SignatureError {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
-            Self::ExpiredToken => write!(f, "The security token included with the request is expired"),
+            Self::ExpiredToken(msg) => f.write_str(msg),
             Self::IO(ref e) => Display::fmt(e, f),
             Self::InternalServiceError(ref e) => Display::fmt(e, f),
             Self::InvalidBodyEncoding(msg) => f.write_str(msg),

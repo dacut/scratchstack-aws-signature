@@ -1,8 +1,7 @@
 use {
     chrono::Utc,
     hyper::{body::Body, Request, Response},
-    scratchstack_aws_principal::Principal,
-    scratchstack_aws_signature::{sigv4_validate_request_hyper_stream, GetSigningKeyRequest, KSigningKey, SignatureError},
+    scratchstack_aws_signature::{sigv4_validate_request_hyper_stream, GetSigningKeyRequest, GetSigningKeyResponse, SignatureError},
     std::{
         any::type_name,
         fmt::{Debug, Display, Formatter, Result as FmtResult},
@@ -17,7 +16,7 @@ use {
 #[derive(Clone)]
 pub struct AwsSigV4VerifierService<G, S>
 where
-    G: Service<GetSigningKeyRequest, Response = (Principal, KSigningKey), Error = BoxError> + Send + 'static,
+    G: Service<GetSigningKeyRequest, Response = GetSigningKeyResponse, Error = BoxError> + Send + 'static,
     G::Future: Send,
     S: Service<Request<Body>, Response = Response<Body>> + Send + 'static,
     S::Future: Send,
@@ -31,7 +30,7 @@ where
 
 impl<G, S> AwsSigV4VerifierService<G, S>
 where
-    G: Service<GetSigningKeyRequest, Response = (Principal, KSigningKey), Error = BoxError> + Send + 'static,
+    G: Service<GetSigningKeyRequest, Response = GetSigningKeyResponse, Error = BoxError> + Send + 'static,
     G::Future: Send,
     S: Service<Request<Body>, Response = Response<Body>> + Clone + Send + 'static,
     S::Future: Send,
@@ -49,7 +48,7 @@ where
 
 impl<G, S> Debug for AwsSigV4VerifierService<G, S>
 where
-    G: Service<GetSigningKeyRequest, Response = (Principal, KSigningKey), Error = BoxError> + Send + 'static,
+    G: Service<GetSigningKeyRequest, Response = GetSigningKeyResponse, Error = BoxError> + Send + 'static,
     G::Future: Send,
     S: Service<Request<Body>, Response = Response<Body>> + Send + 'static,
     S::Future: Send,
@@ -67,7 +66,7 @@ where
 
 impl<G, S> Display for AwsSigV4VerifierService<G, S>
 where
-    G: Service<GetSigningKeyRequest, Response = (Principal, KSigningKey), Error = BoxError> + Send + 'static,
+    G: Service<GetSigningKeyRequest, Response = GetSigningKeyResponse, Error = BoxError> + Send + 'static,
     G::Future: Send,
     S: Service<Request<Body>, Response = Response<Body>> + Send + 'static,
     S::Future: Send,
@@ -80,7 +79,7 @@ where
 
 impl<G, S> Service<Request<Body>> for AwsSigV4VerifierService<G, S>
 where
-    G: Service<GetSigningKeyRequest, Response = (Principal, KSigningKey), Error = BoxError> + Send + 'static,
+    G: Service<GetSigningKeyRequest, Response = GetSigningKeyResponse, Error = BoxError> + Send + 'static,
     G::Future: Send,
     S: Service<Request<Body>, Response = Response<Body>> + Send + 'static,
     S::Future: Send,
@@ -124,7 +123,7 @@ async fn handle_call<G, S>(
     implementation: Buffer<S, Request<Body>>,
 ) -> Result<Response<Body>, BoxError>
 where
-    G: Service<GetSigningKeyRequest, Response = (Principal, KSigningKey), Error = BoxError> + Send + 'static,
+    G: Service<GetSigningKeyRequest, Response = GetSigningKeyResponse, Error = BoxError> + Send + 'static,
     G::Future: Send,
     S: Service<Request<Body>, Response = Response<Body>> + Send + 'static,
     S::Future: Send,

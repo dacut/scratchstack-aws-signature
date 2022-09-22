@@ -21,7 +21,7 @@ mod tests {
         rusoto_signature::SignedRequest,
         scratchstack_aws_principal::{Principal, User},
         scratchstack_aws_signature::{
-            service_for_signing_key_fn, GetSigningKeyRequest, KSecretKey, KSigningKey, SignatureError,
+            service_for_signing_key_fn, GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, SignatureError,
         },
         std::{
             convert::Infallible,
@@ -196,13 +196,13 @@ mod tests {
         }
     }
 
-    async fn get_creds_fn(request: GetSigningKeyRequest) -> Result<(Principal, KSigningKey), BoxError> {
+    async fn get_creds_fn(request: GetSigningKeyRequest) -> Result<GetSigningKeyResponse, BoxError> {
         if request.access_key == "AKIDEXAMPLE" {
             let k_secret = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
             let k_signing =
                 k_secret.to_ksigning(request.request_date, request.region.as_str(), request.service.as_str());
             let principal = Principal::from(User::new("aws", "123456789012", "/", "test").unwrap());
-            Ok((principal, k_signing))
+            Ok(GetSigningKeyResponse{principal, signing_key: k_signing})
         } else {
             Err(Box::new(SignatureError::InvalidClientTokenId(
                 "The AWS access key provided does not exist in our records".to_string(),
@@ -235,7 +235,7 @@ mod tests {
     #[derive(Clone)]
     struct GetDummyCreds {}
     impl Service<GetSigningKeyRequest> for GetDummyCreds {
-        type Response = (Principal, KSigningKey);
+        type Response = GetSigningKeyResponse;
         type Error = BoxError;
         type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
@@ -247,9 +247,9 @@ mod tests {
             Box::pin(async move {
                 if req.access_key == "AKIDEXAMPLE" {
                     let k_secret = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
-                    let derived = k_secret.to_ksigning(req.request_date, req.region.as_str(), req.service.as_str());
+                    let signing_key = k_secret.to_ksigning(req.request_date, req.region.as_str(), req.service.as_str());
                     let principal = Principal::from(User::new("aws", "123456789012", "/", "test").unwrap());
-                    Ok((principal, derived))
+                    Ok(GetSigningKeyResponse{principal, signing_key})
                 } else {
                     Err(SignatureError::InvalidClientTokenId(
                         "The AWS access key provided does not exist in our records".to_string(),

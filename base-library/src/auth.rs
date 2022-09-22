@@ -9,7 +9,7 @@
 //!
 
 use {
-    crate::{crypto::hmac_sha256, GetSigningKeyRequest, KSigningKey, SignatureError},
+    crate::{crypto::hmac_sha256, GetSigningKeyRequest, GetSigningKeyResponse, SignatureError},
     chrono::{DateTime, Duration, Utc},
     derive_builder::Builder,
     log::trace,
@@ -131,7 +131,7 @@ impl SigV4Authenticator {
         // Rule 11: ... or too far into the future.
         if req_ts > max_ts {
             return Err(SignatureError::SignatureDoesNotMatch(Some(format!(
-                "Signature expired: {} is now later than {} ({} + {}.)",
+                "Signature not yet current: {} is still later than {} ({} + {}.)",
                 req_ts.format(ISO8601_COMPACT_FORMAT),
                 max_ts.format(ISO8601_COMPACT_FORMAT),
                 server_timestamp.format(ISO8601_COMPACT_FORMAT),
@@ -156,23 +156,23 @@ impl SigV4Authenticator {
         // Rule 13: Credential scope must be correct for the region/service/date.
         let mut cscope_errors = Vec::new();
         if cscope_region != region {
-            cscope_errors.push(format!("Credential should be scoped to a valid region not '{}'", region));
+            cscope_errors.push(format!("Credential should be scoped to a valid region, not '{}'.", cscope_region));
         }
 
         if cscope_service != service {
-            cscope_errors.push(format!("Credential should be scoped to correct service: '{}'", service));
+            cscope_errors.push(format!("Credential should be scoped to correct service: '{}'.", service));
         }
 
         if cscope_term != AWS4_REQUEST {
             cscope_errors.push(format!(
-                "Credential should be scoped with a valid terminator: 'aws4_request', not '{}'",
+                "Credential should be scoped with a valid terminator: 'aws4_request', not '{}'.",
                 cscope_term
             ));
         }
 
         let expected_cscope_date = req_ts.format("%Y%m%d").to_string();
         if cscope_date != expected_cscope_date {
-            cscope_errors.push(format!("Date in Credential scope does not match YYYYMMDD from ISO-8601 version of date from HTTP: '{}' != '{}', from '{}'", cscope_date, expected_cscope_date, req_ts.format(ISO8601_COMPACT_FORMAT)));
+            cscope_errors.push(format!("Date in Credential scope does not match YYYYMMDD from ISO-8601 version of date from HTTP: '{}' != '{}', from '{}'.", cscope_date, expected_cscope_date, req_ts.format(ISO8601_COMPACT_FORMAT)));
         }
 
         if !cscope_errors.is_empty() {
@@ -189,10 +189,10 @@ impl SigV4Authenticator {
         region: &str,
         service: &str,
         get_signing_key: &mut S,
-    ) -> Result<(Principal, KSigningKey), SignatureError>
+    ) -> Result<GetSigningKeyResponse, SignatureError>
     where
-        S: Service<GetSigningKeyRequest, Response = (Principal, KSigningKey), Error = BoxError, Future = F> + Send,
-        F: Future<Output = Result<(Principal, KSigningKey), BoxError>> + Send,
+        S: Service<GetSigningKeyRequest, Response = GetSigningKeyResponse, Error = BoxError, Future = F> + Send,
+        F: Future<Output = Result<GetSigningKeyResponse, BoxError>> + Send,
     {
         let access_key = self.credential.split('/').next().expect("prevalidate must been called first").to_string();
 
@@ -243,14 +243,14 @@ impl SigV4Authenticator {
         get_signing_key: &mut S,
     ) -> Result<Principal, SignatureError>
     where
-        S: Service<GetSigningKeyRequest, Response = (Principal, KSigningKey), Error = BoxError, Future = F> + Send,
-        F: Future<Output = Result<(Principal, KSigningKey), BoxError>> + Send,
+        S: Service<GetSigningKeyRequest, Response = GetSigningKeyResponse, Error = BoxError, Future = F> + Send,
+        F: Future<Output = Result<GetSigningKeyResponse, BoxError>> + Send,
     {
         self.prevalidate(region, service, server_timestamp, allowed_mismatch)?;
         let string_to_sign = self.get_string_to_sign();
         trace!("String to sign: {:?}", String::from_utf8_lossy(string_to_sign.as_ref()));
-        let (principal, signing_key) = self.get_signing_key(region, service, get_signing_key).await?;
-        let expected_signature = hex::encode(hmac_sha256(signing_key.as_ref(), string_to_sign.as_ref()));
+        let response = self.get_signing_key(region, service, get_signing_key).await?;
+        let expected_signature = hex::encode(hmac_sha256(response.signing_key.as_ref(), string_to_sign.as_ref()));
         let expected_signature_bytes = expected_signature.as_bytes();
         let signature_bytes = self.signature.as_bytes();
         let is_equal: bool = signature_bytes.ct_eq(expected_signature_bytes).into();
@@ -258,7 +258,7 @@ impl SigV4Authenticator {
             trace!("Signature mismatch: expected '{}', got '{}'", expected_signature, self.signature);
             Err(SignatureError::SignatureDoesNotMatch(Some(MSG_REQUEST_SIGNATURE_MISMATCH.to_string())))
         } else {
-            Ok(principal)
+            Ok(response.principal)
         }
     }
 }
@@ -276,10 +276,6 @@ impl SigV4AuthenticatorBuilder {
     pub(crate) fn get_session_token(&self) -> &Option<Option<String>> {
         &self.session_token
     }
-
-    pub(crate) fn get_request_timestamp(&self) -> &Option<DateTime<Utc>> {
-        &self.request_timestamp
-    }
 }
 
 fn duration_to_string(duration: Duration) -> String {
@@ -290,3 +286,338 @@ fn duration_to_string(duration: Duration) -> String {
         format!("{} sec", secs)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::duration_to_string,
+        crate::{
+            service_for_signing_key_fn, GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, SigV4Authenticator,
+            SigV4AuthenticatorBuilder, SignatureError,
+        },
+        chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc},
+        ring::digest::SHA256_OUTPUT_LEN,
+        scratchstack_aws_principal::{Principal, User},
+        tower::BoxError,
+    };
+
+    #[test_log::test]
+    fn test_derived() {
+        let epoch = DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc);
+        let test_time = DateTime::<Utc>::from_utc(
+            NaiveDateTime::new(NaiveDate::from_ymd(2015, 8, 30), NaiveTime::from_hms(12, 36, 0)),
+            Utc,
+        );
+        let auth1: SigV4Authenticator = Default::default();
+        assert_eq!(
+            auth1.canonical_request_sha256().as_slice(),
+            b"\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"
+        );
+        assert!(auth1.credential().is_empty());
+        assert!(auth1.session_token().is_none());
+        assert!(auth1.signature().is_empty());
+        assert_eq!(auth1.request_timestamp(), epoch);
+
+        let sha256: [u8; 32] = [
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
+            29, 30, 31,
+        ];
+        let auth2 = SigV4AuthenticatorBuilder::default()
+            .canonical_request_sha256(sha256)
+            .credential("AKIA1/20151231/us-east-1/example/aws4_request".to_string())
+            .session_token("token".to_string())
+            .signature("1234".to_string())
+            .request_timestamp(test_time)
+            .build()
+            .unwrap();
+
+        assert_eq!(
+            auth2.canonical_request_sha256.as_slice(),
+            &[
+                0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
+                28, 29, 30, 31,
+            ]
+        );
+        assert_eq!(auth2.credential(), "AKIA1/20151231/us-east-1/example/aws4_request");
+        assert_eq!(auth2.session_token(), Some("token"));
+        assert_eq!(auth2.signature(), "1234");
+        assert_eq!(auth2.request_timestamp(), test_time);
+
+        assert_eq!(auth2.credential(), auth2.clone().credential());
+        let _ = format!("{:?}", auth2);
+    }
+
+    async fn get_signing_key(request: GetSigningKeyRequest) -> Result<GetSigningKeyResponse, BoxError> {
+        if let Some(ref token) = request.session_token {
+            match token.as_str() {
+                "internal-service-error" => {
+                    return Err("internal service error".into());
+                }
+                "invalid" => {
+                    return Err(Box::new(SignatureError::InvalidClientTokenId(
+                        "The security token included in the request is invalid".to_string(),
+                    )))
+                }
+                "expired" => {
+                    return Err(Box::new(SignatureError::ExpiredToken(
+                        "The security token included in the request is expired".to_string(),
+                    )))
+                }
+                _ => (),
+            }
+        }
+
+        match request.access_key.as_str() {
+            "AKIDEXAMPLE" => {
+                let principal = Principal::from(User::new("aws", "123456789012", "/", "test").unwrap());
+                let k_secret = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
+                let k_signing =
+                    k_secret.to_ksigning(request.request_date, request.region.as_str(), request.service.as_str());
+
+                let response = GetSigningKeyResponse {
+                    principal,
+                    signing_key: k_signing,
+                };
+                Ok(response)
+            }
+            _ => Err(Box::new(SignatureError::InvalidClientTokenId(
+                "The AWS access key provided does not exist in our records".to_string(),
+            ))),
+        }
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_error_ordering() {
+        // Test that the error ordering is correct.
+        let creq_sha256: [u8; SHA256_OUTPUT_LEN] = [0; SHA256_OUTPUT_LEN];
+        let test_timestamp = DateTime::<Utc>::from_utc(
+            NaiveDateTime::new(NaiveDate::from_ymd(2015, 8, 30), NaiveTime::from_hms(12, 36, 0)),
+            Utc,
+        );
+        let outdated_timestamp = DateTime::<Utc>::from_utc(
+            NaiveDateTime::new(NaiveDate::from_ymd(2015, 8, 30), NaiveTime::from_hms(12, 20, 59)),
+            Utc,
+        );
+        let future_timestamp = DateTime::<Utc>::from_utc(
+            NaiveDateTime::new(NaiveDate::from_ymd(2015, 8, 30), NaiveTime::from_hms(12, 51, 1)),
+            Utc,
+        );
+        let get_signing_key_svc = service_for_signing_key_fn(get_signing_key);
+        let mismatch = Duration::minutes(15);
+
+        let auth = SigV4Authenticator::builder()
+            .canonical_request_sha256(creq_sha256)
+            .credential("AKIDFOO/20130101/wrong-region/wrong-service".to_string())
+            .session_token("expired")
+            .signature("invalid".to_string())
+            .request_timestamp(outdated_timestamp)
+            .build()
+            .unwrap();
+
+        let e = auth
+            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .await
+            .unwrap_err();
+
+        if let SignatureError::SignatureDoesNotMatch(msg) = e {
+            assert_eq!(
+                msg.unwrap().as_str(),
+                "Signature expired: 20150830T122059Z is now earlier than 20150830T122100Z (20150830T123600Z - 15 min.)"
+            );
+        } else {
+            panic!("Unexpected error: {:?}", e);
+        }
+
+        let auth = SigV4Authenticator::builder()
+            .canonical_request_sha256(creq_sha256)
+            .credential("AKIDFOO/20130101/wrong-region/wrong-service".to_string())
+            .session_token("expired")
+            .signature("invalid".to_string())
+            .request_timestamp(future_timestamp)
+            .build()
+            .unwrap();
+
+        let e = auth
+            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .await
+            .unwrap_err();
+
+        if let SignatureError::SignatureDoesNotMatch(msg) = e {
+            assert_eq!(
+                msg.unwrap().as_str(),
+                "Signature not yet current: 20150830T125101Z is still later than 20150830T125100Z (20150830T123600Z + 15 min.)"
+            );
+        } else {
+            panic!("Unexpected error: {:?}", e);
+        }
+
+        let auth = SigV4Authenticator::builder()
+            .canonical_request_sha256(creq_sha256)
+            .credential("AKIDFOO/20130101/wrong-region/wrong-service".to_string())
+            .session_token("expired")
+            .signature("invalid".to_string())
+            .request_timestamp(test_timestamp)
+            .build()
+            .unwrap();
+
+        let e = auth
+            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .await
+            .unwrap_err();
+
+        if let SignatureError::IncompleteSignature(msg) = e {
+            assert_eq!(
+                msg.as_str(),
+                "Credential must have exactly 5 slash-delimited elements, e.g. keyid/date/region/service/term, got 'AKIDFOO/20130101/wrong-region/wrong-service'"
+            );
+        } else {
+            panic!("Unexpected error: {:?}", e);
+        }
+
+        let auth = SigV4Authenticator::builder()
+            .canonical_request_sha256(creq_sha256)
+            .credential("AKIDFOO/20130101/wrong-region/wrong-service/aws5_request".to_string())
+            .session_token("expired")
+            .signature("invalid".to_string())
+            .request_timestamp(test_timestamp)
+            .build()
+            .unwrap();
+
+        let e = auth
+            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .await
+            .unwrap_err();
+
+        if let SignatureError::SignatureDoesNotMatch(msg) = e {
+            assert_eq!(
+                msg.unwrap().as_str(),
+                "Credential should be scoped to a valid region, not 'wrong-region'. Credential should be scoped to correct service: 'example'. Credential should be scoped with a valid terminator: 'aws4_request', not 'aws5_request'. Date in Credential scope does not match YYYYMMDD from ISO-8601 version of date from HTTP: '20130101' != '20150830', from '20150830T123600Z'."
+            );
+        } else {
+            panic!("Unexpected error: {:?}", e);
+        }
+
+        let auth = SigV4Authenticator::builder()
+            .canonical_request_sha256(creq_sha256)
+            .credential("AKIDFOO/20150830/us-east-1/example/aws4_request".to_string())
+            .session_token("invalid")
+            .signature("invalid".to_string())
+            .request_timestamp(test_timestamp)
+            .build()
+            .unwrap();
+
+        let e = auth
+            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .await
+            .unwrap_err();
+
+        if let SignatureError::InvalidClientTokenId(msg) = e {
+            assert_eq!(msg.as_str(), "The security token included in the request is invalid");
+        } else {
+            panic!("Unexpected error: {:?}", e);
+        }
+
+        let auth = SigV4Authenticator::builder()
+            .canonical_request_sha256(creq_sha256)
+            .credential("AKIDFOO/20150830/us-east-1/example/aws4_request".to_string())
+            .session_token("expired")
+            .signature("invalid".to_string())
+            .request_timestamp(test_timestamp)
+            .build()
+            .unwrap();
+
+        let e = auth
+            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .await
+            .unwrap_err();
+
+        if let SignatureError::ExpiredToken(msg) = e {
+            assert_eq!(msg.as_str(), "The security token included in the request is expired");
+        } else {
+            panic!("Unexpected error: {:?}", e);
+        }
+
+        let auth = SigV4Authenticator::builder()
+            .canonical_request_sha256(creq_sha256)
+            .credential("AKIDFOO/20150830/us-east-1/example/aws4_request".to_string())
+            .session_token("internal-service-error")
+            .signature("invalid".to_string())
+            .request_timestamp(test_timestamp)
+            .build()
+            .unwrap();
+
+        let e = auth
+            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .await
+            .unwrap_err();
+
+        if let SignatureError::InternalServiceError(err) = e {
+            assert_eq!(format!("{:?}", err), r#""internal service error""#);
+        } else {
+            panic!("Unexpected error: {:?}", e);
+        }
+
+        let auth = SigV4Authenticator::builder()
+            .canonical_request_sha256(creq_sha256)
+            .credential("AKIDFOO/20150830/us-east-1/example/aws4_request".to_string())
+            .session_token("ok")
+            .signature("invalid".to_string())
+            .request_timestamp(test_timestamp)
+            .build()
+            .unwrap();
+
+        let e = auth
+            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .await
+            .unwrap_err();
+
+        if let SignatureError::InvalidClientTokenId(msg) = e {
+            assert_eq!(msg.as_str(), "The AWS access key provided does not exist in our records");
+        } else {
+            panic!("Unexpected error: {:?}", e);
+        }
+
+        let auth = SigV4Authenticator::builder()
+            .canonical_request_sha256(creq_sha256)
+            .credential("AKIDEXAMPLE/20150830/us-east-1/example/aws4_request".to_string())
+            .session_token("ok")
+            .signature("invalid".to_string())
+            .request_timestamp(test_timestamp)
+            .build()
+            .unwrap();
+
+        let e = auth
+            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .await
+            .unwrap_err();
+
+        if let SignatureError::SignatureDoesNotMatch(msg) = e {
+            assert_eq!(msg.unwrap().as_str(), "The request signature we calculated does not match the signature you provided. Check your AWS Secret Access Key and signing method. Consult the service documentation for details.");
+        } else {
+            panic!("Unexpected error: {:?}", e);
+        }
+
+        let auth = SigV4Authenticator::builder()
+            .canonical_request_sha256(creq_sha256)
+            .credential("AKIDEXAMPLE/20150830/us-east-1/example/aws4_request".to_string())
+            .session_token("ok")
+            .signature("88bf1ccb1e3e4df7bb2ed6d89bcd8558d6770845007e1a5c392ac9edce0d5deb".to_string())
+            .request_timestamp(test_timestamp)
+            .build()
+            .unwrap();
+
+        let _ = auth
+            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .await
+            .unwrap();
+    }
+
+    #[test_log::test]
+    fn test_duration_formatting() {
+        assert_eq!(duration_to_string(Duration::seconds(32)).as_str(), "32 sec");
+        assert_eq!(duration_to_string(Duration::seconds(60)).as_str(), "1 min");
+        assert_eq!(duration_to_string(Duration::seconds(61)).as_str(), "61 sec");
+        assert_eq!(duration_to_string(Duration::seconds(600)).as_str(), "10 min");
+    }
+}
+// end tests -- do not delete; needed for coverage.
