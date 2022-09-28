@@ -210,7 +210,7 @@ impl CanonicalRequest {
                     pq.push('?');
                     pq.push_str(&qs);
                 }
-                
+
                 parts.uri =
                     Uri::builder().path_and_query(pq).build().expect("failed to rebuild URI with new query string");
                 body = Bytes::from("");
@@ -1221,7 +1221,6 @@ mod tests {
         assert!(cr.query_parameters().is_empty());
     }
 
-
     #[test_log::test]
     fn test_default_form_encoding() {
         let uri = Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap();
@@ -1568,7 +1567,10 @@ mod tests {
             .uri(uri)
             .header("x-amz-date", "20150830T123600Z")
             .header("host", "example.amazonaws.com")
-            .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=a;host;x-amz-date, Signature=5678")
+            .header(
+                "authorization",
+                "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=a;host;x-amz-date, Signature=5678",
+            )
             .body(Bytes::new())
             .unwrap();
 

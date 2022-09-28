@@ -109,8 +109,8 @@ where
 mod tests {
     use {
         crate::{
-            service_for_signing_key_fn, sigv4_validate_request_empty, GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey,
-            SignatureError,
+            service_for_signing_key_fn, sigv4_validate_request_empty, GetSigningKeyRequest, GetSigningKeyResponse,
+            KSecretKey, SignatureError,
         },
         chrono::{DateTime, NaiveDate, Utc},
         http::{
@@ -165,7 +165,10 @@ mod tests {
         let k_sigining = k_secret.to_ksigning(req.request_date, req.region.as_str(), req.service.as_str());
 
         let principal = Principal::from(vec![User::new("aws", "123456789012", "/", "test").unwrap().into()]);
-        Ok(GetSigningKeyResponse{principal, signing_key: k_sigining})
+        Ok(GetSigningKeyResponse {
+            principal,
+            signing_key: k_sigining,
+        })
     }
 
     async fn run_auth_test_get_err(auth_str: &str) -> SignatureError {

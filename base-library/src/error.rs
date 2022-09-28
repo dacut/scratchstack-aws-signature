@@ -1,5 +1,5 @@
 use {
-    http::{status::StatusCode},
+    http::status::StatusCode,
     std::{
         error::Error,
         fmt::{Display, Formatter, Result as FmtResult},
@@ -84,9 +84,10 @@ impl SignatureError {
 
     pub fn http_status(&self) -> StatusCode {
         match self {
-            Self::InvalidBodyEncoding(_) | Self::MalformedHeader(_) | Self::MalformedQueryString(_) | Self::MissingAuthenticationToken(_) => {
-                StatusCode::BAD_REQUEST
-            }
+            Self::InvalidBodyEncoding(_)
+            | Self::MalformedHeader(_)
+            | Self::MalformedQueryString(_)
+            | Self::MissingAuthenticationToken(_) => StatusCode::BAD_REQUEST,
             Self::IO(_) | Self::InternalServiceError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             _ => StatusCode::UNAUTHORIZED,
         }

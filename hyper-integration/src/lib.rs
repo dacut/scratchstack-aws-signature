@@ -59,12 +59,7 @@ mod tests {
                     endpoint: format!("http://[::1]:{}", port),
                 };
                 let mut sr = SignedRequest::new("GET", "service", &region, "/");
-                sr.sign(&AwsCredentials::new(
-                    "AKIDEXAMPLE",
-                    "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
-                    None,
-                    None,
-                ));
+                sr.sign(&AwsCredentials::new("AKIDEXAMPLE", "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY", None, None));
                 match client.dispatch(sr, Some(Duration::from_millis(100))).await {
                     Ok(r) => {
                         eprintln!("Response from server: {:?}", r.status);
@@ -113,12 +108,7 @@ mod tests {
                     endpoint: format!("http://[::1]:{}", port),
                 };
                 let mut sr = SignedRequest::new("GET", "service", &region, "/");
-                sr.sign(&AwsCredentials::new(
-                    "AKIDEXAMPLE",
-                    "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY",
-                    None,
-                    None,
-                ));
+                sr.sign(&AwsCredentials::new("AKIDEXAMPLE", "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY", None, None));
                 match client.dispatch(sr, Some(Duration::from_millis(100))).await {
                     Ok(r) => {
                         eprintln!("Response from server: {:?}", r.status);
@@ -202,7 +192,10 @@ mod tests {
             let k_signing =
                 k_secret.to_ksigning(request.request_date, request.region.as_str(), request.service.as_str());
             let principal = Principal::from(vec![User::new("aws", "123456789012", "/", "test").unwrap().into()]);
-            Ok(GetSigningKeyResponse{principal, signing_key: k_signing})
+            Ok(GetSigningKeyResponse {
+                principal,
+                signing_key: k_signing,
+            })
         } else {
             Err(Box::new(SignatureError::InvalidClientTokenId(
                 "The AWS access key provided does not exist in our records".to_string(),
@@ -248,8 +241,12 @@ mod tests {
                 if req.access_key == "AKIDEXAMPLE" {
                     let k_secret = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
                     let signing_key = k_secret.to_ksigning(req.request_date, req.region.as_str(), req.service.as_str());
-                    let principal = Principal::from(vec![User::new("aws", "123456789012", "/", "test").unwrap().into()]);
-                    Ok(GetSigningKeyResponse{principal, signing_key})
+                    let principal =
+                        Principal::from(vec![User::new("aws", "123456789012", "/", "test").unwrap().into()]);
+                    Ok(GetSigningKeyResponse {
+                        principal,
+                        signing_key,
+                    })
                 } else {
                     Err(SignatureError::InvalidClientTokenId(
                         "The AWS access key provided does not exist in our records".to_string(),

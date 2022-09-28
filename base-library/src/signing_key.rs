@@ -2,7 +2,7 @@ use {
     crate::crypto::hmac_sha256,
     chrono::{Date, Utc},
     ring::digest::SHA256_OUTPUT_LEN,
-    scratchstack_aws_principal::{Principal},
+    scratchstack_aws_principal::Principal,
     std::{
         fmt::{Debug, Display, Formatter, Result as FmtResult},
         future::Future,

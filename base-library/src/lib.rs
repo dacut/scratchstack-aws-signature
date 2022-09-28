@@ -29,7 +29,8 @@ pub use {
     error::SignatureError,
     signature::{sigv4_validate_request_bytes, sigv4_validate_request_empty, sigv4_validate_request_hyper_stream},
     signing_key::{
-        service_for_signing_key_fn, GetSigningKeyRequest, GetSigningKeyResponse, KDateKey, KRegionKey, KSecretKey, KServiceKey, KSigningKey,
+        service_for_signing_key_fn, GetSigningKeyRequest, GetSigningKeyResponse, KDateKey, KRegionKey, KSecretKey,
+        KServiceKey, KSigningKey,
     },
 };
 
