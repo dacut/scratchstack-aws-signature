@@ -26,22 +26,31 @@ Options:
         Open the HTML coverage reports in the default browser. The default is
         to open the HTML coverage reports.
 """
-from getopt import getopt, GetoptError
-from os import environ, fwalk, makedirs, open as os_open, rmdir, scandir, unlink, walk, O_RDONLY, O_DIRECTORY
-from os.path import abspath, dirname, exists, join as path_join
-from re import compile as re_compile, escape
+from getopt import GetoptError, getopt
+from os import O_DIRECTORY, O_RDONLY, environ, fwalk, makedirs
+from os import open as os_open
+from os import rmdir, scandir, unlink, walk
+from os.path import abspath, dirname, exists
+from os.path import join as path_join
+from re import compile as re_compile
+from re import escape
 from subprocess import run
+from sys import argv
+from sys import exit as sys_exit
+from sys import platform, stderr, stdout
+
 import toml
-from sys import argv, exit as sys_exit, platform, stderr, stdout
 
 ROOT = dirname(abspath(__file__))
 ROOT_FD = os_open(ROOT, O_RDONLY | O_DIRECTORY)
 ROOT_DIRS = []
 
+
 def merge_env(**kwargs):
     env = dict(environ)
     env.update(kwargs)
     return env
+
 
 class Crate:
     def __init__(self, root, cargodef):
@@ -55,18 +64,20 @@ class Crate:
     @property
     def target_dir(self):
         return path_join(ROOT, "target", "coverage", self.crate_name)
-    
+
     @property
     def profdata_filename(self):
         return path_join(self.target_dir, "cov.profdata")
-    
+
     @property
     def html_dir(self):
         return path_join(ROOT, "coverage-html", self.crate_name)
 
     @property
     def target_exec(self):
-        exec_name = re_compile(r"^" + escape(self.crate_name.replace("-", "_")) + r"-[0-9a-f]{16}$")
+        exec_name = re_compile(
+            r"^" + escape(self.crate_name.replace("-", "_")) + r"-[0-9a-f]{16}$"
+        )
         for entry in scandir(path_join(self.target_dir, "debug", "deps")):
             if not entry.is_file() or entry.stat().st_mode & 0o100 == 0:
                 continue
@@ -74,14 +85,16 @@ class Crate:
             m = exec_name.match(entry.name)
             if m is not None:
                 return entry.path
-            
+
         raise RuntimeError(f"Could not find target executable for {self.crate_name}")
 
     @property
     def ignore_filename_regex(self):
         _ignore_filename_regex = getattr(self, "_ignore_filename_regex", None)
         if _ignore_filename_regex is None:
-            self._ignore_filename_regex = _ignore_filename_regex = self.get_ignore_filename_regex()
+            self._ignore_filename_regex = (
+                _ignore_filename_regex
+            ) = self.get_ignore_filename_regex()
 
         return _ignore_filename_regex
 
@@ -90,21 +103,23 @@ class Crate:
         for entry in ROOT_DIRS:
             if not entry.is_dir():
                 continue
-            
+
             if entry.path.startswith(self.root):
                 continue
-        
+
             entries.append(escape(f"{entry.name}/"))
-        
+
         return "|".join(entries)
 
     def clean(self):
         self.cargo("clean")
-    
+
     def test(self):
         if exists(self.target_dir):
             for entry in scandir(self.target_dir):
-                if entry.is_file() and (entry.name.endswith(".profdata") or entry.name.endswith(".profraw")):
+                if entry.is_file() and (
+                    entry.name.endswith(".profdata") or entry.name.endswith(".profraw")
+                ):
                     unlink(entry.path)
 
         self.cargo("test")
@@ -129,7 +144,8 @@ class Crate:
     def generate_lcov(self):
         print(f"Generating {self.crate_name}.lcov file")
         args = [
-            "llvm-cov", "export",
+            "llvm-cov",
+            "export",
             "-format=lcov",
             f"-Xdemangler={environ['HOME']}/.cargo/bin/rustfilt",
             f"-ignore-filename-regex={self.ignore_filename_regex}",
@@ -147,7 +163,8 @@ class Crate:
             for subdir in subdirs:
                 rmdir(subdir, dir_fd=dir_fd)
         args = [
-            "llvm-cov", "show",
+            "llvm-cov",
+            "show",
             "-format=html",
             f"-Xdemangler={environ['HOME']}/.cargo/bin/rustfilt",
             f"-ignore-filename-regex={self.ignore_filename_regex}",
@@ -162,11 +179,12 @@ class Crate:
         if platform == "darwin":
             self.run(["open", path_join(self.html_dir, "index.html")])
         elif platform == "linux":
-            self.run(["open", path_join(self.html_dir, "index.html")])
+            self.run(["xdg-open", path_join(self.html_dir, "index.html")])
 
     def generate_report(self):
         args = [
-            "llvm-cov", "report",
+            "llvm-cov",
+            "report",
             "-use-color",
             f"-Xdemangler={environ['HOME']}/.cargo/bin/rustfilt",
             f"-ignore-filename-regex={self.ignore_filename_regex}",
@@ -176,10 +194,13 @@ class Crate:
         print("")
         print("Coverage report for", self.crate_name)
         self.run(args)
-    
+
     def run(self, args, *, stdout=None):
-        subproc_env = merge_env(LLVM_PROFILE_FILE=path_join(self.target_dir, "cov-%m.profraw"))
+        subproc_env = merge_env(
+            LLVM_PROFILE_FILE=path_join(self.target_dir, "cov-%m.profraw")
+        )
         run(args, cwd=self.root, check=True, env=subproc_env, stdout=stdout)
+
 
 def load_workspace(members):
     results = []
@@ -191,6 +212,7 @@ def load_workspace(members):
             results.append(Crate(crate_root, cargo))
     return results
 
+
 def main(args):
     global ROOT_DIRS
     clean = True
@@ -200,7 +222,22 @@ def main(args):
     report = True
 
     try:
-        opts, args = getopt(args, "h", ["clean", "no-clean", "html", "no-html", "report", "no-report", "test", "no-test"])
+        opts, args = getopt(
+            args,
+            "h",
+            [
+                "clean",
+                "no-clean",
+                "html",
+                "no-html",
+                "open",
+                "no-open",
+                "report",
+                "no-report",
+                "test",
+                "no-test",
+            ],
+        )
         for opt, val in opts:
             if opt in ["-h", "--help"]:
                 usage(stdout)
@@ -213,6 +250,10 @@ def main(args):
                 html = True
             if opt in ["--no-html"]:
                 html = False
+            if opt in ["--open"]:
+                html_open = True
+            if opt in ["--no-open"]:
+                html_open = False
             if opt in ["--report"]:
                 report = True
             if opt in ["--no-report"]:
@@ -233,7 +274,7 @@ def main(args):
 
     with open(path_join(ROOT, "Cargo.toml"), "r") as cargo_fd:
         cargo = toml.load(cargo_fd)
-    
+
     if "workspace" in cargo:
         crates = load_workspace(cargo["workspace"]["members"])
     else:
@@ -242,16 +283,16 @@ def main(args):
     environ["CARGO_INCREMENTAL"] = "0"
     environ["RUSTFLAGS"] = "-Cinstrument-coverage -Ccodegen-units=1 -Copt-level=0"
 
-    if clean:    
+    if clean:
         for crate in crates:
             if not args or crate.crate_name in args:
                 crate.clean()
-    
+
     if test:
         for crate in crates:
             if not args or crate.crate_name in args:
                 crate.test()
-    
+
     if html:
         for crate in crates:
             if not args or crate.crate_name in args:
@@ -267,8 +308,10 @@ def main(args):
             if not args or crate.crate_name in args:
                 crate.open_html()
 
+
 def usage(fd=stderr):
     fd.write(__doc__)
+
 
 if __name__ == "__main__":
     sys_exit(main(argv[1:]))

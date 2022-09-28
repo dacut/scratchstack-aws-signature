@@ -19,8 +19,11 @@ jobs:
         toolchain: nightly
         override: true
         profile: default
-    - name: Install LLVM
-      run: sudo apt-get install -y llvm
+    - name: Install coverage-run dependencies
+      run: |
+        sudo apt-get install -y llvm
+        pip3 install --user toml
+        cargo install rustfilt
     - name: Run Clippy check.
       uses: actions-rs/clippy-check@v1
       with:
@@ -29,7 +32,7 @@ jobs:
     - name: Run formatting check.
       run: cargo fmt --check
     - name: Build and test with coverage data
-      run: ./coverage-run.py
+      run: ./coverage-run.py --no-open --no-html
     - name: Combine coverage reports
       run: cat scratchstack-aws-signature.lcov scratchstack-aws-signature-hyper.lcov > scratchstack-aws-signature-all.lcov
     - name: Upload coverage report to Coveralls
