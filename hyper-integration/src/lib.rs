@@ -201,7 +201,7 @@ mod tests {
             let k_secret = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
             let k_signing =
                 k_secret.to_ksigning(request.request_date, request.region.as_str(), request.service.as_str());
-            let principal = Principal::from(User::new("aws", "123456789012", "/", "test").unwrap());
+            let principal = Principal::from(vec![User::new("aws", "123456789012", "/", "test").unwrap().into()]);
             Ok(GetSigningKeyResponse{principal, signing_key: k_signing})
         } else {
             Err(Box::new(SignatureError::InvalidClientTokenId(
@@ -248,7 +248,7 @@ mod tests {
                 if req.access_key == "AKIDEXAMPLE" {
                     let k_secret = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
                     let signing_key = k_secret.to_ksigning(req.request_date, req.region.as_str(), req.service.as_str());
-                    let principal = Principal::from(User::new("aws", "123456789012", "/", "test").unwrap());
+                    let principal = Principal::from(vec![User::new("aws", "123456789012", "/", "test").unwrap().into()]);
                     Ok(GetSigningKeyResponse{principal, signing_key})
                 } else {
                     Err(SignatureError::InvalidClientTokenId(

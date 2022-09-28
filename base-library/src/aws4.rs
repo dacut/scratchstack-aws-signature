@@ -277,7 +277,7 @@ async fn run(basename: &str) {
 }
 
 async fn get_signing_key(request: GetSigningKeyRequest) -> Result<GetSigningKeyResponse, BoxError> {
-    let principal = Principal::from(User::new("aws", "123456789012", "/", "test").unwrap());
+    let principal = Principal::from(vec![User::new("aws", "123456789012", "/", "test").unwrap().into()]);
     let k_secret = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
     let k_signing = k_secret.to_ksigning(request.request_date, request.region.as_str(), request.service.as_str());
 

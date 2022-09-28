@@ -296,13 +296,19 @@ mod tests {
             SigV4AuthenticatorBuilder, SignatureError,
         },
         chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc},
+        log::LevelFilter,
         ring::digest::SHA256_OUTPUT_LEN,
         scratchstack_aws_principal::{Principal, User},
         tower::BoxError,
     };
 
-    #[test_log::test]
+    fn init() {
+        let _ = env_logger::builder().is_test(true).filter_level(LevelFilter::Trace).try_init();
+    }
+
+    #[test]
     fn test_derived() {
+        init();
         let epoch = DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc);
         let test_time = DateTime::<Utc>::from_utc(
             NaiveDateTime::new(NaiveDate::from_ymd(2015, 8, 30), NaiveTime::from_hms(12, 36, 0)),
@@ -369,7 +375,7 @@ mod tests {
 
         match request.access_key.as_str() {
             "AKIDEXAMPLE" => {
-                let principal = Principal::from(User::new("aws", "123456789012", "/", "test").unwrap());
+                let principal = Principal::from(vec![User::new("aws", "123456789012", "/", "test").unwrap().into()]);
                 let k_secret = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
                 let k_signing =
                     k_secret.to_ksigning(request.request_date, request.region.as_str(), request.service.as_str());
@@ -386,8 +392,10 @@ mod tests {
         }
     }
 
-    #[test_log::test(tokio::test)]
+    #[tokio::test]
     async fn test_error_ordering() {
+        init();
+
         // Test that the error ordering is correct.
         let creq_sha256: [u8; SHA256_OUTPUT_LEN] = [0; SHA256_OUTPUT_LEN];
         let test_timestamp = DateTime::<Utc>::from_utc(
@@ -612,8 +620,9 @@ mod tests {
             .unwrap();
     }
 
-    #[test_log::test]
+    #[test]
     fn test_duration_formatting() {
+        init();
         assert_eq!(duration_to_string(Duration::seconds(32)).as_str(), "32 sec");
         assert_eq!(duration_to_string(Duration::seconds(60)).as_str(), "1 min");
         assert_eq!(duration_to_string(Duration::seconds(61)).as_str(), "61 sec");

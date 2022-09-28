@@ -2,7 +2,7 @@ use {
     crate::crypto::hmac_sha256,
     chrono::{Date, Utc},
     ring::digest::SHA256_OUTPUT_LEN,
-    scratchstack_aws_principal::{FederatedUser, Principal},
+    scratchstack_aws_principal::{Principal},
     std::{
         fmt::{Debug, Display, Formatter, Result as FmtResult},
         future::Future,
@@ -254,7 +254,7 @@ impl Default for GetSigningKeyResponse {
             signing_key: KSigningKey {
                 key: [0; SHA256_OUTPUT_LEN],
             },
-            principal: Principal::FederatedUser(FederatedUser::new("unknown", "000000000000", "unknown").unwrap()),
+            principal: Principal::new(vec![]),
         }
     }
 }
@@ -283,7 +283,7 @@ mod tests {
     use {
         crate::{GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey},
         chrono::{Date, NaiveDate, Utc},
-        scratchstack_aws_principal::AssumedRole,
+        scratchstack_aws_principal::{AssumedRole, Principal},
     };
 
     #[test_log::test]
@@ -408,7 +408,7 @@ mod tests {
                 "us-east-1",
                 "example",
             ),
-            principal: AssumedRole::new("aws", "123456789012", "role", "session").unwrap().into(),
+            principal: Principal::new(vec![AssumedRole::new("aws", "123456789012", "role", "session").unwrap().into()]),
         };
 
         // Make sure we can debug print the response.
@@ -418,6 +418,12 @@ mod tests {
         let gsk_resp1b = gsk_resp1a.clone();
         assert_eq!(gsk_resp1a.signing_key, gsk_resp1b.signing_key);
         assert_eq!(gsk_resp1a.principal, gsk_resp1b.principal);
+    }
+
+    #[test_log::test]
+    fn test_gsk_reponse_derived() {
+        let response: GetSigningKeyResponse = Default::default();
+        assert_eq!(response.signing_key.as_ref(), &[0u8; 32]);
     }
 }
 // end tests -- do not delete; needed for coverage.
