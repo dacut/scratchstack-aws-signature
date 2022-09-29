@@ -173,7 +173,7 @@ class Crate:
             path_join(self.target_dir, self.target_exec),
         ]
 
-        result = run(args, cwd=self.root, check=True)
+        result = self.run(args)
 
     def open_html(self):
         if platform == "darwin":
