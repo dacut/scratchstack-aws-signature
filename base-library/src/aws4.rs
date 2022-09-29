@@ -1,7 +1,7 @@
 use {
     crate::{
-        service_for_signing_key_fn, sigv4_validate_request_bytes, CanonicalRequest, GetSigningKeyRequest,
-        GetSigningKeyResponse, KSecretKey,
+        service_for_signing_key_fn, sigv4_validate_request, CanonicalRequest, GetSigningKeyRequest,
+        GetSigningKeyResponse, KSecretKey, SignedHeaderRequirements,
     },
     bytes::{Bytes, BytesMut},
     chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc},
@@ -224,7 +224,8 @@ async fn run(basename: &str) {
     expected_canonical_request.retain(|c| *c != b'\r'); // Remove carriage returns (not newlines)
 
     // Check the canonical request.
-    let auth_params = canonical.get_auth_parameters().expect("Failed to get auth parameters");
+    let req = SignedHeaderRequirements::empty();
+    let auth_params = canonical.get_auth_parameters(&req).expect("Failed to get auth parameters");
     let canonical_request = canonical.canonical_request(&auth_params.signed_headers);
     assert_eq!(
         String::from_utf8_lossy(canonical_request.as_slice()),
@@ -271,7 +272,8 @@ async fn run(basename: &str) {
     // Create a GetSigningKeyRequest from our existing request.
     debug!("body: {:?}", body);
     let request = Request::from_parts(parts, body);
-    sigv4_validate_request_bytes(request, TEST_REGION, TEST_SERVICE, &mut signing_key_svc, test_time)
+    let required_headers = SignedHeaderRequirements::empty();
+    sigv4_validate_request(request, TEST_REGION, TEST_SERVICE, &mut signing_key_svc, test_time, &required_headers)
         .await
         .expect(&format!("Failed to validate request: {:?}", sreq_path));
 }

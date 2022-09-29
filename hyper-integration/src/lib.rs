@@ -174,7 +174,7 @@ mod tests {
                             }
                         }
                         eprintln!();
-                        assert_eq!(r.status, StatusCode::UNAUTHORIZED);
+                        assert_eq!(r.status, 403);
                     }
                     Err(e) => panic!("Error from server: {:?}", e),
                 };

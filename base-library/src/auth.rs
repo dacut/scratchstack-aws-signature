@@ -299,6 +299,7 @@ mod tests {
         log::LevelFilter,
         ring::digest::SHA256_OUTPUT_LEN,
         scratchstack_aws_principal::{Principal, User},
+        std::{error::Error, fs::File},
         tower::BoxError,
     };
 
@@ -364,6 +365,10 @@ mod tests {
                         "The security token included in the request is invalid".to_string(),
                     )))
                 }
+                "io-error" => {
+                    let e = File::open("/00Hi1i6V4qad5nF/6KPlcyW4H9miTOD02meLgTaV09O2UToMPTE9j6sNmHZ/08EzM4qOs8bYOINWJ9RheQVadpgixRTh0VjcwpVPoo1Rh4gNAJhS4cj/this-path/does//not/exist").unwrap_err();
+                    return Err(Box::new(SignatureError::from(e)));
+                }
                 "expired" => {
                     return Err(Box::new(SignatureError::ExpiredToken(
                         "The security token included in the request is expired".to_string(),
@@ -427,11 +432,13 @@ mod tests {
             .await
             .unwrap_err();
 
-        if let SignatureError::SignatureDoesNotMatch(msg) = e {
+        if let SignatureError::SignatureDoesNotMatch(ref msg) = e {
             assert_eq!(
-                msg.unwrap().as_str(),
+                msg.as_ref().unwrap(),
                 "Signature expired: 20150830T122059Z is now earlier than 20150830T122100Z (20150830T123600Z - 15 min.)"
             );
+            assert_eq!(e.error_code(), "SignatureDoesNotMatch");
+            assert_eq!(e.http_status(), 403);
         } else {
             panic!("Unexpected error: {:?}", e);
         }
@@ -450,11 +457,13 @@ mod tests {
             .await
             .unwrap_err();
 
-        if let SignatureError::SignatureDoesNotMatch(msg) = e {
+        if let SignatureError::SignatureDoesNotMatch(ref msg) = e {
             assert_eq!(
-                msg.unwrap().as_str(),
+                msg.as_ref().unwrap(),
                 "Signature not yet current: 20150830T125101Z is still later than 20150830T125100Z (20150830T123600Z + 15 min.)"
             );
+            assert_eq!(e.error_code(), "SignatureDoesNotMatch");
+            assert_eq!(e.http_status(), 403);
         } else {
             panic!("Unexpected error: {:?}", e);
         }
@@ -473,11 +482,13 @@ mod tests {
             .await
             .unwrap_err();
 
-        if let SignatureError::IncompleteSignature(msg) = e {
+        if let SignatureError::IncompleteSignature(_) = e {
             assert_eq!(
-                msg.as_str(),
+                e.to_string(),
                 "Credential must have exactly 5 slash-delimited elements, e.g. keyid/date/region/service/term, got 'AKIDFOO/20130101/wrong-region/wrong-service'"
             );
+            assert_eq!(e.error_code(), "IncompleteSignature");
+            assert_eq!(e.http_status(), 400);
         } else {
             panic!("Unexpected error: {:?}", e);
         }
@@ -496,11 +507,13 @@ mod tests {
             .await
             .unwrap_err();
 
-        if let SignatureError::SignatureDoesNotMatch(msg) = e {
+        if let SignatureError::SignatureDoesNotMatch(_) = e {
             assert_eq!(
-                msg.unwrap().as_str(),
+                e.to_string(),
                 "Credential should be scoped to a valid region, not 'wrong-region'. Credential should be scoped to correct service: 'example'. Credential should be scoped with a valid terminator: 'aws4_request', not 'aws5_request'. Date in Credential scope does not match YYYYMMDD from ISO-8601 version of date from HTTP: '20130101' != '20150830', from '20150830T123600Z'."
             );
+            assert_eq!(e.error_code(), "SignatureDoesNotMatch");
+            assert_eq!(e.http_status(), 403);
         } else {
             panic!("Unexpected error: {:?}", e);
         }
@@ -519,8 +532,10 @@ mod tests {
             .await
             .unwrap_err();
 
-        if let SignatureError::InvalidClientTokenId(msg) = e {
-            assert_eq!(msg.as_str(), "The security token included in the request is invalid");
+        if let SignatureError::InvalidClientTokenId(_) = e {
+            assert_eq!(e.to_string(), "The security token included in the request is invalid");
+            assert_eq!(e.error_code(), "InvalidClientTokenId");
+            assert_eq!(e.http_status(), 403);
         } else {
             panic!("Unexpected error: {:?}", e);
         }
@@ -539,8 +554,10 @@ mod tests {
             .await
             .unwrap_err();
 
-        if let SignatureError::ExpiredToken(msg) = e {
-            assert_eq!(msg.as_str(), "The security token included in the request is expired");
+        if let SignatureError::ExpiredToken(_) = e {
+            assert_eq!(e.to_string(), "The security token included in the request is expired");
+            assert_eq!(e.error_code(), "ExpiredToken");
+            assert_eq!(e.http_status(), 403);
         } else {
             panic!("Unexpected error: {:?}", e);
         }
@@ -559,8 +576,40 @@ mod tests {
             .await
             .unwrap_err();
 
-        if let SignatureError::InternalServiceError(err) = e {
+        if let SignatureError::InternalServiceError(ref err) = e {
             assert_eq!(format!("{:?}", err), r#""internal service error""#);
+            assert_eq!(e.to_string(), "internal service error");
+            assert_eq!(e.error_code(), "InternalFailure");
+            assert_eq!(e.http_status(), 500);
+        } else {
+            panic!("Unexpected error: {:?}", e);
+        }
+
+        let auth = SigV4Authenticator::builder()
+            .canonical_request_sha256(creq_sha256)
+            .credential("AKIDFOO/20150830/us-east-1/example/aws4_request".to_string())
+            .session_token("io-error")
+            .signature("invalid".to_string())
+            .request_timestamp(test_timestamp)
+            .build()
+            .unwrap();
+
+        let e = auth
+            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .await
+            .unwrap_err();
+
+        if let SignatureError::IO(_) = e {
+            let e_string = e.to_string();
+            assert!(
+                e_string.contains("No such file or directory")
+                    || e_string.contains("The system cannot find the file specified"),
+                "Error message: {:#?}",
+                e_string
+            );
+            assert_eq!(e.error_code(), "InternalFailure");
+            assert_eq!(e.http_status(), 500);
+            assert!(e.source().is_some());
         } else {
             panic!("Unexpected error: {:?}", e);
         }
@@ -579,8 +628,10 @@ mod tests {
             .await
             .unwrap_err();
 
-        if let SignatureError::InvalidClientTokenId(msg) = e {
-            assert_eq!(msg.as_str(), "The AWS access key provided does not exist in our records");
+        if let SignatureError::InvalidClientTokenId(_) = e {
+            assert_eq!(e.to_string(), "The AWS access key provided does not exist in our records");
+            assert_eq!(e.error_code(), "InvalidClientTokenId");
+            assert_eq!(e.http_status(), 403);
         } else {
             panic!("Unexpected error: {:?}", e);
         }
@@ -599,8 +650,10 @@ mod tests {
             .await
             .unwrap_err();
 
-        if let SignatureError::SignatureDoesNotMatch(msg) = e {
-            assert_eq!(msg.unwrap().as_str(), "The request signature we calculated does not match the signature you provided. Check your AWS Secret Access Key and signing method. Consult the service documentation for details.");
+        if let SignatureError::SignatureDoesNotMatch(_) = e {
+            assert_eq!(e.to_string(), "The request signature we calculated does not match the signature you provided. Check your AWS Secret Access Key and signing method. Consult the service documentation for details.");
+            assert_eq!(e.error_code(), "SignatureDoesNotMatch");
+            assert_eq!(e.http_status(), 403);
         } else {
             panic!("Unexpected error: {:?}", e);
         }
@@ -629,4 +682,3 @@ mod tests {
         assert_eq!(duration_to_string(Duration::seconds(600)).as_str(), "10 min");
     }
 }
-// end tests -- do not delete; needed for coverage.

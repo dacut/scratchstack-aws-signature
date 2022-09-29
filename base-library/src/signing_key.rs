@@ -426,4 +426,3 @@ mod tests {
         assert_eq!(response.signing_key.as_ref(), &[0u8; 32]);
     }
 }
-// end tests -- do not delete; needed for coverage.

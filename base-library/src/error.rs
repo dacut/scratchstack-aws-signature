@@ -7,6 +7,33 @@ use {
     },
 };
 
+/// Error code: ExpiredToken
+const ERR_CODE_EXPIRED_TOKEN: &str = "ExpiredToken";
+
+/// Error code: InternalFailure
+const ERR_CODE_INTERNAL_FAILURE: &str = "InternalFailure";
+
+/// Error code: InvalidBodyEncoding
+const ERR_CODE_INVALID_BODY_ENCODING: &str = "InvalidBodyEncoding";
+
+/// Error code: InvalidClientTokenId
+const ERR_CODE_INVALID_CLIENT_TOKEN_ID: &str = "InvalidClientTokenId";
+
+/// Error code: IncompleteSignature
+const ERR_CODE_INCOMPLETE_SIGNATURE: &str = "IncompleteSignature";
+
+/// Error code: InvalidURIPath
+const ERR_CODE_INVALID_URI_PATH: &str = "InvalidURIPath";
+
+/// Error code: MalformedQueryString
+const ERR_CODE_MALFORMED_QUERY_STRING: &str = "MalformedQueryString";
+
+/// Error code: MissingAuthenticationToken
+const ERR_CODE_MISSING_AUTHENTICATION_TOKEN: &str = "MissingAuthenticationToken";
+
+/// Error code: SignatureDoesNotMatch
+const ERR_CODE_SIGNATURE_DOES_NOT_MATCH: &str = "SignatureDoesNotMatch";
+
 /// Error returned when an attempt at validating an AWS SigV4 signature fails.
 #[derive(Debug)]
 pub enum SignatureError {
@@ -32,19 +59,9 @@ pub enum SignatureError {
     /// `Unsupported AWS 'algorithm': 'AWS4-HMAC-SHA512'`
     IncompleteSignature(/* message */ String),
 
-    /// The request signature specified an invalid credential -- either the access key was not specified, or the
-    /// credential scope (in the form `<code>_date_/_region_/_service_/aws4_request</code>`) did not match the
-    /// expected value for the server.
-    InvalidCredential(/* message */ String),
-
     /// The URI path includes invalid components. This can be a malformed hex encoding (e.g. `%0J`), a non-absolute
     /// URI path (`foo/bar`), or a URI path that attempts to navigate above the root (`/x/../../../y`).
     InvalidURIPath(/* message */ String),
-
-    /// An HTTP header was malformed -- the value could not be decoded as UTF-8, or the header was empty and this is
-    /// not allowed (e.g. the `content-type` header), or the header could not be parsed (e.g., the `date` header is
-    /// not a valid date).
-    MalformedHeader(/* message */ String),
 
     /// A query parameter was malformed -- the value could not be decoded as UTF-8, or the parameter was empty and
     /// this is not allowed (e.g. a signature parameter), or the parameter could not be parsed (e.g., the `X-Amz-Date`
@@ -68,28 +85,27 @@ pub enum SignatureError {
 impl SignatureError {
     pub fn error_code(&self) -> &'static str {
         match self {
-            Self::ExpiredToken(_) => "ExpiredToken",
-            Self::IO(_) | Self::InternalServiceError(_) => "InternalServiceError",
-            Self::InvalidBodyEncoding(_) => "InvalidBodyEncoding",
-            Self::InvalidClientTokenId(_) => "InvalidClientTokenId",
-            Self::IncompleteSignature(_) => "IncomlpeteSignature",
-            Self::InvalidCredential(_) => "InvalidCredential",
-            Self::InvalidURIPath(_) => "InvalidURIPath",
-            Self::MalformedHeader(_) => "MalformedHeader",
-            Self::MalformedQueryString(_) => "MalformedQueryString",
-            Self::MissingAuthenticationToken(_) => "MissingAuthenticationToken",
-            Self::SignatureDoesNotMatch(_) => "SignatureDoesNotMatch",
+            Self::ExpiredToken(_) => ERR_CODE_EXPIRED_TOKEN,
+            Self::IO(_) | Self::InternalServiceError(_) => ERR_CODE_INTERNAL_FAILURE,
+            Self::InvalidBodyEncoding(_) => ERR_CODE_INVALID_BODY_ENCODING,
+            Self::InvalidClientTokenId(_) => ERR_CODE_INVALID_CLIENT_TOKEN_ID,
+            Self::IncompleteSignature(_) => ERR_CODE_INCOMPLETE_SIGNATURE,
+            Self::InvalidURIPath(_) => ERR_CODE_INVALID_URI_PATH,
+            Self::MalformedQueryString(_) => ERR_CODE_MALFORMED_QUERY_STRING,
+            Self::MissingAuthenticationToken(_) => ERR_CODE_MISSING_AUTHENTICATION_TOKEN,
+            Self::SignatureDoesNotMatch(_) => ERR_CODE_SIGNATURE_DOES_NOT_MATCH,
         }
     }
 
     pub fn http_status(&self) -> StatusCode {
         match self {
-            Self::InvalidBodyEncoding(_)
-            | Self::MalformedHeader(_)
+            Self::IncompleteSignature(_)
+            | Self::InvalidBodyEncoding(_)
+            | Self::InvalidURIPath(_)
             | Self::MalformedQueryString(_)
             | Self::MissingAuthenticationToken(_) => StatusCode::BAD_REQUEST,
             Self::IO(_) | Self::InternalServiceError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            _ => StatusCode::UNAUTHORIZED,
+            _ => StatusCode::FORBIDDEN,
         }
     }
 }
@@ -103,9 +119,7 @@ impl Display for SignatureError {
             Self::InvalidBodyEncoding(msg) => f.write_str(msg),
             Self::InvalidClientTokenId(msg) => f.write_str(msg),
             Self::IncompleteSignature(msg) => f.write_str(msg),
-            Self::InvalidCredential(msg) => f.write_str(msg),
             Self::InvalidURIPath(msg) => f.write_str(msg),
-            Self::MalformedHeader(msg) => f.write_str(msg),
             Self::MalformedQueryString(msg) => f.write_str(msg),
             Self::MissingAuthenticationToken(msg) => f.write_str(msg),
             Self::SignatureDoesNotMatch(msg) => {
@@ -140,5 +154,24 @@ impl From<Box<dyn Error + Send + Sync>> for SignatureError {
             Ok(sig_err) => *sig_err,
             Err(e) => SignatureError::InternalServiceError(e),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use {crate::SignatureError, std::error::Error};
+
+    #[test_log::test]
+    fn test_from() {
+        // This just exercises a few codepaths that aren't usually exercised.
+        let utf8_error = Box::new(String::from_utf8(b"\x80".to_vec()).unwrap_err());
+        let e: SignatureError = (utf8_error as Box<dyn Error + Send + Sync + 'static>).into();
+        assert_eq!(e.error_code(), "InternalFailure");
+        assert_eq!(e.http_status(), 500);
+
+        let e = SignatureError::MalformedQueryString("foo".to_string());
+        let e2 = SignatureError::from(Box::new(e) as Box<dyn Error + Send + Sync + 'static>);
+        assert_eq!(e2.to_string(), "foo");
+        assert_eq!(e2.error_code(), "MalformedQueryString");
     }
 }

@@ -2,7 +2,7 @@ use {
     chrono::Utc,
     hyper::{body::Body, Request, Response},
     scratchstack_aws_signature::{
-        sigv4_validate_request_hyper_stream, GetSigningKeyRequest, GetSigningKeyResponse, SignatureError,
+        sigv4_validate_request, GetSigningKeyRequest, GetSigningKeyResponse, SignatureError, SignedHeaderRequirements,
     },
     std::{
         any::type_name,
@@ -132,12 +132,13 @@ where
     S::Error: Into<BoxError> + Send + Sync,
 {
     let mut gsk = get_signing_key.ready().await?;
-    let (mut parts, body, principal) = match sigv4_validate_request_hyper_stream(
+    let (mut parts, body, principal) = match sigv4_validate_request(
         request,
         region.as_str(),
         service.as_str(),
         &mut gsk,
         Utc::now(),
+        &SignedHeaderRequirements::empty(), // FIXME
     )
     .await
     {

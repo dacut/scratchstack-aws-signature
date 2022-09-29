@@ -282,6 +282,7 @@ def main(args):
 
     environ["CARGO_INCREMENTAL"] = "0"
     environ["RUSTFLAGS"] = "-Cinstrument-coverage -Ccodegen-units=1 -Copt-level=0"
+    environ["RUST_LOG"] = "trace"
 
     if clean:
         for crate in crates:

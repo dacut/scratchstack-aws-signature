@@ -11,10 +11,9 @@ use {
         uri::Uri,
     },
     lazy_static::lazy_static,
-    log::debug,
     regex::Regex,
     ring::digest::{digest, SHA256, SHA256_OUTPUT_LEN},
-    std::{collections::HashMap, io::Write, str::from_utf8},
+    std::{collections::HashMap, str::from_utf8},
 };
 
 /// Content-Type string for HTML forms
@@ -38,8 +37,12 @@ const CONTENT_TYPE: &str = "content-type";
 /// Signature field for the access key
 const CREDENTIAL: &[u8] = b"Credential";
 
-/// Header parameter for the date
+/// Header parameter for the date.
 const DATE: &str = "date";
+
+/// Uppercase hex digits.
+const HEX_DIGITS_UPPER: [u8; 16] =
+    [b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', b'A', b'B', b'C', b'D', b'E', b'F'];
 
 /// Error message: `"Authorization header requires 'Credential' parameter."`
 const MSG_AUTH_HEADER_REQ_CREDENTIAL: &str = "Authorization header requires 'Credential' parameter.";
@@ -127,6 +130,14 @@ lazy_static! {
     static ref AWS4_HMAC_SHA256_RE: Regex = Regex::new(r"\s*AWS4-HMAC-SHA256(?:\s+|$)").unwrap();
 }
 
+/// Authentication parameters extracted from the header or query string.
+#[derive(Debug)]
+pub(crate) struct AuthParams {
+    pub(crate) builder: SigV4AuthenticatorBuilder,
+    pub(crate) signed_headers: Vec<String>,
+    pub(crate) timestamp_str: String,
+}
+
 /// A canonicalized request for AWS SigV4.
 #[derive(Debug)]
 pub struct CanonicalRequest {
@@ -150,31 +161,12 @@ pub struct CanonicalRequest {
     body_sha256: String,
 }
 
-/// Authentication parameters extracted from the header or query string.
-#[derive(Debug)]
-pub(crate) struct AuthParams {
-    pub(crate) builder: SigV4AuthenticatorBuilder,
-    pub(crate) signed_headers: Vec<String>,
-    pub(crate) timestamp_str: String,
-}
-
-/// The Content-Type header value, along with the character set (if specified).
-#[derive(Debug)]
-struct ContentTypeCharset {
-    content_type: String,
-    charset: Option<String>,
-}
-
 impl CanonicalRequest {
     /// Create a CanonicalRequest from an HTTP request [Parts] and a body of [Bytes].
     pub fn from_request_parts(mut parts: Parts, mut body: Bytes) -> Result<(Self, Parts, Bytes), SignatureError> {
         let canonical_path = canonicalize_uri_path(&parts.uri.path())?;
         let content_type = get_content_type_and_charset(&parts.headers);
         let mut query_parameters = query_string_to_normalized_map(&parts.uri.query().unwrap_or(""))?;
-
-        debug!("canonical_path: {}", canonical_path);
-        debug!("query_parameters (before content-type check): {:?}", query_parameters);
-        debug!("content_type: {:?}", content_type);
 
         // Treat requests with application/x-www-form-urlencoded bodies as if they were passed into the query string.
         if let Some(content_type) = content_type {
@@ -216,13 +208,9 @@ impl CanonicalRequest {
                 body = Bytes::from("");
             }
         }
-        debug!("query_parameters (after content-type check): {:?}", query_parameters);
 
         let headers = normalize_headers(&parts.headers);
         let body_sha256 = sha256_hex(body.as_ref());
-
-        debug!("headers: {}", debug_headers(&headers));
-        debug!("body_sha256: {}", body_sha256);
 
         Ok((
             CanonicalRequest {
@@ -312,7 +300,6 @@ impl CanonicalRequest {
     /// Get the SHA-256 hash of the [canonical request](https://docs.aws.amazon.com/general/latest/gr/sigv4-create-canonical-request.html).
     pub fn canonical_request_sha256(&self, signed_headers: &Vec<String>) -> [u8; SHA256_OUTPUT_LEN] {
         let canonical_request = self.canonical_request(&signed_headers);
-        debug!("canonical_request: {:?}", String::from_utf8_lossy(&canonical_request));
         let result_digest = digest(&SHA256, canonical_request.as_ref());
         let result_slice = result_digest.as_ref();
         assert!(result_slice.len() == SHA256_OUTPUT_LEN);
@@ -323,8 +310,11 @@ impl CanonicalRequest {
 
     /// Create a [SigV4Authenticator] for the request. This performs steps 1-8 from the AWS Auth Error Ordering
     /// workflow.
-    pub fn get_authenticator(&self) -> Result<SigV4Authenticator, SignatureError> {
-        let auth_params = self.get_auth_parameters()?;
+    pub fn get_authenticator(
+        &self,
+        signed_header_requirements: &SignedHeaderRequirements,
+    ) -> Result<SigV4Authenticator, SignatureError> {
+        let auth_params = self.get_auth_parameters(signed_header_requirements)?;
         self.get_authenticator_from_auth_parameters(auth_params)
     }
 
@@ -355,7 +345,10 @@ impl CanonicalRequest {
 
     /// Create an [AuthParams] structure, either from the `Authorization` header or the query strings as appropriate.
     /// This performs step 5 and either performs steps 6a-6d or 7a-7d from the AWS Auth Error Ordering workflow.
-    pub(crate) fn get_auth_parameters(&self) -> Result<AuthParams, SignatureError> {
+    pub(crate) fn get_auth_parameters(
+        &self,
+        signed_header_requirements: &SignedHeaderRequirements,
+    ) -> Result<AuthParams, SignatureError> {
         let auth_header = self.headers.get(AUTHORIZATION);
         let sig_algs = self.query_parameters.get(X_AMZ_ALGORITHM);
 
@@ -372,13 +365,50 @@ impl CanonicalRequest {
         };
 
         // Rule 8: SignedHeaders must include "Host" or ":authority".
+        let mut found_host = false;
         for header in &params.signed_headers {
             if header == "host" || header == ":authority" {
-                return Ok(params);
+                found_host = true;
+                break;
+            }
+        }
+        if !found_host {
+            return Err(SignatureError::SignatureDoesNotMatch(Some(MSG_HOST_AUTHORITY_MUST_BE_SIGNED.to_string())));
+        }
+
+        for header in signed_header_requirements.always_present() {
+            let header_lower = header.to_lowercase();
+            if !params.signed_headers.contains(&header_lower) {
+                return Err(SignatureError::SignatureDoesNotMatch(Some(format!(
+                    "'{}' must be a 'SignedHeader' in the AWS Authorization.",
+                    header
+                ))));
             }
         }
 
-        Err(SignatureError::SignatureDoesNotMatch(Some(MSG_HOST_AUTHORITY_MUST_BE_SIGNED.to_string())))
+        for header in signed_header_requirements.if_in_request() {
+            let header_lower = header.to_lowercase();
+            if self.headers.contains_key(&header_lower) && !params.signed_headers.contains(&header_lower) {
+                return Err(SignatureError::SignatureDoesNotMatch(Some(format!(
+                    "'{}' must be a 'SignedHeader' in the AWS Authorization.",
+                    header
+                ))));
+            }
+        }
+
+        for header in signed_header_requirements.prefixes() {
+            let header_lower = header.to_lowercase();
+            for http_header in self.headers.keys() {
+                if http_header.starts_with(&header_lower) && !params.signed_headers.contains(http_header) {
+                    return Err(SignatureError::SignatureDoesNotMatch(Some(format!(
+                        "'{}' must be a 'SignedHeader' in the AWS Authorization.",
+                        http_header
+                    ))));
+                }
+            }
+        }
+
+        Ok(params)
     }
 
     /// Create an [AuthParams] structure from the `Authorization` header. This performs steps 6a-6d of the AWS Auth
@@ -392,7 +422,7 @@ impl CanonicalRequest {
         let algorithm = parts[0];
         if algorithm != AWS4_HMAC_SHA256_BYTES {
             return Err(SignatureError::IncompleteSignature(format!(
-                "{}'{}'",
+                "{}'{}'.",
                 MSG_UNSUPPORTED_ALGORITHM,
                 String::from_utf8_lossy(algorithm)
             )));
@@ -512,9 +542,7 @@ impl CanonicalRequest {
         }
 
         let mut signed_headers = if let Some(signed_headers) = self.query_parameters.get(X_AMZ_SIGNED_HEADERS) {
-            debug!("Origin signed headers: {:?}", &signed_headers[0]);
             let unescaped_signed_headers = unescape_uri_encoding(&signed_headers[0]);
-            debug!("X-Amz-SignedHeaders: {:?}", unescaped_signed_headers);
             unescaped_signed_headers.split(';').map(|s| s.to_string()).collect::<Vec<String>>()
         } else {
             missing_messages.push(MSG_QUERY_STRING_MUST_INCLUDE_SIGNED_HEADERS);
@@ -547,6 +575,100 @@ impl CanonicalRequest {
             timestamp_str,
         })
     }
+}
+
+/// The Content-Type header value, along with the character set (if specified).
+#[derive(Debug)]
+struct ContentTypeCharset {
+    content_type: String,
+    charset: Option<String>,
+}
+
+/// Requirement for a signed header.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SignedHeaderRequirements {
+    /// Headers that must always be present in SignedHeaders.
+    always_present: Vec<String>,
+
+    /// Headers that must be present in SignedHeaders if they are present in the request.
+    if_in_request: Vec<String>,
+
+    /// Prefixes that must be present in SignedHeaders if any headers with that prefix are present in the request.
+    prefixes: Vec<String>,
+}
+
+impl SignedHeaderRequirements {
+    pub fn new(mut always_present: Vec<String>, mut if_in_request: Vec<String>, mut prefixes: Vec<String>) -> Self {
+        always_present.sort();
+        if_in_request.sort();
+        prefixes.sort();
+
+        SignedHeaderRequirements {
+            always_present,
+            if_in_request,
+            prefixes,
+        }
+    }
+
+    pub fn empty() -> Self {
+        SignedHeaderRequirements {
+            always_present: Vec::new(),
+            if_in_request: Vec::new(),
+            prefixes: Vec::new(),
+        }
+    }
+
+    #[inline]
+    pub fn always_present(&self) -> &[String] {
+        &self.always_present
+    }
+
+    #[inline]
+    pub fn if_in_request(&self) -> &[String] {
+        &self.if_in_request
+    }
+
+    #[inline]
+    pub fn prefixes(&self) -> &[String] {
+        &self.prefixes
+    }
+
+    pub fn add_always_present(&mut self, header: &str) {
+        self.always_present.push(header.to_string());
+        self.always_present.sort();
+        self.always_present.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    }
+
+    pub fn add_if_in_request(&mut self, header: &str) {
+        self.if_in_request.push(header.to_string());
+        self.if_in_request.sort();
+        self.if_in_request.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    }
+
+    pub fn add_prefix(&mut self, prefix: &str) {
+        self.prefixes.push(prefix.to_string());
+        self.prefixes.sort();
+        self.prefixes.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    }
+
+    pub fn remove_always_present(&mut self, header: &str) {
+        self.always_present.retain(|h| !h.eq_ignore_ascii_case(header));
+    }
+
+    pub fn remove_if_in_request(&mut self, header: &str) {
+        self.if_in_request.retain(|h| !h.eq_ignore_ascii_case(header));
+    }
+
+    pub fn remove_prefix(&mut self, prefix: &str) {
+        self.prefixes.retain(|p| !p.eq_ignore_ascii_case(prefix));
+    }
+}
+
+/// Indicates whether we are normalizing a URI path element or a query string element. This is used to create the
+/// correct error message.
+enum UriElement {
+    Path,
+    Query,
 }
 
 /// Convert a [HashMap] of query parameters to a string for the canonical request.
@@ -623,7 +745,9 @@ pub(crate) fn canonicalize_uri_path(uri_path: &str) -> Result<String, SignatureE
 }
 
 /// Formats HTTP headers in a HashMap suitable for debugging.
+#[cfg(debug)]
 fn debug_headers(headers: &HashMap<String, Vec<Vec<u8>>>) -> String {
+    use std::io::Write;
     let mut result = Vec::new();
     for (key, values) in headers.iter() {
         for value in values {
@@ -729,13 +853,6 @@ fn normalize_header_value(value: &[u8]) -> Vec<u8> {
     }
 
     result
-}
-
-/// Indicates whether we are normalizing a URI path element or a query string element. This is used to create the
-/// correct error message.
-enum UriElement {
-    Path,
-    Query,
 }
 
 /// Normalize a single element (key or value from key=value) of a query string.
@@ -916,9 +1033,6 @@ const fn trim_ascii(bytes: &[u8]) -> &[u8] {
     trim_ascii_end(trim_ascii_start(bytes))
 }
 
-const HEX_DIGITS_UPPER: [u8; 16] =
-    [b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', b'A', b'B', b'C', b'D', b'E', b'F'];
-
 /// Convert a byte to uppercase hex representation.
 #[inline]
 const fn u8_to_upper_hex(b: u8) -> [u8; 2] {
@@ -956,7 +1070,7 @@ mod tests {
         super::u8_to_upper_hex,
         crate::{
             canonical::{canonicalize_uri_path, normalize_uri_path_component, query_string_to_normalized_map},
-            CanonicalRequest, SignatureError,
+            CanonicalRequest, SignatureError, SignedHeaderRequirements,
         },
         bytes::Bytes,
         http::{
@@ -1001,7 +1115,14 @@ mod tests {
     fn canonicalize_invalid() {
         let e = expect_err!(canonicalize_uri_path("hello/world"), InvalidURIPath);
         assert_eq!(e.to_string(), "Path is not absolute: hello/world");
-        expect_err!(canonicalize_uri_path("/hello/../../world"), InvalidURIPath);
+        let e = canonicalize_uri_path("/hello/../../world").unwrap_err();
+        if let SignatureError::InvalidURIPath(_) = e {
+            assert_eq!(e.to_string(), "Relative path entry '..' navigates above root: /hello/../../world");
+            assert_eq!(e.error_code(), "InvalidURIPath");
+            assert_eq!(e.http_status(), 400);
+        } else {
+            panic!("Expected InvalidURIPath; got {:#?}", &e);
+        }
     }
 
     #[test_log::test]
@@ -1177,7 +1298,8 @@ mod tests {
         );
         assert_eq!(cr.body_sha256(), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
 
-        let params = cr.get_auth_parameters().unwrap();
+        let required_headers = SignedHeaderRequirements::empty();
+        let params = cr.get_auth_parameters(&required_headers).unwrap();
         // Ensure we can debug print the auth parameters.
         let _ = format!("{:?}", params);
         assert_eq!(params.signed_headers, vec!["date", "host"]);
@@ -1197,8 +1319,10 @@ mod tests {
         let (parts, body) = request.into_parts();
 
         let e = CanonicalRequest::from_request_parts(parts, body).unwrap_err();
-        if let SignatureError::InvalidBodyEncoding(msg) = e {
-            assert_eq!(msg.as_str(), "application/x-www-form-urlencoded body uses unsupported charset 'foobar'")
+        if let SignatureError::InvalidBodyEncoding(_) = e {
+            assert_eq!(e.to_string(), "application/x-www-form-urlencoded body uses unsupported charset 'foobar'");
+            assert_eq!(e.error_code(), "InvalidBodyEncoding");
+            assert_eq!(e.http_status(), 400);
         } else {
             panic!("Unexpected error: {:?}", e);
         }
@@ -1381,7 +1505,8 @@ mod tests {
             let (parts, body) = request.into_parts();
 
             let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
-            let e = cr.get_auth_parameters().unwrap_err();
+            let required_headers = SignedHeaderRequirements::empty();
+            let e = cr.get_auth_parameters(&required_headers).unwrap_err();
             if let SignatureError::IncompleteSignature(msg) = e {
                 let error_message = format!("{} Authorization=AWS4-HMAC-SHA256", error_messages.join(" "));
                 assert_eq!(msg.as_str(), error_message.as_str());
@@ -1405,7 +1530,8 @@ mod tests {
         let (parts, body) = request.into_parts();
 
         let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
-        let e = cr.get_auth_parameters().unwrap_err();
+        let required_headers = SignedHeaderRequirements::empty();
+        let e = cr.get_auth_parameters(&required_headers).unwrap_err();
         if let SignatureError::IncompleteSignature(msg) = e {
             assert_eq!(msg.as_str(), "'SignedHeadersdate;host' not a valid key=value pair (missing equal-sign) in Authorization header: 'AWS4-HMAC-SHA256 Credential=1234, SignedHeadersdate;host'");
         } else {
@@ -1455,7 +1581,8 @@ mod tests {
             let (parts, body) = request.into_parts();
 
             let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
-            let e = cr.get_auth_parameters().unwrap_err();
+            let required_headers = SignedHeaderRequirements::empty();
+            let e = cr.get_auth_parameters(&required_headers).unwrap_err();
             if let SignatureError::IncompleteSignature(msg) = e {
                 let error_message = format!("{} Re-examine the query-string parameters.", error_messages.join(" "));
                 assert_eq!(msg.as_str(), error_message.as_str());
@@ -1483,8 +1610,8 @@ mod tests {
         let (parts, body) = request.into_parts();
 
         let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
-
-        let auth = cr.get_auth_parameters().unwrap();
+        let required_headers = SignedHeaderRequirements::empty();
+        let auth = cr.get_auth_parameters(&required_headers).unwrap();
         // Expect last component found
         assert_eq!(auth.builder.get_credential(), &Some("ABCD".to_string()));
         assert_eq!(auth.builder.get_signature(), &Some("DEFG".to_string()));
@@ -1503,8 +1630,8 @@ mod tests {
         let (parts, body) = request.into_parts();
 
         let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
-
-        let auth = cr.get_auth_parameters().unwrap();
+        let required_headers = SignedHeaderRequirements::empty();
+        let auth = cr.get_auth_parameters(&required_headers).unwrap();
         // Expect first component found
         assert_eq!(auth.builder.get_credential(), &Some("1234".to_string()));
         assert_eq!(auth.builder.get_signature(), &Some("5678".to_string()));
@@ -1512,7 +1639,8 @@ mod tests {
         assert_eq!(auth.timestamp_str, "20150830T123600Z");
         assert_eq!(auth.signed_headers, vec!["date", "host"]);
 
-        let auth = cr.get_authenticator();
+        let required_headers = SignedHeaderRequirements::empty();
+        let auth = cr.get_authenticator(&required_headers);
         assert!(auth.is_ok());
     }
 
@@ -1531,7 +1659,8 @@ mod tests {
         let (parts, body) = request.into_parts();
 
         let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
-        let e = cr.get_auth_parameters().unwrap_err();
+        let required_headers = SignedHeaderRequirements::empty();
+        let e = cr.get_auth_parameters(&required_headers).unwrap_err();
         if let SignatureError::SignatureDoesNotMatch(msg) = e {
             let msg = msg.expect("Expected error message");
             assert_eq!(msg.as_str(), "'Host' or ':authority' must be a 'SignedHeader' in the AWS Authorization.");
@@ -1550,7 +1679,8 @@ mod tests {
         let (parts, body) = request.into_parts();
 
         let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
-        let e = cr.get_auth_parameters().unwrap_err();
+        let required_headers = SignedHeaderRequirements::empty();
+        let e = cr.get_auth_parameters(&required_headers).unwrap_err();
         if let SignatureError::SignatureDoesNotMatch(msg) = e {
             let msg = msg.expect("Expected error message");
             assert_eq!(msg.as_str(), "'Host' or ':authority' must be a 'SignedHeader' in the AWS Authorization.");
@@ -1577,7 +1707,8 @@ mod tests {
         let (parts, body) = request.into_parts();
 
         let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
-        let a = cr.get_auth_parameters().unwrap();
+        let required_headers = SignedHeaderRequirements::empty();
+        let a = cr.get_auth_parameters(&required_headers).unwrap();
         assert_eq!(a.signed_headers, vec!["a", "host", "x-amz-date"]);
         let cr_bytes = cr.canonical_request(&a.signed_headers);
         assert!(!cr_bytes.is_empty());
@@ -1599,7 +1730,8 @@ mod tests {
         let (parts, body) = request.into_parts();
 
         let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
-        let e = cr.get_auth_parameters().unwrap_err();
+        let required_headers = SignedHeaderRequirements::empty();
+        let e = cr.get_auth_parameters(&required_headers).unwrap_err();
         if let SignatureError::MissingAuthenticationToken(msg) = e {
             assert_eq!(msg.as_str(), "Request is missing Authentication Token");
         } else {
@@ -1620,9 +1752,11 @@ mod tests {
         let (parts, body) = request.into_parts();
 
         let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
-        let e = cr.get_auth_parameters().unwrap_err();
-        if let SignatureError::SignatureDoesNotMatch(msg) = e {
+        let required_headers = SignedHeaderRequirements::empty();
+        let e = cr.get_auth_parameters(&required_headers).unwrap_err();
+        if let SignatureError::SignatureDoesNotMatch(ref msg) = e {
             assert!(msg.is_none());
+            assert_eq!(e.to_string(), "");
         } else {
             panic!("Unexpected error: {:?}", e);
         }
@@ -1641,9 +1775,10 @@ mod tests {
         let (parts, body) = request.into_parts();
 
         let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
-        let e = cr.get_auth_parameters().unwrap_err();
+        let required_headers = SignedHeaderRequirements::empty();
+        let e = cr.get_auth_parameters(&required_headers).unwrap_err();
         if let SignatureError::IncompleteSignature(msg) = e {
-            assert_eq!(msg.as_str(), "Unsupported AWS 'algorithm': 'AWS3-HMAC-SHA256'");
+            assert_eq!(msg.as_str(), "Unsupported AWS 'algorithm': 'AWS3-HMAC-SHA256'.");
         } else {
             panic!("Unexpected error: {:?}", e);
         }
@@ -1661,7 +1796,8 @@ mod tests {
         let (parts, body) = request.into_parts();
 
         let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
-        let e = cr.get_auth_parameters().unwrap_err();
+        let required_headers = SignedHeaderRequirements::empty();
+        let e = cr.get_auth_parameters(&required_headers).unwrap_err();
         if let SignatureError::MissingAuthenticationToken(msg) = e {
             assert_eq!(msg.as_str(), "Request is missing Authentication Token");
         } else {
@@ -1669,4 +1805,3 @@ mod tests {
         }
     }
 }
-// end tests -- do not delete; needed for coverage.
