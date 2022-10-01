@@ -1,0 +1,11 @@
+kw1="Authorization"
+kw2="AWS4-HMAC-SHA256"
+kw3="Credential"
+kw4="Signature"
+kw5="SignedHeaders"
+kw6="x-amz-date"
+kw7="x-amz-security-token"
+kw8="x-amz-content-sha256"
+kw9="x-amz-target"
+kw10="host"
+
