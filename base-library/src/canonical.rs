@@ -11,6 +11,7 @@ use {
         uri::Uri,
     },
     lazy_static::lazy_static,
+    log::trace,
     regex::Regex,
     ring::digest::{digest, SHA256, SHA256_OUTPUT_LEN},
     std::{collections::HashMap, str::from_utf8},
@@ -181,7 +182,10 @@ impl CanonicalRequest {
                             )))
                         }
                     },
-                    None => UTF_8,
+                    None => {
+                        trace!("Falling back to UTF-8 for application/x-www-form-urlencoded body");
+                        UTF_8
+                    }
                 };
 
                 let body_query = match encoding.decode(&body, DecoderTrap::Strict) {
@@ -578,7 +582,6 @@ impl CanonicalRequest {
 }
 
 /// The Content-Type header value, along with the character set (if specified).
-#[derive(Debug)]
 struct ContentTypeCharset {
     content_type: String,
     charset: Option<String>,
@@ -1069,7 +1072,10 @@ mod tests {
     use {
         super::u8_to_upper_hex,
         crate::{
-            canonical::{canonicalize_uri_path, normalize_uri_path_component, query_string_to_normalized_map},
+            canonical::{
+                canonicalize_uri_path, normalize_uri_path_component, query_string_to_normalized_map,
+                unescape_uri_encoding,
+            },
             CanonicalRequest, SignatureError, SignedHeaderRequirements,
         },
         bytes::Bytes,
@@ -1078,6 +1084,7 @@ mod tests {
             request::Request,
             uri::{PathAndQuery, Uri},
         },
+        scratchstack_errors::ServiceError,
         std::mem::transmute,
     };
 
@@ -1401,6 +1408,23 @@ mod tests {
     }
 
     #[test_log::test]
+    fn test_bad_form_charset_param() {
+        let uri = Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap();
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(uri)
+            .header("content-type", "application/x-www-form-urlencoded; charset")
+            .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
+            .header("x-amz-date", "20150830T123600Z")
+            .body(Bytes::from(b"foo=bar".to_vec()))
+            .unwrap();
+        let (parts, body) = request.into_parts();
+
+        let (_, _, body) = CanonicalRequest::from_request_parts(parts, body).unwrap();
+        assert_eq!(body.as_ref(), b"");
+    }
+
+    #[test_log::test]
     fn test_bad_form_urlencoding() {
         let uri = Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap();
         let request = Request::builder()
@@ -1660,6 +1684,9 @@ mod tests {
 
         let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
         let required_headers = SignedHeaderRequirements::empty();
+        let required_headers2 = required_headers.clone();
+        assert_eq!(&required_headers, &required_headers2);
+        assert_eq!(format!("{:?}", required_headers), format!("{:?}", required_headers2));
         let e = cr.get_auth_parameters(&required_headers).unwrap_err();
         if let SignatureError::SignatureDoesNotMatch(msg) = e {
             let msg = msg.expect("Expected error message");
@@ -1803,5 +1830,11 @@ mod tests {
         } else {
             panic!("Unexpected error: {:?}", e);
         }
+    }
+
+    #[test_log::test]
+    #[should_panic]
+    fn unescape_uri_encoding_invalid_panics() {
+        unescape_uri_encoding("%YY");
     }
 }

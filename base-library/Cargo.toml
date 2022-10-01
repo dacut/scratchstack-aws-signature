@@ -30,6 +30,7 @@ regex = "^1.6"
 ring = "^0.16"
 scratchstack-arn = { git = "https://github.com/dacut/scratchstack-core", branch = "main" }
 scratchstack-aws-principal = { git = "https://github.com/dacut/scratchstack-core", branch = "main" }
+scratchstack-errors = { git = "https://github.com/dacut/scratchstack-core", branch = "main" }
 subtle = "^2.4"
 tower = { version = "^0.4", features = [ "util" ] }
 

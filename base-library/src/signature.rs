@@ -92,6 +92,7 @@ mod tests {
         hyper::body::Body as HyperBody,
         lazy_static::lazy_static,
         scratchstack_aws_principal::{Principal, User},
+        scratchstack_errors::ServiceError,
         std::{convert::Infallible, mem::transmute},
         tower::BoxError,
     };

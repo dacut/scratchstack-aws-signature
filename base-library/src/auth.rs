@@ -204,7 +204,7 @@ impl SigV4Authenticator {
             service: service.to_string(),
         };
 
-        match get_signing_key.ready().await?.call(req).await {
+        match get_signing_key.oneshot(req).await {
             Ok(key) => Ok(key),
             Err(e) => match e.downcast::<SignatureError>() {
                 Ok(sig_err) => Err(*sig_err),
@@ -299,6 +299,7 @@ mod tests {
         log::LevelFilter,
         ring::digest::SHA256_OUTPUT_LEN,
         scratchstack_aws_principal::{Principal, User},
+        scratchstack_errors::ServiceError,
         std::{error::Error, fs::File},
         tower::BoxError,
     };

@@ -1,5 +1,6 @@
 use {
     http::status::StatusCode,
+    scratchstack_errors::ServiceError,
     std::{
         error::Error,
         fmt::{Display, Formatter, Result as FmtResult},
@@ -83,7 +84,7 @@ pub enum SignatureError {
 }
 
 impl SignatureError {
-    pub fn error_code(&self) -> &'static str {
+    fn error_code(&self) -> &'static str {
         match self {
             Self::ExpiredToken(_) => ERR_CODE_EXPIRED_TOKEN,
             Self::IO(_) | Self::InternalServiceError(_) => ERR_CODE_INTERNAL_FAILURE,
@@ -97,7 +98,7 @@ impl SignatureError {
         }
     }
 
-    pub fn http_status(&self) -> StatusCode {
+    fn http_status(&self) -> StatusCode {
         match self {
             Self::IncompleteSignature(_)
             | Self::InvalidBodyEncoding(_)
@@ -107,6 +108,16 @@ impl SignatureError {
             Self::IO(_) | Self::InternalServiceError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             _ => StatusCode::FORBIDDEN,
         }
+    }
+}
+
+impl ServiceError for SignatureError {
+    fn error_code(&self) -> &'static str {
+        SignatureError::error_code(self)
+    }
+
+    fn http_status(&self) -> StatusCode {
+        SignatureError::http_status(self)
     }
 }
 
