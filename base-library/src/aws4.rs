@@ -13,7 +13,7 @@ use {
         version::Version as HttpVersion,
     },
     log::debug,
-    scratchstack_aws_principal::{Principal, User},
+    scratchstack_aws_principal::{Principal, SessionData, User},
     std::{
         env,
         fs::File,
@@ -285,6 +285,7 @@ async fn get_signing_key(request: GetSigningKeyRequest) -> Result<GetSigningKeyR
 
     let response = GetSigningKeyResponse {
         principal,
+        session_data: SessionData::default(),
         signing_key: k_signing,
     };
     Ok(response)

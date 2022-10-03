@@ -243,7 +243,7 @@ mod tests {
         rusoto_core::{DispatchSignedRequest, HttpClient, Region},
         rusoto_credential::AwsCredentials,
         rusoto_signature::SignedRequest,
-        scratchstack_aws_principal::{Principal, User},
+        scratchstack_aws_principal::{Principal, SessionData, User},
         scratchstack_aws_signature::{
             service_for_signing_key_fn, GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, SignatureError,
             SignedHeaderRequirements,
@@ -478,6 +478,7 @@ mod tests {
             let principal = Principal::from(vec![User::new("aws", "123456789012", "/", "test").unwrap().into()]);
             Ok(GetSigningKeyResponse {
                 principal,
+                session_data: SessionData::default(),
                 signing_key: k_signing,
             })
         } else {
@@ -543,6 +544,7 @@ mod tests {
                 let principal = Principal::from(vec![User::new("aws", "123456789012", "/", "test").unwrap().into()]);
                 Ok(GetSigningKeyResponse {
                     principal,
+                    session_data: SessionData::default(),
                     signing_key,
                 })
             } else {

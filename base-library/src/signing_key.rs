@@ -2,7 +2,7 @@ use {
     crate::crypto::hmac_sha256,
     chrono::{Date, Utc},
     ring::digest::SHA256_OUTPUT_LEN,
-    scratchstack_aws_principal::Principal,
+    scratchstack_aws_principal::{Principal, SessionData},
     std::{
         fmt::{Debug, Display, Formatter, Result as FmtResult},
         future::Future,
@@ -244,8 +244,9 @@ pub struct GetSigningKeyRequest {
 /// A response from the signing key provider.
 #[derive(Clone, Debug)]
 pub struct GetSigningKeyResponse {
-    pub signing_key: KSigningKey,
     pub principal: Principal,
+    pub session_data: SessionData,
+    pub signing_key: KSigningKey,
 }
 
 impl Default for GetSigningKeyResponse {
@@ -254,6 +255,7 @@ impl Default for GetSigningKeyResponse {
             signing_key: KSigningKey {
                 key: [0; SHA256_OUTPUT_LEN],
             },
+            session_data: SessionData::default(),
             principal: Principal::new(vec![]),
         }
     }
@@ -283,7 +285,7 @@ mod tests {
     use {
         crate::{GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey},
         chrono::{Date, NaiveDate, Utc},
-        scratchstack_aws_principal::{AssumedRole, Principal},
+        scratchstack_aws_principal::{AssumedRole, Principal, SessionData},
     };
 
     #[test_log::test]
@@ -408,6 +410,7 @@ mod tests {
                 "us-east-1",
                 "example",
             ),
+            session_data: SessionData::default(),
             principal: Principal::new(vec![AssumedRole::new("aws", "123456789012", "role", "session").unwrap().into()]),
         };
 

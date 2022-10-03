@@ -91,7 +91,7 @@ mod tests {
         },
         hyper::body::Body as HyperBody,
         lazy_static::lazy_static,
-        scratchstack_aws_principal::{Principal, User},
+        scratchstack_aws_principal::{Principal, SessionData, User},
         scratchstack_errors::ServiceError,
         std::{convert::Infallible, mem::transmute},
         tower::BoxError,
@@ -142,6 +142,7 @@ mod tests {
         let principal = Principal::from(vec![User::new("aws", "123456789012", "/", "test").unwrap().into()]);
         Ok(GetSigningKeyResponse {
             principal,
+            session_data: SessionData::default(),
             signing_key: k_sigining,
         })
     }

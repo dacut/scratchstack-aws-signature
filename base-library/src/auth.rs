@@ -298,7 +298,7 @@ mod tests {
         chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc},
         log::LevelFilter,
         ring::digest::SHA256_OUTPUT_LEN,
-        scratchstack_aws_principal::{Principal, User},
+        scratchstack_aws_principal::{Principal, SessionData, User},
         scratchstack_errors::ServiceError,
         std::{error::Error, fs::File},
         tower::BoxError,
@@ -388,6 +388,7 @@ mod tests {
 
                 let response = GetSigningKeyResponse {
                     principal,
+                    session_data: SessionData::default(),
                     signing_key: k_signing,
                 };
                 Ok(response)
