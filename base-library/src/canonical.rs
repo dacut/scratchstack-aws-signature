@@ -14,7 +14,7 @@ use {
     log::trace,
     regex::Regex,
     ring::digest::{digest, SHA256, SHA256_OUTPUT_LEN},
-    std::{collections::HashMap, str::from_utf8},
+    std::{fmt::{Debug, Formatter, Result as FmtResult}, collections::HashMap, str::from_utf8},
 };
 
 /// Content-Type string for HTML forms
@@ -140,7 +140,6 @@ pub(crate) struct AuthParams {
 }
 
 /// A canonicalized request for AWS SigV4.
-#[derive(Debug)]
 pub struct CanonicalRequest {
     /// The HTTP method for the request (e.g., "GET", "POST", etc.)
     request_method: String,
@@ -585,6 +584,20 @@ impl CanonicalRequest {
     }
 }
 
+impl Debug for CanonicalRequest {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        let headers = debug_headers(&self.headers);
+
+        f.debug_struct("CanonicalRequest")
+            .field("request_method", &self.request_method)
+            .field("canonical_path", &self.canonical_path)
+            .field("query_parameters", &self.query_parameters)
+            .field("headers", &headers)
+            .field("body_sha256", &self.body_sha256)
+            .finish()
+    }
+}
+
 /// The Content-Type header value, along with the character set (if specified).
 struct ContentTypeCharset {
     content_type: String,
@@ -752,7 +765,6 @@ pub(crate) fn canonicalize_uri_path(uri_path: &str) -> Result<String, SignatureE
 }
 
 /// Formats HTTP headers in a HashMap suitable for debugging.
-#[cfg(debug)]
 fn debug_headers(headers: &HashMap<String, Vec<Vec<u8>>>) -> String {
     use std::io::Write;
     let mut result = Vec::new();
