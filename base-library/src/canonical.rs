@@ -301,6 +301,8 @@ impl CanonicalRequest {
         result.push(b'\n');
         result.extend(self.body_sha256.as_bytes());
 
+        trace!("Canonical request:\n{}", String::from_utf8_lossy(&result));
+
         result
     }
 
