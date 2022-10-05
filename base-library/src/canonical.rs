@@ -172,6 +172,8 @@ impl CanonicalRequest {
         // Treat requests with application/x-www-form-urlencoded bodies as if they were passed into the query string.
         if let Some(content_type) = content_type {
             if content_type.content_type == APPLICATION_X_WWW_FORM_URLENCODED {
+                trace!("Body is application/x-www-form-urlencoded; converting to query parameters");
+
                 let encoding = match &content_type.charset {
                     Some(charset) => match encoding_from_whatwg_label(charset.as_str()) {
                         Some(encoding) => encoding,
@@ -201,6 +203,8 @@ impl CanonicalRequest {
                 query_parameters.extend(query_string_to_normalized_map(body_query.as_str())?.into_iter());
                 // Rebuild the parts URI with the new query string.
                 let qs = canonicalize_query_to_string(&query_parameters);
+                trace!("Rebuilding URI with new query string: {}", qs);
+
                 let mut pq = canonical_path.clone();
                 if !qs.is_empty() {
                     pq.push('?');

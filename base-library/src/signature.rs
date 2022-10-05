@@ -6,6 +6,7 @@ use {
     futures::stream::StreamExt,
     http::request::{Parts, Request},
     hyper::body::Body as HyperBody,
+    log::trace,
     scratchstack_aws_principal::Principal,
     std::{error::Error, future::Future},
     tower::{BoxError, Service},
@@ -30,7 +31,9 @@ where
     let (parts, body) = request.into_parts();
     let body = body.into_request_bytes().await?;
     let (canonical_request, parts, body) = CanonicalRequest::from_request_parts(parts, body)?;
+    trace!("Created canonical request: {:?}", canonical_request);
     let auth = canonical_request.get_authenticator(required_headers)?;
+    trace!("Created authenticator: {:?}", auth);
     let principal = auth
         .validate_signature(
             region,

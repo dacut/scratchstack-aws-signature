@@ -12,7 +12,7 @@ use {
     crate::{crypto::hmac_sha256, GetSigningKeyRequest, GetSigningKeyResponse, SignatureError},
     chrono::{DateTime, Duration, Utc},
     derive_builder::Builder,
-    log::trace,
+    log::{trace, debug},
     ring::digest::SHA256_OUTPUT_LEN,
     scratchstack_aws_principal::Principal,
     std::future::Future,
@@ -119,6 +119,7 @@ impl SigV4Authenticator {
 
         // Rule 10: Make sure date isn't expired...
         if req_ts < min_ts {
+            trace!("prevalidate: request timestamp {} is before minimum timestamp {}", req_ts, min_ts);
             return Err(SignatureError::SignatureDoesNotMatch(Some(format!(
                 "Signature expired: {} is now earlier than {} ({} - {}.)",
                 req_ts.format(ISO8601_COMPACT_FORMAT),
@@ -130,6 +131,7 @@ impl SigV4Authenticator {
 
         // Rule 11: ... or too far into the future.
         if req_ts > max_ts {
+            trace!("prevalidate: request timestamp {} is after maximum timestamp {}", req_ts, max_ts);
             return Err(SignatureError::SignatureDoesNotMatch(Some(format!(
                 "Signature not yet current: {} is still later than {} ({} + {}.)",
                 req_ts.format(ISO8601_COMPACT_FORMAT),
@@ -142,6 +144,7 @@ impl SigV4Authenticator {
         // Rule 12: Credential scope must have exactly five elements.
         let credential_parts = self.credential.split('/').collect::<Vec<&str>>();
         if credential_parts.len() != 5 {
+            trace!("prevalidate: credential has {} parts, expected 5", credential_parts.len());
             return Err(SignatureError::IncompleteSignature(format!(
                 "{} got '{}'",
                 MSG_CREDENTIAL_MUST_HAVE_FIVE_PARTS, self.credential
@@ -156,14 +159,17 @@ impl SigV4Authenticator {
         // Rule 13: Credential scope must be correct for the region/service/date.
         let mut cscope_errors = Vec::new();
         if cscope_region != region {
+            trace!("prevalidate: credential region '{}' does not match expected region '{}'", cscope_region, region);
             cscope_errors.push(format!("Credential should be scoped to a valid region, not '{}'.", cscope_region));
         }
 
         if cscope_service != service {
+            trace!("prevalidate: credential service '{}' does not match expected service '{}'", cscope_service, service);
             cscope_errors.push(format!("Credential should be scoped to correct service: '{}'.", service));
         }
 
         if cscope_term != AWS4_REQUEST {
+            trace!("prevalidate: credential terminator '{}' does not match expected terminator '{}'", cscope_term, AWS4_REQUEST);
             cscope_errors.push(format!(
                 "Credential should be scoped with a valid terminator: 'aws4_request', not '{}'.",
                 cscope_term
@@ -172,6 +178,7 @@ impl SigV4Authenticator {
 
         let expected_cscope_date = req_ts.format("%Y%m%d").to_string();
         if cscope_date != expected_cscope_date {
+            trace!("prevalidate: credential date '{}' does not match expected date '{}'", cscope_date, expected_cscope_date);
             cscope_errors.push(format!("Date in Credential scope does not match YYYYMMDD from ISO-8601 version of date from HTTP: '{}' != '{}', from '{}'.", cscope_date, expected_cscope_date, req_ts.format(ISO8601_COMPACT_FORMAT)));
         }
 
@@ -205,11 +212,17 @@ impl SigV4Authenticator {
         };
 
         match get_signing_key.oneshot(req).await {
-            Ok(key) => Ok(key),
-            Err(e) => match e.downcast::<SignatureError>() {
-                Ok(sig_err) => Err(*sig_err),
-                Err(e) => Err(SignatureError::InternalServiceError(e)),
-            },
+            Ok(key) => {
+                trace!("get_signing_key: got signing key");
+                Ok(key)
+            }
+            Err(e) => {
+                debug!("get_signing_key: error getting signing key: {}", e);
+                match e.downcast::<SignatureError>() {
+                    Ok(sig_err) => Err(*sig_err),
+                    Err(e) => Err(SignatureError::InternalServiceError(e)),
+                }
+            }
         }
     }
 
