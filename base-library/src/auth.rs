@@ -15,7 +15,7 @@ use {
     log::{trace, debug},
     ring::digest::SHA256_OUTPUT_LEN,
     scratchstack_aws_principal::Principal,
-    std::future::Future,
+    std::{fmt::{Debug, Formatter, Result as FmtResult}, future::Future},
     subtle::ConstantTimeEq,
     tower::{BoxError, Service, ServiceExt},
 };
@@ -46,7 +46,7 @@ const SHA256_EMPTY: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495
 const SHA256_HEX_LENGTH: usize = SHA256_EMPTY.len();
 
 /// Low-level structure for performing AWS SigV4 authentication after a canonical request has been generated.
-#[derive(Builder, Clone, Debug, Default)]
+#[derive(Builder, Clone, Default)]
 #[builder(derive(Debug))]
 pub struct SigV4Authenticator {
     /// The SHA-256 hash of the canonical request.
@@ -273,6 +273,17 @@ impl SigV4Authenticator {
         } else {
             Ok(response.principal)
         }
+    }
+}
+
+impl Debug for SigV4Authenticator {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        f.debug_struct("SigV4Authenticator")
+            .field("canonical_request_sha256", &hex::encode(&self.canonical_request_sha256))
+            .field("session_token", &self.session_token)
+            .field("signature", &self.signature)
+            .field("request_timestamp", &self.request_timestamp)
+            .finish()
     }
 }
 
