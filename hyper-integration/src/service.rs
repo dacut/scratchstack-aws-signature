@@ -36,6 +36,7 @@ where
     pub get_signing_key: G,
     pub implementation: S,
     pub error_handler: E,
+    pub signature_options: SignatureOptions,
 }
 
 impl<G, S, E> AwsSigV4VerifierService<G, S, E>
@@ -53,6 +54,7 @@ where
         get_signing_key: G,
         implementation: S,
         error_handler: E,
+        signature_options: SignatureOptions,
     ) -> Self {
         AwsSigV4VerifierService {
             region: region.to_string(),
@@ -61,6 +63,7 @@ where
             get_signing_key,
             implementation,
             error_handler,
+            signature_options,
         }
     }
 }
@@ -80,6 +83,7 @@ where
             .field("get_signing_key", &type_name::<G>())
             .field("implementation", &type_name::<S>())
             .field("error_handler", &type_name::<E>())
+            .field("signature_options", &self.signature_options)
             .finish()
     }
 }
@@ -119,6 +123,7 @@ where
         let get_signing_key = self.get_signing_key.clone();
         let implementation = self.implementation.clone();
         let error_handler = self.error_handler.clone();
+        let signature_options = self.signature_options;
 
         Box::pin(handle_call(
             req,
@@ -128,10 +133,12 @@ where
             get_signing_key,
             implementation,
             error_handler,
+            signature_options,
         ))
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_call<G, S, E>(
     req: Request<Body>,
     region: String,
@@ -140,6 +147,7 @@ async fn handle_call<G, S, E>(
     mut get_signing_key: G,
     implementation: S,
     error_handler: E,
+    signature_options: SignatureOptions,
 ) -> Result<Response<Body>, BoxError>
 where
     G: Service<GetSigningKeyRequest, Response = GetSigningKeyResponse, Error = BoxError> + Clone + Send + 'static,
@@ -155,7 +163,7 @@ where
         &mut get_signing_key,
         Utc::now(),
         &signed_header_requirements,
-        SignatureOptions::url_encode_form(),
+        signature_options,
     )
     .await;
 
@@ -248,7 +256,7 @@ mod tests {
         scratchstack_aws_principal::{Principal, SessionData, User},
         scratchstack_aws_signature::{
             service_for_signing_key_fn, GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, SignatureError,
-            SignedHeaderRequirements,
+            SignatureOptions, SignedHeaderRequirements,
         },
         std::{
             convert::Infallible,
@@ -277,6 +285,7 @@ mod tests {
                 sigfn,
                 wrapped,
                 err_handler,
+                SignatureOptions::default(),
             );
             // Make sure we can debug print the verifier service.
             let _ = format!("{:?}", verifier_svc);
@@ -514,6 +523,7 @@ mod tests {
                     GetDummyCreds {},
                     HelloService {},
                     XmlErrorMapper::new("https://sts.amazonaws.com/doc/2011-06-15/"),
+                    SignatureOptions::default(),
                 ))
             })
         }
@@ -626,6 +636,7 @@ mod tests {
                     },
                     HelloService {},
                     XmlErrorMapper::new("service-ns"),
+                    SignatureOptions::default(),
                 ))
             })
         }
