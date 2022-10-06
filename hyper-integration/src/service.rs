@@ -5,7 +5,8 @@ use {
     hyper::{body::Body, Request, Response},
     quick_xml::{events::BytesText, writer::Writer as XmlWriter},
     scratchstack_aws_signature::{
-        sigv4_validate_request, GetSigningKeyRequest, GetSigningKeyResponse, SignatureError, SignedHeaderRequirements,
+        sigv4_validate_request, GetSigningKeyRequest, GetSigningKeyResponse, SignatureError, SignatureOptions,
+        SignedHeaderRequirements,
     },
     scratchstack_errors::ServiceError,
     std::{
@@ -154,6 +155,7 @@ where
         &mut get_signing_key,
         Utc::now(),
         &signed_header_requirements,
+        SignatureOptions::url_encode_form(),
     )
     .await;
 

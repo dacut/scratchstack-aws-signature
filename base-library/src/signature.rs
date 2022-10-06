@@ -12,6 +12,52 @@ use {
     tower::{BoxError, Service},
 };
 
+/// Options that can be used to configure the signature service.
+#[derive(Clone, Copy, Debug)]
+pub struct SignatureOptions {
+    /// Canonicalize requests according to S3 rules.
+    pub s3: bool,
+
+    /// Fold `application/x-www-form-urlencoded` bodies into the query string.
+    pub url_encode_form: bool,
+}
+
+impl SignatureOptions {
+    #[inline]
+    pub fn default() -> Self {
+        Self {
+            s3: false,
+            url_encode_form: false,
+        }
+    }
+
+    #[inline]
+    pub fn url_encode_form() -> Self {
+        Self {
+            s3: false,
+            url_encode_form: true,
+        }
+    }
+
+    #[inline]
+    pub fn s3() -> Self {
+        Self {
+            s3: true,
+            url_encode_form: false,
+        }
+    }
+}
+
+impl Default for SignatureOptions {
+    #[inline]
+    fn default() -> Self {
+        Self {
+            s3: false,
+            url_encode_form: false,
+        }
+    }
+}
+
 /// Default allowed timestamp mismatch in minutes.
 const ALLOWED_MISMATCH_MINUTES: i64 = 15;
 
@@ -22,6 +68,7 @@ pub async fn sigv4_validate_request<B, S, F>(
     get_signing_key: &mut S,
     server_timestamp: DateTime<Utc>,
     required_headers: &SignedHeaderRequirements,
+    options: SignatureOptions,
 ) -> Result<(Parts, Bytes, Principal), BoxError>
 where
     B: IntoRequestBytes,
@@ -30,7 +77,7 @@ where
 {
     let (parts, body) = request.into_parts();
     let body = body.into_request_bytes().await?;
-    let (canonical_request, parts, body) = CanonicalRequest::from_request_parts(parts, body)?;
+    let (canonical_request, parts, body) = CanonicalRequest::from_request_parts(parts, body, options)?;
     trace!("Created canonical request: {:?}", canonical_request);
     let auth = canonical_request.get_authenticator(required_headers)?;
     trace!("Created authenticator: {:?}", auth);
@@ -83,7 +130,7 @@ mod tests {
     use {
         crate::{
             service_for_signing_key_fn, sigv4_validate_request, GetSigningKeyRequest, GetSigningKeyResponse,
-            KSecretKey, SignatureError, SignedHeaderRequirements,
+            KSecretKey, SignatureError, SignatureOptions, SignedHeaderRequirements,
         },
         bytes::Bytes,
         chrono::{DateTime, NaiveDate, Utc},
@@ -169,6 +216,7 @@ mod tests {
             &mut get_signing_key_svc,
             *TEST_TIMESTAMP,
             &required_headers,
+            SignatureOptions::url_encode_form(),
         )
         .await
     }
@@ -200,7 +248,8 @@ mod tests {
                 TEST_SERVICE,
                 &mut gsk_service,
                 *TEST_TIMESTAMP,
-                &required_headers
+                &required_headers,
+                SignatureOptions::url_encode_form()
             )
             .await,
             IncompleteSignature
@@ -230,7 +279,8 @@ mod tests {
                 TEST_SERVICE,
                 &mut gsk_service,
                 *TEST_TIMESTAMP,
-                &required_headers
+                &required_headers,
+                SignatureOptions::url_encode_form()
             )
             .await,
             IncompleteSignature
@@ -321,6 +371,7 @@ mod tests {
                 &mut get_signing_key_svc.clone(),
                 *TEST_TIMESTAMP,
                 &required_headers,
+                SignatureOptions::url_encode_form(),
             )
             .await;
 
@@ -484,6 +535,7 @@ mod tests {
                 &mut get_signing_key_svc.clone(),
                 *TEST_TIMESTAMP,
                 &required_headers,
+                SignatureOptions::url_encode_form(),
             )
             .await;
 

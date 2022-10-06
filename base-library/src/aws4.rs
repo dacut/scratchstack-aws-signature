@@ -1,7 +1,7 @@
 use {
     crate::{
         service_for_signing_key_fn, sigv4_validate_request, CanonicalRequest, GetSigningKeyRequest,
-        GetSigningKeyResponse, KSecretKey, SignedHeaderRequirements,
+        GetSigningKeyResponse, KSecretKey, SignatureOptions, SignedHeaderRequirements,
     },
     bytes::{Bytes, BytesMut},
     chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc},
@@ -211,7 +211,9 @@ async fn run(basename: &str) {
     let sreq = File::open(&sreq_path).expect(&format!("Failed to open {:?}", sreq_path));
     let request = parse_file(sreq, &sreq_path);
     let (parts, body) = request.into_parts();
-    let (canonical, parts, body) = CanonicalRequest::from_request_parts(parts, body).expect("Failed to parse request");
+    let (canonical, parts, body) =
+        CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form())
+            .expect("Failed to parse request");
 
     // The canonical request calculated by AWS for verification.
     let mut creq_path = PathBuf::new();
@@ -273,9 +275,17 @@ async fn run(basename: &str) {
     debug!("body: {:?}", body);
     let request = Request::from_parts(parts, body);
     let required_headers = SignedHeaderRequirements::empty();
-    sigv4_validate_request(request, TEST_REGION, TEST_SERVICE, &mut signing_key_svc, test_time, &required_headers)
-        .await
-        .expect(&format!("Failed to validate request: {:?}", sreq_path));
+    sigv4_validate_request(
+        request,
+        TEST_REGION,
+        TEST_SERVICE,
+        &mut signing_key_svc,
+        test_time,
+        &required_headers,
+        SignatureOptions::url_encode_form(),
+    )
+    .await
+    .expect(&format!("Failed to validate request: {:?}", sreq_path));
 }
 
 async fn get_signing_key(request: GetSigningKeyRequest) -> Result<GetSigningKeyResponse, BoxError> {

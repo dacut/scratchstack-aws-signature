@@ -27,7 +27,7 @@ pub use {
     auth::{SigV4Authenticator, SigV4AuthenticatorBuilder},
     canonical::{CanonicalRequest, SignedHeaderRequirements},
     error::SignatureError,
-    signature::sigv4_validate_request,
+    signature::{sigv4_validate_request, SignatureOptions},
     signing_key::{
         service_for_signing_key_fn, GetSigningKeyRequest, GetSigningKeyResponse, KDateKey, KRegionKey, KSecretKey,
         KServiceKey, KSigningKey,

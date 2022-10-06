@@ -1,6 +1,7 @@
 use {
     crate::{
         chronoutil::ParseISO8601, crypto::sha256_hex, SigV4Authenticator, SigV4AuthenticatorBuilder, SignatureError,
+        SignatureOptions,
     },
     bytes::Bytes,
     chrono::{offset::FixedOffset, DateTime, Utc},
@@ -14,7 +15,11 @@ use {
     log::trace,
     regex::Regex,
     ring::digest::{digest, SHA256, SHA256_OUTPUT_LEN},
-    std::{fmt::{Debug, Formatter, Result as FmtResult}, collections::HashMap, str::from_utf8},
+    std::{
+        collections::HashMap,
+        fmt::{Debug, Formatter, Result as FmtResult},
+        str::from_utf8,
+    },
 };
 
 /// Content-Type string for HTML forms
@@ -163,56 +168,62 @@ pub struct CanonicalRequest {
 
 impl CanonicalRequest {
     /// Create a CanonicalRequest from an HTTP request [Parts] and a body of [Bytes].
-    pub fn from_request_parts(mut parts: Parts, mut body: Bytes) -> Result<(Self, Parts, Bytes), SignatureError> {
+    pub fn from_request_parts(
+        mut parts: Parts,
+        mut body: Bytes,
+        options: SignatureOptions,
+    ) -> Result<(Self, Parts, Bytes), SignatureError> {
         let canonical_path = canonicalize_uri_path(&parts.uri.path())?;
         let content_type = get_content_type_and_charset(&parts.headers);
         let mut query_parameters = query_string_to_normalized_map(&parts.uri.query().unwrap_or(""))?;
 
-        // Treat requests with application/x-www-form-urlencoded bodies as if they were passed into the query string.
-        if let Some(content_type) = content_type {
-            if content_type.content_type == APPLICATION_X_WWW_FORM_URLENCODED {
-                trace!("Body is application/x-www-form-urlencoded; converting to query parameters");
+        if options.url_encode_form {
+            // Treat requests with application/x-www-form-urlencoded bodies as if they were passed into the query string.
+            if let Some(content_type) = content_type {
+                if content_type.content_type == APPLICATION_X_WWW_FORM_URLENCODED {
+                    trace!("Body is application/x-www-form-urlencoded; converting to query parameters");
 
-                let encoding = match &content_type.charset {
-                    Some(charset) => match encoding_from_whatwg_label(charset.as_str()) {
-                        Some(encoding) => encoding,
+                    let encoding = match &content_type.charset {
+                        Some(charset) => match encoding_from_whatwg_label(charset.as_str()) {
+                            Some(encoding) => encoding,
+                            None => {
+                                return Err(SignatureError::InvalidBodyEncoding(format!(
+                                    "application/x-www-form-urlencoded body uses unsupported charset '{}'",
+                                    charset
+                                )))
+                            }
+                        },
                         None => {
-                            return Err(SignatureError::InvalidBodyEncoding(format!(
-                                "application/x-www-form-urlencoded body uses unsupported charset '{}'",
-                                charset
-                            )))
+                            trace!("Falling back to UTF-8 for application/x-www-form-urlencoded body");
+                            UTF_8
                         }
-                    },
-                    None => {
-                        trace!("Falling back to UTF-8 for application/x-www-form-urlencoded body");
-                        UTF_8
-                    }
-                };
+                    };
 
-                let body_query = match encoding.decode(&body, DecoderTrap::Strict) {
-                    Ok(body) => body,
-                    Err(_) => {
-                        return Err(SignatureError::InvalidBodyEncoding(format!(
+                    let body_query = match encoding.decode(&body, DecoderTrap::Strict) {
+                        Ok(body) => body,
+                        Err(_) => {
+                            return Err(SignatureError::InvalidBodyEncoding(format!(
                             "Invalid body data encountered parsing application/x-www-form-urlencoded with charset '{}'",
                             encoding.whatwg_name().unwrap_or(encoding.name())
                         )))
+                        }
+                    };
+
+                    query_parameters.extend(query_string_to_normalized_map(body_query.as_str())?.into_iter());
+                    // Rebuild the parts URI with the new query string.
+                    let qs = canonicalize_query_to_string(&query_parameters);
+                    trace!("Rebuilding URI with new query string: {}", qs);
+
+                    let mut pq = canonical_path.clone();
+                    if !qs.is_empty() {
+                        pq.push('?');
+                        pq.push_str(&qs);
                     }
-                };
 
-                query_parameters.extend(query_string_to_normalized_map(body_query.as_str())?.into_iter());
-                // Rebuild the parts URI with the new query string.
-                let qs = canonicalize_query_to_string(&query_parameters);
-                trace!("Rebuilding URI with new query string: {}", qs);
-
-                let mut pq = canonical_path.clone();
-                if !qs.is_empty() {
-                    pq.push('?');
-                    pq.push_str(&qs);
+                    parts.uri =
+                        Uri::builder().path_and_query(pq).build().expect("failed to rebuild URI with new query string");
+                    body = Bytes::from("");
                 }
-
-                parts.uri =
-                    Uri::builder().path_and_query(pq).build().expect("failed to rebuild URI with new query string");
-                body = Bytes::from("");
             }
         }
 
@@ -1094,7 +1105,7 @@ mod tests {
                 canonicalize_uri_path, normalize_uri_path_component, query_string_to_normalized_map,
                 unescape_uri_encoding,
             },
-            CanonicalRequest, SignatureError, SignedHeaderRequirements,
+            CanonicalRequest, SignatureError, SignatureOptions, SignedHeaderRequirements,
         },
         bytes::Bytes,
         http::{
@@ -1235,7 +1246,7 @@ mod tests {
                 .unwrap();
             let (parts, body) = request.into_parts();
 
-            let e = CanonicalRequest::from_request_parts(parts, body).unwrap_err();
+            let e = CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap_err();
             if let SignatureError::InvalidURIPath(msg) = e {
                 assert_eq!(msg.as_str(), error_message);
             }
@@ -1275,7 +1286,7 @@ mod tests {
                 .unwrap();
             let (parts, body) = request.into_parts();
 
-            let e = CanonicalRequest::from_request_parts(parts, body).unwrap_err();
+            let e = CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap_err();
             if let SignatureError::MalformedQueryString(msg) = e {
                 assert_eq!(msg.as_str(), error_message);
             }
@@ -1307,7 +1318,8 @@ mod tests {
             .unwrap();
         let (parts, body) = request.into_parts();
 
-        let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
+        let (cr, _, _) =
+            CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
 
         // Ensure we can debug print the canonical request.
         let _ = format!("{:?}", cr);
@@ -1343,7 +1355,7 @@ mod tests {
             .unwrap();
         let (parts, body) = request.into_parts();
 
-        let e = CanonicalRequest::from_request_parts(parts, body).unwrap_err();
+        let e = CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap_err();
         if let SignatureError::InvalidBodyEncoding(_) = e {
             assert_eq!(e.to_string(), "application/x-www-form-urlencoded body uses unsupported charset 'foobar'");
             assert_eq!(e.error_code(), "InvalidBodyEncoding");
@@ -1366,7 +1378,8 @@ mod tests {
             .unwrap();
         let (parts, body) = request.into_parts();
 
-        let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
+        let (cr, _, _) =
+            CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
         assert!(cr.query_parameters().is_empty());
     }
 
@@ -1383,7 +1396,8 @@ mod tests {
             .unwrap();
         let (parts, body) = request.into_parts();
 
-        let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
+        let (cr, _, _) =
+            CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
         assert_eq!(cr.query_parameters.get("foo").unwrap(), &vec!["bar%C3%BF".to_string()]);
 
         let uri = Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap();
@@ -1397,7 +1411,8 @@ mod tests {
             .unwrap();
         let (parts, body) = request.into_parts();
 
-        let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
+        let (cr, _, _) =
+            CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
         assert_eq!(cr.query_parameters.get("foo").unwrap(), &vec!["bar%C3%BF".to_string()]);
     }
 
@@ -1414,7 +1429,7 @@ mod tests {
             .unwrap();
         let (parts, body) = request.into_parts();
 
-        let e = CanonicalRequest::from_request_parts(parts, body).unwrap_err();
+        let e = CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap_err();
         if let SignatureError::InvalidBodyEncoding(msg) = e {
             assert_eq!(
                 msg.as_str(),
@@ -1438,7 +1453,8 @@ mod tests {
             .unwrap();
         let (parts, body) = request.into_parts();
 
-        let (_, _, body) = CanonicalRequest::from_request_parts(parts, body).unwrap();
+        let (_, _, body) =
+            CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
         assert_eq!(body.as_ref(), b"");
     }
 
@@ -1455,7 +1471,7 @@ mod tests {
             .unwrap();
         let (parts, body) = request.into_parts();
 
-        let e = CanonicalRequest::from_request_parts(parts, body).unwrap_err();
+        let e = CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap_err();
         if let SignatureError::MalformedQueryString(msg) = e {
             assert_eq!(msg.as_str(), "Illegal hex character in escape % pattern: %yy")
         } else {
@@ -1473,7 +1489,7 @@ mod tests {
             .unwrap();
         let (parts, body) = request.into_parts();
 
-        let e = CanonicalRequest::from_request_parts(parts, body).unwrap_err();
+        let e = CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap_err();
         if let SignatureError::MalformedQueryString(msg) = e {
             assert_eq!(msg.as_str(), "Illegal hex character in escape % pattern: %tt")
         } else {
@@ -1491,7 +1507,7 @@ mod tests {
             .unwrap();
         let (parts, body) = request.into_parts();
 
-        let e = CanonicalRequest::from_request_parts(parts, body).unwrap_err();
+        let e = CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap_err();
         if let SignatureError::MalformedQueryString(msg) = e {
             assert_eq!(msg.as_str(), "Incomplete trailing escape % sequence")
         } else {
@@ -1546,7 +1562,8 @@ mod tests {
             let request = builder.body(Bytes::new()).unwrap();
             let (parts, body) = request.into_parts();
 
-            let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
+            let (cr, _, _) =
+                CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
             let required_headers = SignedHeaderRequirements::empty();
             let e = cr.get_auth_parameters(&required_headers).unwrap_err();
             if let SignatureError::IncompleteSignature(msg) = e {
@@ -1571,7 +1588,8 @@ mod tests {
 
         let (parts, body) = request.into_parts();
 
-        let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
+        let (cr, _, _) =
+            CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
         let required_headers = SignedHeaderRequirements::empty();
         let e = cr.get_auth_parameters(&required_headers).unwrap_err();
         if let SignatureError::IncompleteSignature(msg) = e {
@@ -1622,7 +1640,8 @@ mod tests {
             let request = builder.body(Bytes::new()).unwrap();
             let (parts, body) = request.into_parts();
 
-            let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
+            let (cr, _, _) =
+                CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
             let required_headers = SignedHeaderRequirements::empty();
             let e = cr.get_auth_parameters(&required_headers).unwrap_err();
             if let SignatureError::IncompleteSignature(msg) = e {
@@ -1651,7 +1670,8 @@ mod tests {
             .unwrap();
         let (parts, body) = request.into_parts();
 
-        let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
+        let (cr, _, _) =
+            CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
         let required_headers = SignedHeaderRequirements::empty();
         let auth = cr.get_auth_parameters(&required_headers).unwrap();
         // Expect last component found
@@ -1671,7 +1691,8 @@ mod tests {
             .unwrap();
         let (parts, body) = request.into_parts();
 
-        let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
+        let (cr, _, _) =
+            CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
         let required_headers = SignedHeaderRequirements::empty();
         let auth = cr.get_auth_parameters(&required_headers).unwrap();
         // Expect first component found
@@ -1700,7 +1721,8 @@ mod tests {
 
         let (parts, body) = request.into_parts();
 
-        let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
+        let (cr, _, _) =
+            CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
         let required_headers = SignedHeaderRequirements::empty();
         let required_headers2 = required_headers.clone();
         assert_eq!(&required_headers, &required_headers2);
@@ -1723,7 +1745,8 @@ mod tests {
 
         let (parts, body) = request.into_parts();
 
-        let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
+        let (cr, _, _) =
+            CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
         let required_headers = SignedHeaderRequirements::empty();
         let e = cr.get_auth_parameters(&required_headers).unwrap_err();
         if let SignatureError::SignatureDoesNotMatch(msg) = e {
@@ -1751,7 +1774,8 @@ mod tests {
 
         let (parts, body) = request.into_parts();
 
-        let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
+        let (cr, _, _) =
+            CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
         let required_headers = SignedHeaderRequirements::empty();
         let a = cr.get_auth_parameters(&required_headers).unwrap();
         assert_eq!(a.signed_headers, vec!["a", "host", "x-amz-date"]);
@@ -1774,7 +1798,8 @@ mod tests {
 
         let (parts, body) = request.into_parts();
 
-        let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
+        let (cr, _, _) =
+            CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
         let required_headers = SignedHeaderRequirements::empty();
         let e = cr.get_auth_parameters(&required_headers).unwrap_err();
         if let SignatureError::MissingAuthenticationToken(msg) = e {
@@ -1796,7 +1821,8 @@ mod tests {
 
         let (parts, body) = request.into_parts();
 
-        let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
+        let (cr, _, _) =
+            CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
         let required_headers = SignedHeaderRequirements::empty();
         let e = cr.get_auth_parameters(&required_headers).unwrap_err();
         if let SignatureError::SignatureDoesNotMatch(ref msg) = e {
@@ -1819,7 +1845,8 @@ mod tests {
 
         let (parts, body) = request.into_parts();
 
-        let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
+        let (cr, _, _) =
+            CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
         let required_headers = SignedHeaderRequirements::empty();
         let e = cr.get_auth_parameters(&required_headers).unwrap_err();
         if let SignatureError::IncompleteSignature(msg) = e {
@@ -1840,7 +1867,8 @@ mod tests {
 
         let (parts, body) = request.into_parts();
 
-        let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body).unwrap();
+        let (cr, _, _) =
+            CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
         let required_headers = SignedHeaderRequirements::empty();
         let e = cr.get_auth_parameters(&required_headers).unwrap_err();
         if let SignatureError::MissingAuthenticationToken(msg) = e {

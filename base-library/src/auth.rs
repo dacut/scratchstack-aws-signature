@@ -12,10 +12,13 @@ use {
     crate::{crypto::hmac_sha256, GetSigningKeyRequest, GetSigningKeyResponse, SignatureError},
     chrono::{DateTime, Duration, Utc},
     derive_builder::Builder,
-    log::{trace, debug},
+    log::{debug, trace},
     ring::digest::SHA256_OUTPUT_LEN,
     scratchstack_aws_principal::Principal,
-    std::{fmt::{Debug, Formatter, Result as FmtResult}, future::Future},
+    std::{
+        fmt::{Debug, Formatter, Result as FmtResult},
+        future::Future,
+    },
     subtle::ConstantTimeEq,
     tower::{BoxError, Service, ServiceExt},
 };
@@ -164,12 +167,20 @@ impl SigV4Authenticator {
         }
 
         if cscope_service != service {
-            trace!("prevalidate: credential service '{}' does not match expected service '{}'", cscope_service, service);
+            trace!(
+                "prevalidate: credential service '{}' does not match expected service '{}'",
+                cscope_service,
+                service
+            );
             cscope_errors.push(format!("Credential should be scoped to correct service: '{}'.", service));
         }
 
         if cscope_term != AWS4_REQUEST {
-            trace!("prevalidate: credential terminator '{}' does not match expected terminator '{}'", cscope_term, AWS4_REQUEST);
+            trace!(
+                "prevalidate: credential terminator '{}' does not match expected terminator '{}'",
+                cscope_term,
+                AWS4_REQUEST
+            );
             cscope_errors.push(format!(
                 "Credential should be scoped with a valid terminator: 'aws4_request', not '{}'.",
                 cscope_term
@@ -178,7 +189,11 @@ impl SigV4Authenticator {
 
         let expected_cscope_date = req_ts.format("%Y%m%d").to_string();
         if cscope_date != expected_cscope_date {
-            trace!("prevalidate: credential date '{}' does not match expected date '{}'", cscope_date, expected_cscope_date);
+            trace!(
+                "prevalidate: credential date '{}' does not match expected date '{}'",
+                cscope_date,
+                expected_cscope_date
+            );
             cscope_errors.push(format!("Date in Credential scope does not match YYYYMMDD from ISO-8601 version of date from HTTP: '{}' != '{}', from '{}'.", cscope_date, expected_cscope_date, req_ts.format(ISO8601_COMPACT_FORMAT)));
         }
 
