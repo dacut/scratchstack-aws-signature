@@ -20,7 +20,7 @@ pub mod canonical;
 mod chronoutil;
 mod crypto;
 mod error;
-mod signature;
+pub mod signature;
 mod signing_key;
 
 pub use {
