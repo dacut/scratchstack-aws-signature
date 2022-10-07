@@ -14,6 +14,9 @@ const ERR_CODE_EXPIRED_TOKEN: &str = "ExpiredToken";
 /// Error code: InternalFailure
 const ERR_CODE_INTERNAL_FAILURE: &str = "InternalFailure";
 
+/// Error code: InvalidContentType (non-AWS standard)
+const ERR_CODE_INVALID_CONTENT_TYPE: &str = "InvalidContentType";
+
 /// Error code: InvalidBodyEncoding
 const ERR_CODE_INVALID_BODY_ENCODING: &str = "InvalidBodyEncoding";
 
@@ -22,6 +25,9 @@ const ERR_CODE_INVALID_CLIENT_TOKEN_ID: &str = "InvalidClientTokenId";
 
 /// Error code: IncompleteSignature
 const ERR_CODE_INCOMPLETE_SIGNATURE: &str = "IncompleteSignature";
+
+/// Error code: InvalidRequestMethod (non-AWS standard)
+const ERR_CODE_INVALID_REQUEST_METHOD: &str = "InvalidRequestMethod";
 
 /// Error code: InvalidURIPath
 const ERR_CODE_INVALID_URI_PATH: &str = "InvalidURIPath";
@@ -52,6 +58,12 @@ pub enum SignatureError {
 
     /// The AWS access key provided does not exist in our records.
     InvalidClientTokenId(/* message */ String),
+
+    /// The content-type of the request is unsupported.
+    InvalidContentType(/* message */ String),
+
+    /// Invalid request method.
+    InvalidRequestMethod(/* message */ String),
 
     /// The request signature does not conform to AWS standards. Sample messages:  
     /// `Authorization header requires 'Credential' parameter. Authorization=...`  
@@ -90,6 +102,8 @@ impl SignatureError {
             Self::IO(_) | Self::InternalServiceError(_) => ERR_CODE_INTERNAL_FAILURE,
             Self::InvalidBodyEncoding(_) => ERR_CODE_INVALID_BODY_ENCODING,
             Self::InvalidClientTokenId(_) => ERR_CODE_INVALID_CLIENT_TOKEN_ID,
+            Self::InvalidContentType(_) => ERR_CODE_INVALID_CONTENT_TYPE,
+            Self::InvalidRequestMethod(_) => ERR_CODE_INVALID_REQUEST_METHOD,
             Self::IncompleteSignature(_) => ERR_CODE_INCOMPLETE_SIGNATURE,
             Self::InvalidURIPath(_) => ERR_CODE_INVALID_URI_PATH,
             Self::MalformedQueryString(_) => ERR_CODE_MALFORMED_QUERY_STRING,
@@ -102,6 +116,7 @@ impl SignatureError {
         match self {
             Self::IncompleteSignature(_)
             | Self::InvalidBodyEncoding(_)
+            | Self::InvalidRequestMethod(_)
             | Self::InvalidURIPath(_)
             | Self::MalformedQueryString(_)
             | Self::MissingAuthenticationToken(_) => StatusCode::BAD_REQUEST,
@@ -129,6 +144,8 @@ impl Display for SignatureError {
             Self::InternalServiceError(ref e) => Display::fmt(e, f),
             Self::InvalidBodyEncoding(msg) => f.write_str(msg),
             Self::InvalidClientTokenId(msg) => f.write_str(msg),
+            Self::InvalidContentType(msg) => f.write_str(msg),
+            Self::InvalidRequestMethod(msg) => f.write_str(msg),
             Self::IncompleteSignature(msg) => f.write_str(msg),
             Self::InvalidURIPath(msg) => f.write_str(msg),
             Self::MalformedQueryString(msg) => f.write_str(msg),

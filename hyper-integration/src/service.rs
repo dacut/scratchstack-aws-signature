@@ -2,9 +2,12 @@ use {
     async_trait::async_trait,
     bytes::Bytes,
     chrono::Utc,
+    derive_builder::Builder,
+    http::method::Method,
     hyper::{body::Body, Request, Response},
     quick_xml::{events::BytesText, writer::Writer as XmlWriter},
     scratchstack_aws_signature::{
+        canonical::get_content_type_and_charset,
         sigv4_validate_request, GetSigningKeyRequest, GetSigningKeyResponse, SignatureError, SignatureOptions,
         SignedHeaderRequirements,
     },
@@ -21,7 +24,7 @@ use {
 };
 
 /// AWSSigV4VerifierService implements a Hyper service that authenticates a request against AWS SigV4 signing protocol.
-#[derive(Clone)]
+#[derive(Builder, Clone)]
 pub struct AwsSigV4VerifierService<G, S, E>
 where
     G: Service<GetSigningKeyRequest, Response = GetSigningKeyResponse, Error = BoxError> + Clone + Send + 'static,
@@ -30,13 +33,27 @@ where
     S::Future: Send,
     E: ErrorMapper,
 {
-    pub region: String,
-    pub service: String,
-    pub signed_header_requirements: SignedHeaderRequirements,
-    pub get_signing_key: G,
-    pub implementation: S,
-    pub error_handler: E,
-    pub signature_options: SignatureOptions,
+    #[builder(setter(into))]
+    region: String,
+
+    #[builder(setter(into))]
+    service: String,
+
+    #[builder(default)]
+    allowed_request_methods: Vec<Method>,
+
+    #[builder(default)]
+    allowed_content_types: Vec<String>,
+
+    #[builder(default)]
+    signed_header_requirements: SignedHeaderRequirements,
+
+    get_signing_key: G,
+    implementation: S,
+    error_mapper: E,
+
+    #[builder(default)]
+    signature_options: SignatureOptions,
 }
 
 impl<G, S, E> AwsSigV4VerifierService<G, S, E>
@@ -47,24 +64,53 @@ where
     S::Future: Send,
     E: ErrorMapper,
 {
-    pub fn new(
-        region: &str,
-        service: &str,
-        signed_header_requirements: SignedHeaderRequirements,
-        get_signing_key: G,
-        implementation: S,
-        error_handler: E,
-        signature_options: SignatureOptions,
-    ) -> Self {
-        AwsSigV4VerifierService {
-            region: region.to_string(),
-            service: service.to_string(),
-            signed_header_requirements,
-            get_signing_key,
-            implementation,
-            error_handler,
-            signature_options,
-        }
+    pub fn builder() -> AwsSigV4VerifierServiceBuilder<G, S, E> {
+        AwsSigV4VerifierServiceBuilder::default()
+    }
+
+    #[inline]
+    pub fn region(&self) -> &str {
+        &self.region
+    }
+
+    #[inline]
+    pub fn service(&self) -> &str {
+        &self.service
+    }
+
+    #[inline]
+    pub fn allowed_request_methods(&self) -> &Vec<Method> {
+        &self.allowed_request_methods
+    }
+
+    #[inline]
+    pub fn allowed_content_types(&self) -> &Vec<String> {
+        &self.allowed_content_types
+    }
+
+    #[inline]
+    pub fn signed_header_requirements(&self) -> &SignedHeaderRequirements {
+        &self.signed_header_requirements
+    }
+
+    #[inline]
+    pub fn get_signing_key(&self) -> &G {
+        &self.get_signing_key
+    }
+
+    #[inline]
+    pub fn implementation(&self) -> &S {
+        &self.implementation
+    }
+
+    #[inline]
+    pub fn error_mapper(&self) -> &E {
+        &self.error_mapper
+    }
+
+    #[inline]
+    pub fn signature_options(&self) -> &SignatureOptions {
+        &self.signature_options
     }
 }
 
@@ -119,62 +165,53 @@ where
     fn call(&mut self, req: Request<Body>) -> Self::Future {
         let region = self.region.clone();
         let service = self.service.clone();
+        let allowed_request_methods = self.allowed_request_methods.clone();
+        let allowed_content_types = self.allowed_content_types.clone();
         let signed_header_requirements = self.signed_header_requirements.clone();
-        let get_signing_key = self.get_signing_key.clone();
+        let mut get_signing_key = self.get_signing_key.clone();
         let implementation = self.implementation.clone();
-        let error_handler = self.error_handler.clone();
+        let error_mapper = self.error_mapper.clone();
         let signature_options = self.signature_options;
 
-        Box::pin(handle_call(
-            req,
-            region,
-            service,
-            signed_header_requirements,
-            get_signing_key,
-            implementation,
-            error_handler,
-            signature_options,
-        ))
-    }
-}
+        Box::pin(async move {
+            // Rule 2: Is the request method appropriate?
+            if !allowed_request_methods.is_empty() && !allowed_request_methods.contains(req.method()) {
+                return error_mapper
+                    .map_error(
+                        SignatureError::InvalidRequestMethod(format!("Unsupported request method '{}", req.method()))
+                            .into(),
+                    )
+                    .await;
+            }
 
-#[allow(clippy::too_many_arguments)]
-async fn handle_call<G, S, E>(
-    req: Request<Body>,
-    region: String,
-    service: String,
-    signed_header_requirements: SignedHeaderRequirements,
-    mut get_signing_key: G,
-    implementation: S,
-    error_handler: E,
-    signature_options: SignatureOptions,
-) -> Result<Response<Body>, BoxError>
-where
-    G: Service<GetSigningKeyRequest, Response = GetSigningKeyResponse, Error = BoxError> + Clone + Send + 'static,
-    G::Future: Send,
-    S: Service<Request<Body>, Response = Response<Body>, Error = BoxError> + Clone + Send + 'static,
-    S::Future: Send,
-    E: ErrorMapper,
-{
-    let result = sigv4_validate_request(
-        req,
-        region.as_str(),
-        service.as_str(),
-        &mut get_signing_key,
-        Utc::now(),
-        &signed_header_requirements,
-        signature_options,
-    )
-    .await;
+            // Rule 3: Is the content type appropriate?
+            if let Some(ctc) = get_content_type_and_charset(req.headers()) {
+                if !allowed_content_types.contains(&ctc.content_type) {
+                    return error_mapper.map_error(SignatureError::InvalidContentType("The content-type of the request is unsupported".to_string()).into()).await;
+                }
+            }
 
-    match result {
-        Ok((mut parts, body, principal)) => {
-            let body = Body::from(body);
-            parts.extensions.insert(principal);
-            let req = Request::from_parts(parts, body);
-            implementation.oneshot(req).await.map_err(Into::into)
-        }
-        Err(e) => error_handler.map_error(e).await,
+            let result = sigv4_validate_request(
+                req,
+                region.as_str(),
+                service.as_str(),
+                &mut get_signing_key,
+                Utc::now(),
+                &signed_header_requirements,
+                signature_options,
+            )
+            .await;
+
+            match result {
+                Ok((mut parts, body, principal)) => {
+                    let body = Body::from(body);
+                    parts.extensions.insert(principal);
+                    let req = Request::from_parts(parts, body);
+                    implementation.oneshot(req).await.map_err(Into::into)
+                }
+                Err(e) => error_mapper.map_error(e).await,
+            }
+        })
     }
 }
 
@@ -256,7 +293,6 @@ mod tests {
         scratchstack_aws_principal::{Principal, SessionData, User},
         scratchstack_aws_signature::{
             service_for_signing_key_fn, GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, SignatureError,
-            SignatureOptions, SignedHeaderRequirements,
         },
         std::{
             convert::Infallible,
@@ -278,15 +314,14 @@ mod tests {
         let wrapped = service_fn(hello_response);
         let make_svc = make_service_fn(|_socket: &AddrStream| async move {
             let err_handler = XmlErrorMapper::new("service_namespace");
-            let verifier_svc = AwsSigV4VerifierService::new(
-                "local",
-                "service",
-                SignedHeaderRequirements::empty(),
-                sigfn,
-                wrapped,
-                err_handler,
-                SignatureOptions::default(),
-            );
+            let verifier_svc = AwsSigV4VerifierService::builder()
+                .region("local")
+                .service("service")
+                .get_signing_key(sigfn)
+                .implementation(wrapped)
+                .error_mapper(err_handler)
+                .build()
+                .unwrap();
             // Make sure we can debug print the verifier service.
             let _ = format!("{:?}", verifier_svc);
             Ok::<_, Infallible>(verifier_svc)
@@ -516,15 +551,14 @@ mod tests {
 
         fn call(&mut self, _addr: &AddrStream) -> Self::Future {
             Box::pin(async move {
-                Ok(AwsSigV4VerifierService::new(
-                    "local",
-                    "service",
-                    SignedHeaderRequirements::empty(),
-                    GetDummyCreds {},
-                    HelloService {},
-                    XmlErrorMapper::new("https://sts.amazonaws.com/doc/2011-06-15/"),
-                    SignatureOptions::default(),
-                ))
+                Ok(AwsSigV4VerifierService::builder()
+                    .region("local")
+                    .service("service")
+                    .get_signing_key(GetDummyCreds {})
+                    .implementation(HelloService {})
+                    .error_mapper(XmlErrorMapper::new("https://sts.amazonaws.com/doc/2011-06-15/"))
+                    .build()
+                    .unwrap())
             })
         }
     }
@@ -627,17 +661,16 @@ mod tests {
 
         fn call(&mut self, _addr: &AddrStream) -> Self::Future {
             Box::pin(async move {
-                Ok(AwsSigV4VerifierService::new(
-                    "local",
-                    "service",
-                    SignedHeaderRequirements::empty(),
-                    BadGetCredsService {
+                Ok(AwsSigV4VerifierService::builder()
+                    .region("local")
+                    .service("service")
+                    .get_signing_key(BadGetCredsService {
                         calls: 0,
-                    },
-                    HelloService {},
-                    XmlErrorMapper::new("service-ns"),
-                    SignatureOptions::default(),
-                ))
+                    })
+                    .implementation(HelloService {})
+                    .error_mapper(XmlErrorMapper::new("service-ns"))
+                    .build()
+                    .unwrap())
             })
         }
     }

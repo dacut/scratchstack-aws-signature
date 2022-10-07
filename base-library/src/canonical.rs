@@ -612,9 +612,9 @@ impl Debug for CanonicalRequest {
 }
 
 /// The Content-Type header value, along with the character set (if specified).
-struct ContentTypeCharset {
-    content_type: String,
-    charset: Option<String>,
+pub struct ContentTypeCharset {
+    pub content_type: String,
+    pub charset: Option<String>,
 }
 
 /// Requirement for a signed header.
@@ -694,6 +694,16 @@ impl SignedHeaderRequirements {
 
     pub fn remove_prefix(&mut self, prefix: &str) {
         self.prefixes.retain(|p| !p.eq_ignore_ascii_case(prefix));
+    }
+}
+
+impl Default for SignedHeaderRequirements {
+    fn default() -> Self {
+        SignedHeaderRequirements {
+            always_present: vec!["host".to_string()],
+            if_in_request: Vec::new(),
+            prefixes: Vec::new(),
+        }
     }
 }
 
@@ -800,7 +810,7 @@ fn debug_headers(headers: &HashMap<String, Vec<Vec<u8>>>) -> String {
 }
 
 /// Get the content type and character set used in the body
-fn get_content_type_and_charset(headers: &HeaderMap<HeaderValue>) -> Option<ContentTypeCharset> {
+pub fn get_content_type_and_charset(headers: &HeaderMap<HeaderValue>) -> Option<ContentTypeCharset> {
     let content_type_opts = match headers.get(CONTENT_TYPE) {
         Some(value) => value.as_ref(),
         None => return None,
