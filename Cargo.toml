@@ -1,6 +1,6 @@
 [package]
 name = "scratchstack-aws-signature"
-version = "0.11.0"
+version = "0.11.1-preview.0"
 authors = ["David Cuthbert <dacut@kanga.org>"]
 description = "AWS SigV4 signature verification"
 keywords = ["AWS", "Amazon"]
