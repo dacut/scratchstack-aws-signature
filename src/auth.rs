@@ -14,7 +14,7 @@ use {
     derive_builder::Builder,
     log::{debug, trace},
     ring::digest::SHA256_OUTPUT_LEN,
-    scratchstack_aws_principal::Principal,
+    scratchstack_aws_principal::{Principal, SessionData},
     std::{
         fmt::{Debug, Formatter, Result as FmtResult},
         future::Future,
@@ -269,7 +269,7 @@ impl SigV4Authenticator {
         server_timestamp: DateTime<Utc>,
         allowed_mismatch: Duration,
         get_signing_key: &mut S,
-    ) -> Result<Principal, SignatureError>
+    ) -> Result<(Principal, SessionData), SignatureError>
     where
         S: Service<GetSigningKeyRequest, Response = GetSigningKeyResponse, Error = BoxError, Future = F> + Send,
         F: Future<Output = Result<GetSigningKeyResponse, BoxError>> + Send,
@@ -286,7 +286,7 @@ impl SigV4Authenticator {
             trace!("Signature mismatch: expected '{}', got '{}'", expected_signature, self.signature);
             Err(SignatureError::SignatureDoesNotMatch(Some(MSG_REQUEST_SIGNATURE_MISMATCH.to_string())))
         } else {
-            Ok(response.principal)
+            Ok((response.principal, response.session_data))
         }
     }
 }

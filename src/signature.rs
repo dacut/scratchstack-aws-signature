@@ -7,7 +7,7 @@ use {
     http::request::{Parts, Request},
     hyper::body::Body as HyperBody,
     log::trace,
-    scratchstack_aws_principal::Principal,
+    scratchstack_aws_principal::{Principal, SessionData},
     std::{error::Error, future::Future},
     tower::{BoxError, Service},
 };
@@ -69,7 +69,7 @@ pub async fn sigv4_validate_request<B, S, F>(
     server_timestamp: DateTime<Utc>,
     required_headers: &SignedHeaderRequirements,
     options: SignatureOptions,
-) -> Result<(Parts, Bytes, Principal), BoxError>
+) -> Result<(Parts, Bytes, Principal, SessionData), BoxError>
 where
     B: IntoRequestBytes,
     S: Service<GetSigningKeyRequest, Response = GetSigningKeyResponse, Error = BoxError, Future = F> + Send,
@@ -81,7 +81,7 @@ where
     trace!("Created canonical request: {:?}", canonical_request);
     let auth = canonical_request.get_authenticator(required_headers)?;
     trace!("Created authenticator: {:?}", auth);
-    let principal = auth
+    let (principal, session_data) = auth
         .validate_signature(
             region,
             service,
@@ -91,7 +91,7 @@ where
         )
         .await?;
 
-    Ok((parts, body, principal))
+    Ok((parts, body, principal, session_data))
 }
 
 #[async_trait]
@@ -197,7 +197,7 @@ mod tests {
         })
     }
 
-    async fn run_auth_test(auth_str: &str) -> Result<(Parts, Bytes, Principal), BoxError> {
+    async fn run_auth_test(auth_str: &str) -> Result<(Parts, Bytes, Principal, SessionData), BoxError> {
         let uri = Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap();
         let request = Request::builder()
             .method(Method::GET)
