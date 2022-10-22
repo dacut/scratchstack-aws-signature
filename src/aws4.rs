@@ -13,7 +13,7 @@ use {
         version::Version as HttpVersion,
     },
     log::debug,
-    scratchstack_aws_principal::{Principal, SessionData, User},
+    scratchstack_aws_principal::{Principal, User},
     std::{
         env,
         fs::File,
@@ -226,7 +226,7 @@ async fn run(basename: &str) {
     expected_canonical_request.retain(|c| *c != b'\r'); // Remove carriage returns (not newlines)
 
     // Check the canonical request.
-    let req = SignedHeaderRequirements::empty();
+    let req = SignedHeaderRequirements::default();
     let auth_params = canonical.get_auth_parameters(&req).expect("Failed to get auth parameters");
     let canonical_request = canonical.canonical_request(&auth_params.signed_headers);
     assert_eq!(
@@ -274,7 +274,7 @@ async fn run(basename: &str) {
     // Create a GetSigningKeyRequest from our existing request.
     debug!("body: {:?}", body);
     let request = Request::from_parts(parts, body);
-    let required_headers = SignedHeaderRequirements::empty();
+    let required_headers = SignedHeaderRequirements::default();
     sigv4_validate_request(
         request,
         TEST_REGION,
@@ -289,15 +289,11 @@ async fn run(basename: &str) {
 }
 
 async fn get_signing_key(request: GetSigningKeyRequest) -> Result<GetSigningKeyResponse, BoxError> {
-    let principal = Principal::from(vec![User::new("aws", "123456789012", "/", "test").unwrap().into()]);
+    let principal = Principal::from(User::new("aws", "123456789012", "/", "test").unwrap());
     let k_secret = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
-    let k_signing = k_secret.to_ksigning(request.request_date, request.region.as_str(), request.service.as_str());
+    let k_signing = k_secret.to_ksigning(request.request_date(), request.region(), request.service());
 
-    let response = GetSigningKeyResponse {
-        principal,
-        session_data: SessionData::default(),
-        signing_key: k_signing,
-    };
+    let response = GetSigningKeyResponse::builder().principal(principal).signing_key(k_signing).build().unwrap();
     Ok(response)
 }
 

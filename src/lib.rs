@@ -24,13 +24,17 @@ pub mod signature;
 mod signing_key;
 
 pub use {
-    auth::{SigV4Authenticator, SigV4AuthenticatorBuilder},
+    auth::{
+        SigV4Authenticator, SigV4AuthenticatorBuilder, SigV4AuthenticatorResponse, SigV4AuthenticatorResponseBuilder,
+        SigV4AuthenticatorResponseBuilderError,
+    },
     canonical::{CanonicalRequest, SignedHeaderRequirements},
     error::SignatureError,
     signature::{sigv4_validate_request, SignatureOptions},
     signing_key::{
-        service_for_signing_key_fn, GetSigningKeyRequest, GetSigningKeyResponse, KDateKey, KRegionKey, KSecretKey,
-        KServiceKey, KSigningKey,
+        service_for_signing_key_fn, GetSigningKeyRequest, GetSigningKeyRequestBuilder,
+        GetSigningKeyRequestBuilderError, GetSigningKeyResponse, GetSigningKeyResponseBuilder,
+        GetSigningKeyResponseBuilderError, KDateKey, KRegionKey, KSecretKey, KServiceKey, KSigningKey,
     },
 };
 

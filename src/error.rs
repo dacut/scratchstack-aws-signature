@@ -201,5 +201,15 @@ mod tests {
         let e2 = SignatureError::from(Box::new(e) as Box<dyn Error + Send + Sync + 'static>);
         assert_eq!(e2.to_string(), "foo");
         assert_eq!(e2.error_code(), "MalformedQueryString");
+
+        let e = SignatureError::InvalidContentType("Invalid content type: image/jpeg".to_string());
+        assert_eq!(e.error_code(), "InvalidContentType");
+        assert_eq!(e.http_status(), 403); // Should be 400, but AWS returns 403.
+        assert_eq!(format!("{}", e), "Invalid content type: image/jpeg");
+
+        let e = SignatureError::InvalidRequestMethod("Invalid request method: DELETE".to_string());
+        assert_eq!(e.error_code(), "InvalidRequestMethod");
+        assert_eq!(e.http_status(), 400);
+        assert_eq!(format!("{}", e), "Invalid request method: DELETE");
     }
 }

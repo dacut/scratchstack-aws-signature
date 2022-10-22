@@ -14,6 +14,7 @@ use {
     derive_builder::Builder,
     log::{debug, trace},
     ring::digest::SHA256_OUTPUT_LEN,
+    scratchstack_aspen::PolicySet,
     scratchstack_aws_principal::{Principal, SessionData},
     std::{
         fmt::{Debug, Formatter, Result as FmtResult},
@@ -218,13 +219,14 @@ impl SigV4Authenticator {
     {
         let access_key = self.credential.split('/').next().expect("prevalidate must been called first").to_string();
 
-        let req = GetSigningKeyRequest {
-            access_key,
-            session_token: self.session_token.clone(),
-            request_date: self.request_timestamp.date(),
-            region: region.to_string(),
-            service: service.to_string(),
-        };
+        let req = GetSigningKeyRequest::builder()
+            .access_key(access_key)
+            .session_token(self.session_token.clone())
+            .request_date(self.request_timestamp.date())
+            .region(region)
+            .service(service)
+            .build()
+            .expect("All fields set");
 
         match get_signing_key.oneshot(req).await {
             Ok(key) => {
@@ -269,7 +271,7 @@ impl SigV4Authenticator {
         server_timestamp: DateTime<Utc>,
         allowed_mismatch: Duration,
         get_signing_key: &mut S,
-    ) -> Result<(Principal, SessionData), SignatureError>
+    ) -> Result<SigV4AuthenticatorResponse, SignatureError>
     where
         S: Service<GetSigningKeyRequest, Response = GetSigningKeyResponse, Error = BoxError, Future = F> + Send,
         F: Future<Output = Result<GetSigningKeyResponse, BoxError>> + Send,
@@ -278,7 +280,7 @@ impl SigV4Authenticator {
         let string_to_sign = self.get_string_to_sign();
         trace!("String to sign: {:?}", String::from_utf8_lossy(string_to_sign.as_ref()));
         let response = self.get_signing_key(region, service, get_signing_key).await?;
-        let expected_signature = hex::encode(hmac_sha256(response.signing_key.as_ref(), string_to_sign.as_ref()));
+        let expected_signature = hex::encode(hmac_sha256(response.signing_key().as_ref(), string_to_sign.as_ref()));
         let expected_signature_bytes = expected_signature.as_bytes();
         let signature_bytes = self.signature.as_bytes();
         let is_equal: bool = signature_bytes.ct_eq(expected_signature_bytes).into();
@@ -286,7 +288,7 @@ impl SigV4Authenticator {
             trace!("Signature mismatch: expected '{}', got '{}'", expected_signature, self.signature);
             Err(SignatureError::SignatureDoesNotMatch(Some(MSG_REQUEST_SIGNATURE_MISMATCH.to_string())))
         } else {
-            Ok((response.principal, response.session_data))
+            Ok(response.into())
         }
     }
 }
@@ -317,6 +319,64 @@ impl SigV4AuthenticatorBuilder {
     }
 }
 
+/// Upon successful authentication of a signature, this is returned to convey the principal, session data, and possibly
+/// policies associated with the request.
+///
+/// SigV4AuthenticatorResponse structs are immutable. Use [SigV4AuthenticatorResponseBuilder] to construct a new
+/// response.
+#[derive(Builder, Clone, Debug)]
+pub struct SigV4AuthenticatorResponse {
+    /// The principal actors of the request.
+    #[builder(setter(into), default)]
+    principal: Principal,
+
+    /// The session data associated with the principal.
+    #[builder(setter(into), default)]
+    session_data: SessionData,
+
+    /// If available from the signing key provider, relevant policies for the principal. These policies will not
+    /// include resource-based policies.
+    #[builder(setter(into), default)]
+    policies: Option<PolicySet>,
+}
+
+impl SigV4AuthenticatorResponse {
+    /// Create a [SigV4AuthenticatorResponseBuilder] to construct a [SigV4AuthenticatorResponse].
+    #[inline]
+    pub fn builder() -> SigV4AuthenticatorResponseBuilder {
+        SigV4AuthenticatorResponseBuilder::default()
+    }
+
+    /// Retrieve the principal actors of the request.
+    #[inline]
+    pub fn principal(&self) -> &Principal {
+        &self.principal
+    }
+
+    /// Retrieve the session data associated with the principal.
+    #[inline]
+    pub fn session_data(&self) -> &SessionData {
+        &self.session_data
+    }
+
+    /// Retrieve the relevant policies for the principal, if available from the signing key provider. These
+    /// policies will not include resource-based policies.
+    #[inline]
+    pub fn policies(&self) -> Option<&PolicySet> {
+        self.policies.as_ref()
+    }
+}
+
+impl From<GetSigningKeyResponse> for SigV4AuthenticatorResponse {
+    fn from(request: GetSigningKeyResponse) -> Self {
+        SigV4AuthenticatorResponse {
+            principal: request.principal,
+            session_data: request.session_data,
+            policies: request.policies,
+        }
+    }
+}
+
 fn duration_to_string(duration: Duration) -> String {
     let secs = duration.num_seconds();
     if secs % 60 == 0 {
@@ -332,12 +392,12 @@ mod tests {
         super::duration_to_string,
         crate::{
             service_for_signing_key_fn, GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, SigV4Authenticator,
-            SigV4AuthenticatorBuilder, SignatureError,
+            SigV4AuthenticatorBuilder, SigV4AuthenticatorResponse, SignatureError,
         },
         chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc},
         log::LevelFilter,
         ring::digest::SHA256_OUTPUT_LEN,
-        scratchstack_aws_principal::{Principal, SessionData, User},
+        scratchstack_aws_principal::{Principal, User},
         scratchstack_errors::ServiceError,
         std::{error::Error, fs::File},
         tower::BoxError,
@@ -395,8 +455,8 @@ mod tests {
     }
 
     async fn get_signing_key(request: GetSigningKeyRequest) -> Result<GetSigningKeyResponse, BoxError> {
-        if let Some(ref token) = request.session_token {
-            match token.as_str() {
+        if let Some(token) = request.session_token() {
+            match token {
                 "internal-service-error" => {
                     return Err("internal service error".into());
                 }
@@ -418,18 +478,14 @@ mod tests {
             }
         }
 
-        match request.access_key.as_str() {
+        match request.access_key() {
             "AKIDEXAMPLE" => {
                 let principal = Principal::from(vec![User::new("aws", "123456789012", "/", "test").unwrap().into()]);
                 let k_secret = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
-                let k_signing =
-                    k_secret.to_ksigning(request.request_date, request.region.as_str(), request.service.as_str());
+                let k_signing = k_secret.to_ksigning(request.request_date(), request.region(), request.service());
 
-                let response = GetSigningKeyResponse {
-                    principal,
-                    session_data: SessionData::default(),
-                    signing_key: k_signing,
-                };
+                let response =
+                    GetSigningKeyResponse::builder().principal(principal).signing_key(k_signing).build().unwrap();
                 Ok(response)
             }
             _ => Err(Box::new(SignatureError::InvalidClientTokenId(
@@ -721,5 +777,16 @@ mod tests {
         assert_eq!(duration_to_string(Duration::seconds(60)).as_str(), "1 min");
         assert_eq!(duration_to_string(Duration::seconds(61)).as_str(), "61 sec");
         assert_eq!(duration_to_string(Duration::seconds(600)).as_str(), "10 min");
+    }
+
+    #[test_log::test]
+    fn test_response_builder() {
+        let response = SigV4AuthenticatorResponse::builder().build().unwrap();
+        assert!(response.principal().is_empty());
+        assert!(response.session_data().is_empty());
+        assert!(response.policies().is_none());
+
+        let response2 = response.clone();
+        assert_eq!(format!("{:?}", response), format!("{:?}", response2));
     }
 }

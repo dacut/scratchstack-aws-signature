@@ -1,5 +1,8 @@
 use {
-    crate::{CanonicalRequest, GetSigningKeyRequest, GetSigningKeyResponse, SignedHeaderRequirements},
+    crate::{
+        CanonicalRequest, GetSigningKeyRequest, GetSigningKeyResponse, SigV4AuthenticatorResponse,
+        SignedHeaderRequirements,
+    },
     async_trait::async_trait,
     bytes::{Bytes, BytesMut},
     chrono::{DateTime, Duration, Utc},
@@ -7,13 +10,12 @@ use {
     http::request::{Parts, Request},
     hyper::body::Body as HyperBody,
     log::trace,
-    scratchstack_aws_principal::{Principal, SessionData},
     std::{error::Error, future::Future},
     tower::{BoxError, Service},
 };
 
 /// Options that can be used to configure the signature service.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct SignatureOptions {
     /// Canonicalize requests according to S3 rules.
     pub s3: bool,
@@ -23,14 +25,6 @@ pub struct SignatureOptions {
 }
 
 impl SignatureOptions {
-    #[inline]
-    pub fn default() -> Self {
-        Self {
-            s3: false,
-            url_encode_form: false,
-        }
-    }
-
     #[inline]
     pub fn url_encode_form() -> Self {
         Self {
@@ -48,16 +42,6 @@ impl SignatureOptions {
     }
 }
 
-impl Default for SignatureOptions {
-    #[inline]
-    fn default() -> Self {
-        Self {
-            s3: false,
-            url_encode_form: false,
-        }
-    }
-}
-
 /// Default allowed timestamp mismatch in minutes.
 const ALLOWED_MISMATCH_MINUTES: i64 = 15;
 
@@ -69,7 +53,7 @@ pub async fn sigv4_validate_request<B, S, F>(
     server_timestamp: DateTime<Utc>,
     required_headers: &SignedHeaderRequirements,
     options: SignatureOptions,
-) -> Result<(Parts, Bytes, Principal, SessionData), BoxError>
+) -> Result<(Parts, Bytes, SigV4AuthenticatorResponse), BoxError>
 where
     B: IntoRequestBytes,
     S: Service<GetSigningKeyRequest, Response = GetSigningKeyResponse, Error = BoxError, Future = F> + Send,
@@ -81,7 +65,7 @@ where
     trace!("Created canonical request: {:?}", canonical_request);
     let auth = canonical_request.get_authenticator(required_headers)?;
     trace!("Created authenticator: {:?}", auth);
-    let (principal, session_data) = auth
+    let sigv4_response = auth
         .validate_signature(
             region,
             service,
@@ -91,7 +75,7 @@ where
         )
         .await?;
 
-    Ok((parts, body, principal, session_data))
+    Ok((parts, body, sigv4_response))
 }
 
 #[async_trait]
@@ -130,7 +114,7 @@ mod tests {
     use {
         crate::{
             service_for_signing_key_fn, sigv4_validate_request, GetSigningKeyRequest, GetSigningKeyResponse,
-            KSecretKey, SignatureError, SignatureOptions, SignedHeaderRequirements,
+            KSecretKey, SigV4AuthenticatorResponse, SignatureError, SignatureOptions, SignedHeaderRequirements,
         },
         bytes::Bytes,
         chrono::{DateTime, NaiveDate, Utc},
@@ -141,7 +125,7 @@ mod tests {
         },
         hyper::body::Body as HyperBody,
         lazy_static::lazy_static,
-        scratchstack_aws_principal::{Principal, SessionData, User},
+        scratchstack_aws_principal::{Principal, User},
         scratchstack_errors::ServiceError,
         std::{convert::Infallible, mem::transmute},
         tower::BoxError,
@@ -187,17 +171,13 @@ mod tests {
 
     async fn get_signing_key(req: GetSigningKeyRequest) -> Result<GetSigningKeyResponse, BoxError> {
         let k_secret = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
-        let k_sigining = k_secret.to_ksigning(req.request_date, req.region.as_str(), req.service.as_str());
+        let k_signing = k_secret.to_ksigning(req.request_date(), req.region(), req.service());
 
         let principal = Principal::from(vec![User::new("aws", "123456789012", "/", "test").unwrap().into()]);
-        Ok(GetSigningKeyResponse {
-            principal,
-            session_data: SessionData::default(),
-            signing_key: k_sigining,
-        })
+        Ok(GetSigningKeyResponse::builder().principal(principal).signing_key(k_signing).build().unwrap())
     }
 
-    async fn run_auth_test(auth_str: &str) -> Result<(Parts, Bytes, Principal, SessionData), BoxError> {
+    async fn run_auth_test(auth_str: &str) -> Result<(Parts, Bytes, SigV4AuthenticatorResponse), BoxError> {
         let uri = Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap();
         let request = Request::builder()
             .method(Method::GET)
@@ -208,7 +188,7 @@ mod tests {
             .body(())
             .unwrap();
         let mut get_signing_key_svc = service_for_signing_key_fn(get_signing_key);
-        let required_headers = SignedHeaderRequirements::empty();
+        let required_headers = SignedHeaderRequirements::default();
         sigv4_validate_request(
             request,
             TEST_REGION,
@@ -240,7 +220,7 @@ mod tests {
             .header("host", "localhost")
             .body(())
             .unwrap();
-        let required_headers = SignedHeaderRequirements::empty();
+        let required_headers = SignedHeaderRequirements::default();
         let e = expect_err!(
             sigv4_validate_request(
                 request,
@@ -271,7 +251,7 @@ mod tests {
             .header("date", "zzzzzzzzz")
             .body(())
             .unwrap();
-        let required_headers = SignedHeaderRequirements::empty();
+        let required_headers = SignedHeaderRequirements::default();
         let e = expect_err!(
             sigv4_validate_request(
                 request,
@@ -352,7 +332,7 @@ mod tests {
             }
 
             let request = builder.body(()).unwrap();
-            let mut required_headers = SignedHeaderRequirements::empty();
+            let mut required_headers = SignedHeaderRequirements::default();
             required_headers.add_always_present("Content-Type");
             required_headers.add_always_present("Qwerty");
             required_headers.add_if_in_request("Foo");
@@ -667,5 +647,29 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test_log::test]
+    fn test_signature_options() {
+        assert!(!SignatureOptions::default().s3);
+        assert!(!SignatureOptions::default().url_encode_form);
+
+        let opt1 = SignatureOptions::s3();
+        let opt2 = SignatureOptions {
+            s3: true,
+            ..Default::default()
+        };
+        let opt3 = opt1.clone();
+        let opt4 = opt1;
+        assert_eq!(opt1.s3, opt2.s3);
+        assert_eq!(opt1.s3, opt3.s3);
+        assert_eq!(opt1.s3, opt4.s3);
+        assert_eq!(opt1.url_encode_form, opt2.url_encode_form);
+        assert_eq!(opt1.url_encode_form, opt3.url_encode_form);
+        assert_eq!(opt1.url_encode_form, opt4.url_encode_form);
+        assert!(opt1.s3);
+        assert!(!opt1.url_encode_form);
+
+        assert_eq!(format!("{:?}", opt1), "SignatureOptions { s3: true, url_encode_form: false }");
     }
 }

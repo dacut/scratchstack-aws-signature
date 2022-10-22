@@ -1,7 +1,9 @@
 use {
     crate::crypto::hmac_sha256,
     chrono::{Date, Utc},
+    derive_builder::Builder,
     ring::digest::SHA256_OUTPUT_LEN,
+    scratchstack_aspen::PolicySet,
     scratchstack_aws_principal::{Principal, SessionData},
     std::{
         fmt::{Debug, Display, Formatter, Result as FmtResult},
@@ -232,21 +234,123 @@ impl KServiceKey {
 }
 
 /// A request for a signing key of a given kind for the specified request.
-#[derive(Clone, Debug)]
+///
+/// GetSigningKeyRequest structs are immutable. Use [GetSigningKeyRequestBuilder] to programmatically construct a
+/// request.
+#[derive(Builder, Clone, Debug)]
 pub struct GetSigningKeyRequest {
-    pub access_key: String,
-    pub session_token: Option<String>,
-    pub request_date: Date<Utc>,
-    pub region: String,
-    pub service: String,
+    /// The access key used in the request.
+    #[builder(setter(into))]
+    access_key: String,
+
+    /// The session token provided in the request, if any.
+    #[builder(setter(into), default)]
+    session_token: Option<String>,
+
+    /// The date of the request.
+    request_date: Date<Utc>,
+
+    /// The region of the request.
+    #[builder(setter(into))]
+    region: String,
+
+    /// The service of the request.
+    #[builder(setter(into))]
+    service: String,
+}
+
+impl GetSigningKeyRequest {
+    /// Create a [GetSigningKeyRequestBuilder] to construct a [GetSigningKeyRequest].
+    #[inline]
+    pub fn builder() -> GetSigningKeyRequestBuilder {
+        GetSigningKeyRequestBuilder::default()
+    }
+
+    /// Retrieve the access key used in the request.
+    #[inline]
+    pub fn access_key(&self) -> &str {
+        &self.access_key
+    }
+
+    /// Retrieve the session token provided in the request, if any.
+    #[inline]
+    pub fn session_token(&self) -> Option<&str> {
+        self.session_token.as_deref()
+    }
+
+    /// Retrieve the date of the request.
+    #[inline]
+    pub fn request_date(&self) -> Date<Utc> {
+        self.request_date
+    }
+
+    /// Retrieve the region of the request.
+    #[inline]
+    pub fn region(&self) -> &str {
+        &self.region
+    }
+
+    /// Retrieve the service of the request.
+    #[inline]
+    pub fn service(&self) -> &str {
+        &self.service
+    }
 }
 
 /// A response from the signing key provider.
-#[derive(Clone, Debug)]
+///
+/// GetSigningKeyResponse structs are immutable. Use [GetSigningKeyResponseBuilder] to programmatically construct a
+/// response.
+#[derive(Builder, Clone, Debug)]
 pub struct GetSigningKeyResponse {
-    pub principal: Principal,
-    pub session_data: SessionData,
-    pub signing_key: KSigningKey,
+    /// The principal actors of the request.
+    #[builder(setter(into), default)]
+    pub(crate) principal: Principal,
+
+    /// The session data associated with the principal.
+    #[builder(setter(into), default)]
+    pub(crate) session_data: SessionData,
+
+    /// The signing key.
+    signing_key: KSigningKey,
+
+    /// If available from the signing key provider, relevant policies for the principal. These policies will not
+    /// include resource-based policies.
+    #[builder(setter(into), default)]
+    pub(crate) policies: Option<PolicySet>,
+}
+
+impl GetSigningKeyResponse {
+    /// Create a [GetSigningKeyResponseBuilder] to construct a [GetSigningKeyResponse].
+    #[inline]
+    pub fn builder() -> GetSigningKeyResponseBuilder {
+        GetSigningKeyResponseBuilder::default()
+    }
+
+    /// Retrieve the principal actors of the request.
+    #[inline]
+    pub fn principal(&self) -> &Principal {
+        &self.principal
+    }
+
+    /// Retrieve the session data associated with the principal.
+    #[inline]
+    pub fn session_data(&self) -> &SessionData {
+        &self.session_data
+    }
+
+    /// Retrieve the signing key.
+    #[inline]
+    pub fn signing_key(&self) -> &KSigningKey {
+        &self.signing_key
+    }
+
+    /// Retrieve the relevant policies for the principal, if available from the signing key provider. These
+    /// policies will not include resource-based policies.
+    #[inline]
+    pub fn policies(&self) -> Option<&PolicySet> {
+        self.policies.as_ref()
+    }
 }
 
 impl Default for GetSigningKeyResponse {
@@ -257,6 +361,7 @@ impl Default for GetSigningKeyResponse {
             },
             session_data: SessionData::default(),
             principal: Principal::new(vec![]),
+            policies: None,
         }
     }
 }
@@ -285,7 +390,7 @@ mod tests {
     use {
         crate::{GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey},
         chrono::{Date, NaiveDate, Utc},
-        scratchstack_aws_principal::{AssumedRole, Principal, SessionData},
+        scratchstack_aws_principal::{AssumedRole, Principal},
     };
 
     #[test_log::test]
@@ -404,15 +509,12 @@ mod tests {
         assert_eq!(gsk_req1a.region, gsk_req1b.region);
         assert_eq!(gsk_req1a.service, gsk_req1b.service);
 
-        let gsk_resp1a = GetSigningKeyResponse {
-            signing_key: KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY").to_ksigning(
-                date,
-                "us-east-1",
-                "example",
-            ),
-            session_data: SessionData::default(),
-            principal: Principal::new(vec![AssumedRole::new("aws", "123456789012", "role", "session").unwrap().into()]),
-        };
+        let signing_key =
+            KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY").to_ksigning(date, "us-east-1", "example");
+        let principal = Principal::from(AssumedRole::new("aws", "123456789012", "role", "session").unwrap());
+
+        let gsk_resp1a =
+            GetSigningKeyResponse::builder().signing_key(signing_key).principal(principal).build().unwrap();
 
         // Make sure we can debug print the response.
         let _ = format!("{:?}", gsk_resp1a);
@@ -427,5 +529,16 @@ mod tests {
     fn test_gsk_reponse_derived() {
         let response: GetSigningKeyResponse = Default::default();
         assert_eq!(response.signing_key.as_ref(), &[0u8; 32]);
+    }
+
+    #[test_log::test]
+    fn test_response_builder() {
+        let date = Date::from_utc(NaiveDate::from_ymd(2015, 8, 30), Utc);
+        let signing_key =
+            KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY").to_ksigning(date, "us-east-1", "example");
+        let response = GetSigningKeyResponse::builder().signing_key(signing_key).build().unwrap();
+        assert!(response.principal().is_empty());
+        assert!(response.session_data().is_empty());
+        assert!(response.policies().is_none());
     }
 }
