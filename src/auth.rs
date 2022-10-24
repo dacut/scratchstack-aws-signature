@@ -14,7 +14,6 @@ use {
     derive_builder::Builder,
     log::{debug, trace},
     ring::digest::SHA256_OUTPUT_LEN,
-    scratchstack_aspen::PolicySet,
     scratchstack_aws_principal::{Principal, SessionData},
     std::{
         fmt::{Debug, Formatter, Result as FmtResult},
@@ -333,11 +332,6 @@ pub struct SigV4AuthenticatorResponse {
     /// The session data associated with the principal.
     #[builder(setter(into), default)]
     session_data: SessionData,
-
-    /// If available from the signing key provider, relevant policies for the principal. These policies will not
-    /// include resource-based policies.
-    #[builder(setter(into), default)]
-    policies: Option<PolicySet>,
 }
 
 impl SigV4AuthenticatorResponse {
@@ -358,13 +352,6 @@ impl SigV4AuthenticatorResponse {
     pub fn session_data(&self) -> &SessionData {
         &self.session_data
     }
-
-    /// Retrieve the relevant policies for the principal, if available from the signing key provider. These
-    /// policies will not include resource-based policies.
-    #[inline]
-    pub fn policies(&self) -> Option<&PolicySet> {
-        self.policies.as_ref()
-    }
 }
 
 impl From<GetSigningKeyResponse> for SigV4AuthenticatorResponse {
@@ -372,7 +359,6 @@ impl From<GetSigningKeyResponse> for SigV4AuthenticatorResponse {
         SigV4AuthenticatorResponse {
             principal: request.principal,
             session_data: request.session_data,
-            policies: request.policies,
         }
     }
 }
@@ -784,7 +770,6 @@ mod tests {
         let response = SigV4AuthenticatorResponse::builder().build().unwrap();
         assert!(response.principal().is_empty());
         assert!(response.session_data().is_empty());
-        assert!(response.policies().is_none());
 
         let response2 = response.clone();
         assert_eq!(format!("{:?}", response), format!("{:?}", response2));

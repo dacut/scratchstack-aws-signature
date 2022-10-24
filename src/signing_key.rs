@@ -3,7 +3,6 @@ use {
     chrono::{Date, Utc},
     derive_builder::Builder,
     ring::digest::SHA256_OUTPUT_LEN,
-    scratchstack_aspen::PolicySet,
     scratchstack_aws_principal::{Principal, SessionData},
     std::{
         fmt::{Debug, Display, Formatter, Result as FmtResult},
@@ -313,11 +312,6 @@ pub struct GetSigningKeyResponse {
 
     /// The signing key.
     signing_key: KSigningKey,
-
-    /// If available from the signing key provider, relevant policies for the principal. These policies will not
-    /// include resource-based policies.
-    #[builder(setter(into), default)]
-    pub(crate) policies: Option<PolicySet>,
 }
 
 impl GetSigningKeyResponse {
@@ -344,13 +338,6 @@ impl GetSigningKeyResponse {
     pub fn signing_key(&self) -> &KSigningKey {
         &self.signing_key
     }
-
-    /// Retrieve the relevant policies for the principal, if available from the signing key provider. These
-    /// policies will not include resource-based policies.
-    #[inline]
-    pub fn policies(&self) -> Option<&PolicySet> {
-        self.policies.as_ref()
-    }
 }
 
 impl Default for GetSigningKeyResponse {
@@ -361,7 +348,6 @@ impl Default for GetSigningKeyResponse {
             },
             session_data: SessionData::default(),
             principal: Principal::new(vec![]),
-            policies: None,
         }
     }
 }
@@ -539,6 +525,5 @@ mod tests {
         let response = GetSigningKeyResponse::builder().signing_key(signing_key).build().unwrap();
         assert!(response.principal().is_empty());
         assert!(response.session_data().is_empty());
-        assert!(response.policies().is_none());
     }
 }
