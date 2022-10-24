@@ -16,6 +16,7 @@ use {
     regex::Regex,
     ring::digest::{digest, SHA256, SHA256_OUTPUT_LEN},
     std::{
+        borrow::Cow,
         collections::HashMap,
         fmt::{Debug, Formatter, Result as FmtResult},
         str::from_utf8,
@@ -173,7 +174,7 @@ impl CanonicalRequest {
         mut body: Bytes,
         options: SignatureOptions,
     ) -> Result<(Self, Parts, Bytes), SignatureError> {
-        let canonical_path = canonicalize_uri_path(&parts.uri.path())?;
+        let canonical_path = canonicalize_uri_path(&parts.uri.path(), options.s3)?;
         let content_type = get_content_type_and_charset(&parts.headers);
         let mut query_parameters = query_string_to_normalized_map(&parts.uri.query().unwrap_or(""))?;
 
@@ -713,8 +714,9 @@ pub fn canonicalize_query_to_string(query_parameters: &HashMap<String, Vec<Strin
     results.join("&")
 }
 
-/// Normalizes the specified URI path, removing redundant slashes and relative path components.
-pub(crate) fn canonicalize_uri_path(uri_path: &str) -> Result<String, SignatureError> {
+/// Normalizes the specified URI path, removing redundant slashes and relative path components (unless performing S3
+/// canonicalization).
+pub(crate) fn canonicalize_uri_path(uri_path: &str, s3: bool) -> Result<String, SignatureError> {
     // Special case: empty path is converted to '/'; also short-circuit the usual '/' path here.
     if uri_path.is_empty() || uri_path == "/" {
         return Ok("/".to_string());
@@ -725,8 +727,12 @@ pub(crate) fn canonicalize_uri_path(uri_path: &str) -> Result<String, SignatureE
         return Err(SignatureError::InvalidURIPath(format!("Path is not absolute: {}", uri_path)));
     }
 
-    // Replace double slashes; this makes it easier to handle slashes at the end.
-    let uri_path = MULTISLASH.replace_all(uri_path, "/");
+    let uri_path = if s3 {
+        Cow::Borrowed(uri_path)
+    } else {
+        // Replace double slashes; this makes it easier to handle slashes at the end.
+        MULTISLASH.replace_all(uri_path, "/")
+    };
 
     // Examine each path component for relative directories.
     let mut components: Vec<String> = uri_path.split('/').map(|s| s.to_string()).collect();
@@ -734,12 +740,12 @@ pub(crate) fn canonicalize_uri_path(uri_path: &str) -> Result<String, SignatureE
     while i < components.len() {
         let component = normalize_uri_path_component(&components[i])?;
 
-        if component == "." {
+        if component == "." && !s3 {
             // Relative path: current directory; remove this.
             components.remove(i);
 
             // Don't increment i; with the deletion, we're now pointing to the next element in the path.
-        } else if component == ".." {
+        } else if component == ".." && !s3 {
             // Relative path: parent directory.  Remove this and the previous component.
 
             if i <= 1 {
@@ -1123,29 +1129,50 @@ mod tests {
 
     #[test_log::test]
     fn canonicalize_uri_path_empty() {
-        assert_eq!(canonicalize_uri_path("").unwrap(), "/".to_string());
-        assert_eq!(canonicalize_uri_path("/").unwrap(), "/".to_string());
+        assert_eq!(canonicalize_uri_path("", false).unwrap(), "/".to_string());
+        assert_eq!(canonicalize_uri_path("/", false).unwrap(), "/".to_string());
     }
 
     #[test_log::test]
     fn canonicalize_valid() {
-        assert_eq!(canonicalize_uri_path("/hello/world").unwrap(), "/hello/world".to_string());
-        assert_eq!(canonicalize_uri_path("/hello///world").unwrap(), "/hello/world".to_string());
-        assert_eq!(canonicalize_uri_path("/hello/./world").unwrap(), "/hello/world".to_string());
-        assert_eq!(canonicalize_uri_path("/hello/foo/../world").unwrap(), "/hello/world".to_string());
-        assert_eq!(canonicalize_uri_path("/hello/%77%6F%72%6C%64").unwrap(), "/hello/world".to_string());
-        assert_eq!(canonicalize_uri_path("/hello/w*rld").unwrap(), "/hello/w%2Arld".to_string());
-        assert_eq!(canonicalize_uri_path("/hello/w%2arld").unwrap(), "/hello/w%2Arld".to_string());
-        assert_eq!(canonicalize_uri_path("/hello/w+rld").unwrap(), "/hello/w%20rld".to_string());
+        assert_eq!(canonicalize_uri_path("/hello/world", false).unwrap(), "/hello/world".to_string());
+        assert_eq!(canonicalize_uri_path("/hello///world", false).unwrap(), "/hello/world".to_string());
+        assert_eq!(canonicalize_uri_path("/hello/./world", false).unwrap(), "/hello/world".to_string());
+        assert_eq!(canonicalize_uri_path("/hello/foo/../world", false).unwrap(), "/hello/world".to_string());
+        assert_eq!(canonicalize_uri_path("/hello/foo/%2E%2E/world", false).unwrap(), "/hello/world".to_string());
+        assert_eq!(canonicalize_uri_path("/hello/%77%6F%72%6C%64", false).unwrap(), "/hello/world".to_string());
+        assert_eq!(canonicalize_uri_path("/hello/w*rld", false).unwrap(), "/hello/w%2Arld".to_string());
+        assert_eq!(canonicalize_uri_path("/hello/w%2arld", false).unwrap(), "/hello/w%2Arld".to_string());
+        assert_eq!(canonicalize_uri_path("/hello/w+rld", false).unwrap(), "/hello/w%20rld".to_string());
+
+        assert_eq!(canonicalize_uri_path("/hello/world", true).unwrap(), "/hello/world".to_string());
+        assert_eq!(canonicalize_uri_path("/hello///world", true).unwrap(), "/hello///world".to_string());
+        assert_eq!(canonicalize_uri_path("/hello/./world", true).unwrap(), "/hello/./world".to_string());
+        assert_eq!(canonicalize_uri_path("/hello/foo/../world", true).unwrap(), "/hello/foo/../world".to_string());
+        assert_eq!(canonicalize_uri_path("/hello/%77%6F%72%6C%64", true).unwrap(), "/hello/world".to_string());
+        assert_eq!(canonicalize_uri_path("/hello/w*rld", true).unwrap(), "/hello/w%2Arld".to_string());
+        assert_eq!(canonicalize_uri_path("/hello/w%2arld", true).unwrap(), "/hello/w%2Arld".to_string());
+        assert_eq!(canonicalize_uri_path("/hello/w+rld", true).unwrap(), "/hello/w%20rld".to_string());
+        assert_eq!(canonicalize_uri_path("/hello/../../world", true).unwrap(), "/hello/../../world".to_string());
+        assert_eq!(canonicalize_uri_path("/hello/%2e%2e/%2e%2e/world", true).unwrap(), "/hello/../../world".to_string());
     }
 
     #[test_log::test]
     fn canonicalize_invalid() {
-        let e = expect_err!(canonicalize_uri_path("hello/world"), InvalidURIPath);
+        let e = expect_err!(canonicalize_uri_path("hello/world", false), InvalidURIPath);
         assert_eq!(e.to_string(), "Path is not absolute: hello/world");
-        let e = canonicalize_uri_path("/hello/../../world").unwrap_err();
+        let e = canonicalize_uri_path("/hello/../../world", false).unwrap_err();
         if let SignatureError::InvalidURIPath(_) = e {
             assert_eq!(e.to_string(), "Relative path entry '..' navigates above root: /hello/../../world");
+            assert_eq!(e.error_code(), "InvalidURIPath");
+            assert_eq!(e.http_status(), 400);
+        } else {
+            panic!("Expected InvalidURIPath; got {:#?}", &e);
+        }
+
+        let e = canonicalize_uri_path("/hello/%2E%2E/%2E%2E/world", false).unwrap_err();
+        if let SignatureError::InvalidURIPath(_) = e {
+            assert_eq!(e.to_string(), "Relative path entry '..' navigates above root: /hello/%2E%2E/%2E%2E/world");
             assert_eq!(e.error_code(), "InvalidURIPath");
             assert_eq!(e.http_status(), 400);
         } else {

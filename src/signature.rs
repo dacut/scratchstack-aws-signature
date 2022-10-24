@@ -33,13 +33,10 @@ impl SignatureOptions {
         }
     }
 
-    #[inline]
-    pub fn s3() -> Self {
-        Self {
-            s3: true,
-            url_encode_form: false,
-        }
-    }
+    pub const S3: Self = Self {
+        s3: true,
+        url_encode_form: false,
+    };
 }
 
 /// Default allowed timestamp mismatch in minutes.
@@ -654,7 +651,7 @@ mod tests {
         assert!(!SignatureOptions::default().s3);
         assert!(!SignatureOptions::default().url_encode_form);
 
-        let opt1 = SignatureOptions::s3();
+        let opt1 = SignatureOptions::S3;
         let opt2 = SignatureOptions {
             s3: true,
             ..Default::default()
@@ -671,5 +668,54 @@ mod tests {
         assert!(!opt1.url_encode_form);
 
         assert_eq!(format!("{:?}", opt1), "SignatureOptions { s3: true, url_encode_form: false }");
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_canonicalization_forms() {
+        let mut get_signing_key_svc = service_for_signing_key_fn(get_signing_key);
+
+        // Regular, non-S3 request.
+        let req = Request::builder()
+            .method(Method::GET)
+            .uri("/a/path/../to//something") // Becomes /a/to/something.
+            .header("Host", "example.amazonaws.com")
+            .header("X-Amz-Date", "20150830T123600Z")
+            .header("Authorization", "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, Signature=444cab3690e122afc941d086f06cfbc82c1b4f5c553e32ac81e7629a82ff3831, SignedHeaders=host;x-amz-date")
+            .body(HyperBody::empty())
+            .unwrap();
+
+        assert!(sigv4_validate_request(
+            req,
+            "us-east-1",
+            "service",
+            &mut get_signing_key_svc,
+            *TEST_TIMESTAMP,
+            &SignedHeaderRequirements::default(),
+            SignatureOptions::default()
+        )
+        .await
+        .is_ok());
+
+        // S3 request.
+        let req = Request::builder()
+            .method(Method::GET)
+            .uri("/a/path/../to//something") // Becomes /a/to/something.
+            .header("Host", "example.amazonaws.com")
+            .header("X-Amz-Date", "20150830T123600Z")
+            .header("Authorization", "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, Signature=b475de2c96e7bfdfe03bd784d948218730ef62f48ac8bb9f2922af9a44f8657c, SignedHeaders=host;x-amz-date")
+            .body(HyperBody::empty())
+            .unwrap();
+
+        assert!(sigv4_validate_request(
+            req,
+            "us-east-1",
+            "service",
+            &mut get_signing_key_svc,
+            *TEST_TIMESTAMP,
+            &SignedHeaderRequirements::default(),
+            SignatureOptions::S3,
+        )
+        .await
+        .is_ok());
     }
 }

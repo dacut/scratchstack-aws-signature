@@ -277,7 +277,7 @@ impl SigV4Authenticator {
     {
         self.prevalidate(region, service, server_timestamp, allowed_mismatch)?;
         let string_to_sign = self.get_string_to_sign();
-        trace!("String to sign: {:?}", String::from_utf8_lossy(string_to_sign.as_ref()));
+        trace!("String to sign:\n{}", String::from_utf8_lossy(string_to_sign.as_ref()));
         let response = self.get_signing_key(region, service, get_signing_key).await?;
         let expected_signature = hex::encode(hmac_sha256(response.signing_key().as_ref(), string_to_sign.as_ref()));
         let expected_signature_bytes = expected_signature.as_bytes();
