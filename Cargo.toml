@@ -17,7 +17,7 @@ name = "scratchstack_aws_signature"
 [dependencies]
 async-trait = "^0.1"
 bytes = "^1.2"
-chrono = "^0.4"
+chrono = { version = "^0.4", default-features = false, features = [ "std" ] }
 derive_builder = "^0.11"
 encoding = "^0.2"
 futures = "^0.3"
