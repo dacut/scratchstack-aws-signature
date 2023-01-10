@@ -1,6 +1,6 @@
 use {
     crate::crypto::hmac_sha256,
-    chrono::{Date, Utc},
+    chrono::NaiveDate,
     derive_builder::Builder,
     ring::digest::SHA256_OUTPUT_LEN,
     scratchstack_aws_principal::{Principal, SessionData},
@@ -152,7 +152,7 @@ impl KSecretKey {
     }
 
     /// Create a new `KDateKey` from this `KSecretKey` and a date.
-    pub fn to_kdate(&self, date: Date<Utc>) -> KDateKey {
+    pub fn to_kdate(&self, date: NaiveDate) -> KDateKey {
         let date = date.format("%Y%m%d").to_string();
         let date = date.as_bytes();
         let key = hmac_sha256(self.prefixed_key.as_slice(), date);
@@ -164,17 +164,17 @@ impl KSecretKey {
     }
 
     /// Creeate a new `KRegionKey` from this `KSecretKey`, a date, and a region.
-    pub fn to_kregion(&self, date: Date<Utc>, region: &str) -> KRegionKey {
+    pub fn to_kregion(&self, date: NaiveDate, region: &str) -> KRegionKey {
         self.to_kdate(date).to_kregion(region)
     }
 
     /// Creeate a new `KServiceKey` from this `KSecretKey`, a date, a region, and a service.
-    pub fn to_kservice(&self, date: Date<Utc>, region: &str, service: &str) -> KServiceKey {
+    pub fn to_kservice(&self, date: NaiveDate, region: &str, service: &str) -> KServiceKey {
         self.to_kdate(date).to_kservice(region, service)
     }
 
     /// Creeate a new `KSigningKey` from this `KSecretKey`, a date, a region, and a service.
-    pub fn to_ksigning(&self, date: Date<Utc>, region: &str, service: &str) -> KSigningKey {
+    pub fn to_ksigning(&self, date: NaiveDate, region: &str, service: &str) -> KSigningKey {
         self.to_kdate(date).to_ksigning(region, service)
     }
 }
@@ -247,7 +247,7 @@ pub struct GetSigningKeyRequest {
     session_token: Option<String>,
 
     /// The date of the request.
-    request_date: Date<Utc>,
+    request_date: NaiveDate,
 
     /// The region of the request.
     #[builder(setter(into))]
@@ -279,7 +279,7 @@ impl GetSigningKeyRequest {
 
     /// Retrieve the date of the request.
     #[inline]
-    pub fn request_date(&self) -> Date<Utc> {
+    pub fn request_date(&self) -> NaiveDate {
         self.request_date
     }
 
@@ -375,13 +375,13 @@ where
 mod tests {
     use {
         crate::{GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey},
-        chrono::{Date, NaiveDate, Utc},
+        chrono::NaiveDate,
         scratchstack_aws_principal::{AssumedRole, Principal},
     };
 
     #[test_log::test]
     fn test_signing_key_derived() {
-        let date = Date::from_utc(NaiveDate::from_ymd(2015, 8, 30), Utc);
+        let date = NaiveDate::from_ymd_opt(2015, 8, 30).unwrap();
 
         let ksecret1a = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
         let ksecret1b = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
@@ -474,7 +474,7 @@ mod tests {
 
     #[test_log::test]
     fn test_gsk_derived() {
-        let date = Date::from_utc(NaiveDate::from_ymd(2015, 8, 30), Utc);
+        let date = NaiveDate::from_ymd_opt(2015, 8, 30).unwrap();
 
         let gsk_req1a = GetSigningKeyRequest {
             access_key: "AKIDEXAMPLE".to_string(),
@@ -519,7 +519,7 @@ mod tests {
 
     #[test_log::test]
     fn test_response_builder() {
-        let date = Date::from_utc(NaiveDate::from_ymd(2015, 8, 30), Utc);
+        let date = NaiveDate::from_ymd_opt(2015, 8, 30).unwrap();
         let signing_key =
             KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY").to_ksigning(date, "us-east-1", "example");
         let response = GetSigningKeyResponse::builder().signing_key(signing_key).build().unwrap();

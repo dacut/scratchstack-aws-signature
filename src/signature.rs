@@ -133,7 +133,7 @@ mod tests {
 
     lazy_static! {
         static ref TEST_TIMESTAMP: DateTime<Utc> =
-            DateTime::from_local(NaiveDate::from_ymd(2015, 8, 30).and_hms(12, 36, 0), Utc);
+            DateTime::from_local(NaiveDate::from_ymd_opt(2015, 8, 30).unwrap().and_hms_opt(12, 36, 0).unwrap(), Utc);
     }
 
     macro_rules! expect_err {

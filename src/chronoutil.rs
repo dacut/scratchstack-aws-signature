@@ -1,8 +1,6 @@
 use {
     chrono::{
-        format::{ParseError, ParseResult},
-        offset::{FixedOffset, TimeZone},
-        DateTime,
+        DateTime, FixedOffset, LocalResult, NaiveDate, NaiveDateTime, NaiveTime, ParseError, ParseResult, TimeZone,
     },
     lazy_static::lazy_static,
     regex::Regex,
@@ -94,7 +92,20 @@ impl ParseISO8601<DateTime<FixedOffset>> for DateTime<FixedOffset> {
                 sign * (hour * 3600 + min * 60)
             };
 
-            Ok(FixedOffset::east(offset_secs).ymd(year, month, day).and_hms_nano(hour, minute, second, nanos))
+            let Some(offset) = FixedOffset::east_opt(offset_secs) else {
+                return Err(*INVALID);
+            };
+            let Some(date) = NaiveDate::from_ymd_opt(year, month, day) else {
+                return Err(*INVALID);
+            };
+            let Some(time) = NaiveTime::from_hms_nano_opt(hour, minute, second, nanos) else {
+                return Err(*INVALID);
+            };
+            let dt = NaiveDateTime::new(date, time);
+            match offset.from_local_datetime(&dt) {
+                LocalResult::Single(dt) => Ok(dt),
+                _ => Err(*INVALID),
+            }
         } else {
             Err(*INVALID)
         }

@@ -1154,7 +1154,10 @@ mod tests {
         assert_eq!(canonicalize_uri_path("/hello/w%2arld", true).unwrap(), "/hello/w%2Arld".to_string());
         assert_eq!(canonicalize_uri_path("/hello/w+rld", true).unwrap(), "/hello/w%20rld".to_string());
         assert_eq!(canonicalize_uri_path("/hello/../../world", true).unwrap(), "/hello/../../world".to_string());
-        assert_eq!(canonicalize_uri_path("/hello/%2e%2e/%2e%2e/world", true).unwrap(), "/hello/../../world".to_string());
+        assert_eq!(
+            canonicalize_uri_path("/hello/%2e%2e/%2e%2e/world", true).unwrap(),
+            "/hello/../../world".to_string()
+        );
     }
 
     #[test_log::test]

@@ -221,7 +221,7 @@ impl SigV4Authenticator {
         let req = GetSigningKeyRequest::builder()
             .access_key(access_key)
             .session_token(self.session_token.clone())
-            .request_date(self.request_timestamp.date())
+            .request_date(self.request_timestamp.date_naive())
             .region(region)
             .service(service)
             .build()
@@ -396,9 +396,12 @@ mod tests {
     #[test]
     fn test_derived() {
         init();
-        let epoch = DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp(0, 0), Utc);
+        let epoch = DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp_opt(0, 0).unwrap(), Utc);
         let test_time = DateTime::<Utc>::from_utc(
-            NaiveDateTime::new(NaiveDate::from_ymd(2015, 8, 30), NaiveTime::from_hms(12, 36, 0)),
+            NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(2015, 8, 30).unwrap(),
+                NaiveTime::from_hms_opt(12, 36, 0).unwrap(),
+            ),
             Utc,
         );
         let auth1: SigV4Authenticator = Default::default();
@@ -487,15 +490,24 @@ mod tests {
         // Test that the error ordering is correct.
         let creq_sha256: [u8; SHA256_OUTPUT_LEN] = [0; SHA256_OUTPUT_LEN];
         let test_timestamp = DateTime::<Utc>::from_utc(
-            NaiveDateTime::new(NaiveDate::from_ymd(2015, 8, 30), NaiveTime::from_hms(12, 36, 0)),
+            NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(2015, 8, 30).unwrap(),
+                NaiveTime::from_hms_opt(12, 36, 0).unwrap(),
+            ),
             Utc,
         );
         let outdated_timestamp = DateTime::<Utc>::from_utc(
-            NaiveDateTime::new(NaiveDate::from_ymd(2015, 8, 30), NaiveTime::from_hms(12, 20, 59)),
+            NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(2015, 8, 30).unwrap(),
+                NaiveTime::from_hms_opt(12, 20, 59).unwrap(),
+            ),
             Utc,
         );
         let future_timestamp = DateTime::<Utc>::from_utc(
-            NaiveDateTime::new(NaiveDate::from_ymd(2015, 8, 30), NaiveTime::from_hms(12, 51, 1)),
+            NaiveDateTime::new(
+                NaiveDate::from_ymd_opt(2015, 8, 30).unwrap(),
+                NaiveTime::from_hms_opt(12, 51, 1).unwrap(),
+            ),
             Utc,
         );
         let get_signing_key_svc = service_for_signing_key_fn(get_signing_key);

@@ -246,7 +246,7 @@ async fn run(basename: &str) {
     sts_path.push(&req_path);
     sts_path.set_extension("sts");
 
-    let mut sts = File::open(&sts_path).expect(&format!("Failed to open {:?}", sts_path));
+    let mut sts = File::open(&sts_path).expect(&format!("Failed to open {sts_path:?}"));
     let mut expected_string_to_sign = Vec::new();
     sts.read_to_end(&mut expected_string_to_sign).unwrap();
     expected_string_to_sign.retain(|c| *c != b'\r'); // Remove carriage returns (not newlines)
@@ -255,11 +255,10 @@ async fn run(basename: &str) {
     let sigv4_auth =
         canonical.get_authenticator_from_auth_parameters(auth_params).expect("Failed to get authenticator");
     let string_to_sign = sigv4_auth.get_string_to_sign();
-    assert_eq!(from_utf8(&string_to_sign), from_utf8(&expected_string_to_sign), "Failed on {:?}", sreq_path);
+    assert_eq!(from_utf8(&string_to_sign), from_utf8(&expected_string_to_sign), "Failed on {sreq_path:?}");
 
     debug!(
-        "String to sign matches on {:?}\n--------\n{}\n--------",
-        sreq_path,
+        "String to sign matches on {sreq_path:?}\n--------\n{}\n--------",
         String::from_utf8_lossy(string_to_sign.as_slice())
     );
 
@@ -267,7 +266,7 @@ async fn run(basename: &str) {
     let mut signing_key_svc = service_for_signing_key_fn(get_signing_key);
 
     let test_time = DateTime::<Utc>::from_utc(
-        NaiveDateTime::new(NaiveDate::from_ymd(2015, 8, 30), NaiveTime::from_hms(12, 36, 0)),
+        NaiveDateTime::new(NaiveDate::from_ymd_opt(2015, 8, 30).unwrap(), NaiveTime::from_hms_opt(12, 36, 0).unwrap()),
         Utc,
     );
 
