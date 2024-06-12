@@ -1,6 +1,6 @@
 edition = "2021"
 force_explicit_abi = true
-fn_args_layout = "Tall"
+fn_params_layout = "Tall"
 hard_tabs = false
 imports_granularity = "One"
 max_width = 120
