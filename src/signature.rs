@@ -4,13 +4,11 @@ use {
         SignedHeaderRequirements,
     },
     async_trait::async_trait,
-    bytes::{Bytes, BytesMut},
+    bytes::Bytes,
     chrono::{DateTime, Duration, Utc},
-    futures::stream::StreamExt,
     http::request::{Parts, Request},
-    hyper::body::Body as HyperBody,
     log::trace,
-    std::{error::Error, future::Future},
+    std::future::Future,
     tower::{BoxError, Service},
 };
 
@@ -77,39 +75,27 @@ where
 
 #[async_trait]
 pub trait IntoRequestBytes {
-    async fn into_request_bytes(self) -> Result<Bytes, Box<dyn Error + Send + Sync>>;
+    async fn into_request_bytes(self) -> Result<Bytes, BoxError>;
 }
 
 #[async_trait]
 impl IntoRequestBytes for () {
-    async fn into_request_bytes(self) -> Result<Bytes, Box<dyn Error + Send + Sync>> {
+    async fn into_request_bytes(self) -> Result<Bytes, BoxError> {
         Ok(Bytes::new())
     }
 }
 
 #[async_trait]
 impl IntoRequestBytes for Vec<u8> {
-    async fn into_request_bytes(self) -> Result<Bytes, Box<dyn Error + Send + Sync>> {
+    async fn into_request_bytes(self) -> Result<Bytes, BoxError> {
         Ok(Bytes::from(self))
     }
 }
 
 #[async_trait]
 impl IntoRequestBytes for Bytes {
-    async fn into_request_bytes(self) -> Result<Bytes, Box<dyn Error + Send + Sync>> {
+    async fn into_request_bytes(self) -> Result<Bytes, BoxError> {
         Ok(self)
-    }
-}
-
-#[async_trait]
-impl IntoRequestBytes for HyperBody {
-    async fn into_request_bytes(mut self) -> Result<Bytes, Box<dyn Error + Send + Sync>> {
-        let mut body_bytes = BytesMut::new();
-        while let Some(chunk) = self.next().await {
-            body_bytes.extend_from_slice(&chunk?);
-        }
-
-        Ok(body_bytes.freeze())
     }
 }
 
@@ -127,11 +113,10 @@ mod tests {
             request::{Parts, Request},
             uri::{PathAndQuery, Uri},
         },
-        hyper::body::Body as HyperBody,
         lazy_static::lazy_static,
         scratchstack_aws_principal::{Principal, User},
         scratchstack_errors::ServiceError,
-        std::{convert::Infallible, mem::transmute},
+        std::mem::transmute,
         tower::BoxError,
     };
 
@@ -139,8 +124,10 @@ mod tests {
     const TEST_SERVICE: &str = "service";
 
     lazy_static! {
-        static ref TEST_TIMESTAMP: DateTime<Utc> =
-            DateTime::from_local(NaiveDate::from_ymd_opt(2015, 8, 30).unwrap().and_hms_opt(12, 36, 0).unwrap(), Utc);
+        static ref TEST_TIMESTAMP: DateTime<Utc> = DateTime::from_naive_utc_and_offset(
+            NaiveDate::from_ymd_opt(2015, 8, 30).unwrap().and_hms_opt(12, 36, 0).unwrap(),
+            Utc
+        );
     }
 
     macro_rules! expect_err {
@@ -502,8 +489,9 @@ mod tests {
                 _ => builder = builder.header("x-amz-date", "20150830T122100Z"),
             }
 
-            let body = futures::stream::once(async { Result::<Bytes, Infallible>::Ok(Bytes::from_static(b"{}")) });
-            let request = builder.body(HyperBody::wrap_stream(body)).unwrap();
+            let body = Bytes::from_static(b"{}");
+
+            let request = builder.body(body).unwrap();
             let mut required_headers = SignedHeaderRequirements::new(
                 vec!["Content-Type".into(), "Qwerty".into()],
                 vec!["Foo".into(), "Bar".into(), "ETag".into()],
@@ -688,7 +676,7 @@ mod tests {
             .header("Host", "example.amazonaws.com")
             .header("X-Amz-Date", "20150830T123600Z")
             .header("Authorization", "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, Signature=444cab3690e122afc941d086f06cfbc82c1b4f5c553e32ac81e7629a82ff3831, SignedHeaders=host;x-amz-date")
-            .body(HyperBody::empty())
+            .body(())
             .unwrap();
 
         assert!(sigv4_validate_request(
@@ -710,7 +698,7 @@ mod tests {
             .header("Host", "example.amazonaws.com")
             .header("X-Amz-Date", "20150830T123600Z")
             .header("Authorization", "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, Signature=b475de2c96e7bfdfe03bd784d948218730ef62f48ac8bb9f2922af9a44f8657c, SignedHeaders=host;x-amz-date")
-            .body(HyperBody::empty())
+            .body(())
             .unwrap();
 
         assert!(sigv4_validate_request(

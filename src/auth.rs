@@ -396,8 +396,8 @@ mod tests {
     #[test]
     fn test_derived() {
         init();
-        let epoch = DateTime::<Utc>::from_utc(NaiveDateTime::from_timestamp_opt(0, 0).unwrap(), Utc);
-        let test_time = DateTime::<Utc>::from_utc(
+        let epoch = DateTime::<Utc>::from_timestamp(0, 0).unwrap();
+        let test_time = DateTime::<Utc>::from_naive_utc_and_offset(
             NaiveDateTime::new(
                 NaiveDate::from_ymd_opt(2015, 8, 30).unwrap(),
                 NaiveTime::from_hms_opt(12, 36, 0).unwrap(),
@@ -489,21 +489,21 @@ mod tests {
 
         // Test that the error ordering is correct.
         let creq_sha256: [u8; SHA256_OUTPUT_LEN] = [0; SHA256_OUTPUT_LEN];
-        let test_timestamp = DateTime::<Utc>::from_utc(
+        let test_timestamp = DateTime::<Utc>::from_naive_utc_and_offset(
             NaiveDateTime::new(
                 NaiveDate::from_ymd_opt(2015, 8, 30).unwrap(),
                 NaiveTime::from_hms_opt(12, 36, 0).unwrap(),
             ),
             Utc,
         );
-        let outdated_timestamp = DateTime::<Utc>::from_utc(
+        let outdated_timestamp = DateTime::<Utc>::from_naive_utc_and_offset(
             NaiveDateTime::new(
                 NaiveDate::from_ymd_opt(2015, 8, 30).unwrap(),
                 NaiveTime::from_hms_opt(12, 20, 59).unwrap(),
             ),
             Utc,
         );
-        let future_timestamp = DateTime::<Utc>::from_utc(
+        let future_timestamp = DateTime::<Utc>::from_naive_utc_and_offset(
             NaiveDateTime::new(
                 NaiveDate::from_ymd_opt(2015, 8, 30).unwrap(),
                 NaiveTime::from_hms_opt(12, 51, 1).unwrap(),

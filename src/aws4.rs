@@ -265,7 +265,7 @@ async fn run(basename: &str) {
     // Create a service for getting the signing key.
     let mut signing_key_svc = service_for_signing_key_fn(get_signing_key);
 
-    let test_time = DateTime::<Utc>::from_utc(
+    let test_time = DateTime::<Utc>::from_naive_utc_and_offset(
         NaiveDateTime::new(NaiveDate::from_ymd_opt(2015, 8, 30).unwrap(), NaiveTime::from_hms_opt(12, 36, 0).unwrap()),
         Utc,
     );
