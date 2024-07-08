@@ -88,6 +88,13 @@ impl IntoRequestBytes for () {
 }
 
 #[async_trait]
+impl IntoRequestBytes for Vec<u8> {
+    async fn into_request_bytes(self) -> Result<Bytes, Box<dyn Error + Send + Sync>> {
+        Ok(Bytes::from(self))
+    }
+}
+
+#[async_trait]
 impl IntoRequestBytes for Bytes {
     async fn into_request_bytes(self) -> Result<Bytes, Box<dyn Error + Send + Sync>> {
         Ok(self)
