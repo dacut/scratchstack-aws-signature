@@ -22,7 +22,7 @@ derive_builder = "^0.11"
 encoding = "^0.2"
 futures = "^0.3"
 hex = "^0.4"
-http = "^0.2"
+http = "^1.0"
 hyper = { version = "^0.14", features = ["stream"] }
 lazy_static = "^1.4"
 log = "^0.4"
