@@ -1,8 +1,0 @@
-#!/bin/bash
-export RUSTFLAGS="-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Zno-landing-pads"
-export CARGO_INCREMENTAL=0
-cargo clean
-cargo build
-cargo test
-grcov ./target --branch --ignore '**/.cargo/registry/**/*' --ignore '/rustc/**/*' -t lcov > lcov.info
-genhtml -o lcov-html --show-details --highlight --ignore-errors=source --legend lcov.info
