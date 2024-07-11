@@ -1,4 +1,5 @@
 use {
+    crate::{get_signing_key_fn, sigv4_verify_at, Request, SignatureError, SigningKey, SigningKeyKind},
     chrono::{Date, DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc},
     http::{
         header::{HeaderMap, HeaderName, HeaderValue},
@@ -14,11 +15,6 @@ use {
         str::from_utf8,
     },
     tower::Service,
-};
-
-use {
-    crate::{get_signing_key_fn, sigv4_verify_at, Request, SignatureError, SigningKey, SigningKeyKind},
-    test_env_log,
 };
 
 const TEST_REGION: &str = "us-east-1";
@@ -233,7 +229,7 @@ async fn run(basename: &str) {
     sreq_path.set_extension("sreq");
 
     // Read the signed request file and generate our request format from it.
-    let sreq = File::open(&sreq_path).expect(&format!("Failed to open {:?}", sreq_path));
+    let sreq = File::open(&sreq_path).unwrap_or_else(|e| panic!("Failed to open {:?}: {}", sreq_path, e));
     let request = parse_file(sreq, &sreq_path);
 
     // The canonical request calculated by AWS for verification.
@@ -241,7 +237,7 @@ async fn run(basename: &str) {
     creq_path.push(&req_path);
     creq_path.set_extension("creq");
 
-    let mut creq = File::open(&creq_path).expect(&format!("Failed to open {:?}", creq_path));
+    let mut creq = File::open(&creq_path).unwrap_or_else(|e| panic!("Failed to open {:?}: {}", creq_path, e));
     let mut expected_canonical_request = Vec::new();
     creq.read_to_end(&mut expected_canonical_request).unwrap();
     expected_canonical_request.retain(|c| *c != b'\r'); // Remove carriage returns (not newlines)
@@ -251,20 +247,21 @@ async fn run(basename: &str) {
     sts_path.push(&req_path);
     sts_path.set_extension("sts");
 
-    let mut sts = File::open(&sts_path).expect(&format!("Failed to open {:?}", sts_path));
+    let mut sts = File::open(&sts_path).unwrap_or_else(|e| panic!("Failed to open {:?}: {}", sts_path, e));
     let mut expected_string_to_sign = Vec::new();
     sts.read_to_end(&mut expected_string_to_sign).unwrap();
     expected_string_to_sign.retain(|c| *c != b'\r'); // Remove carriage returns (not newlines)
 
     // Compare the canonical request we calculate vs that from AWS.
-    let canonical_request =
-        request.get_canonical_request().expect(&format!("Failed to get canonical request: {:?}", sreq_path));
+    let canonical_request = request
+        .get_canonical_request()
+        .unwrap_or_else(|e| panic!("Failed to get canonical request for {:?}: {}", sreq_path, e));
     assert_eq!(from_utf8(&canonical_request), from_utf8(&expected_canonical_request), "Failed on {:?}", sreq_path);
 
     // Compare the string-to-sign we calculate vs that from AWS.
     let string_to_sign = request
         .get_string_to_sign(TEST_REGION, TEST_SERVICE)
-        .expect(&format!("Failed to get string to sign: {:?}", sreq_path));
+        .unwrap_or_else(|e| panic!("Failed to get string to sign for {:?}: {}", sreq_path, e));
     assert_eq!(from_utf8(&string_to_sign), from_utf8(&expected_string_to_sign), "Failed on {:?}", sreq_path);
 
     // Create a service for getting the signing key.
@@ -282,23 +279,23 @@ async fn run(basename: &str) {
     let (_principal, k_secret) = signing_key_svc.call(gsk_req).await.unwrap();
 
     sigv4_verify_at(&request, &k_secret, &test_time, mismatch, TEST_REGION, TEST_SERVICE)
-        .expect(&format!("Signature verification failed: {:?}", sreq_path));
+        .unwrap_or_else(|e| panic!("Signature verification failed for {:?}: {}", sreq_path, e));
 
     let k_date = k_secret.to_kdate_key(&req_date);
     sigv4_verify_at(&request, &k_date, &test_time, mismatch, TEST_REGION, TEST_SERVICE)
-        .expect(&format!("Signature verification failed: {:?}", sreq_path));
+        .unwrap_or_else(|e| panic!("Signature verification failed for {:?}: {}", sreq_path, e));
 
     let k_region = k_date.to_kregion_key(&req_date, TEST_REGION);
     sigv4_verify_at(&request, &k_region, &test_time, mismatch, TEST_REGION, TEST_SERVICE)
-        .expect(&format!("Signature verification failed: {:?}", sreq_path));
+        .unwrap_or_else(|e| panic!("Signature verification failed for {:?}: {}", sreq_path, e));
 
     let k_service = k_region.to_kservice_key(&req_date, TEST_REGION, TEST_SERVICE);
     sigv4_verify_at(&request, &k_service, &test_time, mismatch, TEST_REGION, TEST_SERVICE)
-        .expect(&format!("Signature verification failed: {:?}", sreq_path));
+        .unwrap_or_else(|e| panic!("Signature verification failed for {:?}: {}", sreq_path, e));
 
     let k_signing = k_service.to_ksigning_key(&req_date, TEST_REGION, TEST_SERVICE);
     sigv4_verify_at(&request, &k_signing, &test_time, mismatch, TEST_REGION, TEST_SERVICE)
-        .expect(&format!("Signature verification failed: {:?}", sreq_path));
+        .unwrap_or_else(|e| panic!("Signature verification failed for {:?}: {}", sreq_path, e));
 }
 
 async fn get_signing_key(
@@ -322,7 +319,7 @@ fn parse_file(f: File, filename: &PathBuf) -> Request {
     let mut reader = BufReader::new(f);
 
     let mut method_line_full: String = String::new();
-    reader.read_line(&mut method_line_full).expect(&format!("No method line in {:?}", filename));
+    reader.read_line(&mut method_line_full).unwrap_or_else(|e| panic!("No method line in {:?}: {}", filename, e));
     let method_line: String = method_line_full.trim_end().to_string();
     let muq_and_ver: Vec<&str> = method_line.rsplitn(2, " ").collect();
     assert_eq!(muq_and_ver.len(), 2, "muq_and_ver.len() != 2, method_line={}, {:?}", method_line, filename);
@@ -355,12 +352,12 @@ fn parse_file(f: File, filename: &PathBuf) -> Request {
 
     while let Ok(n_read) = reader.read_line(&mut line_full) {
         debug!("Considering line: {:#?}", line_full);
-        if n_read <= 0 {
+        if n_read == 0 {
             break;
         }
 
         let line = line_full.trim_end();
-        if line.len() == 0 {
+        if line.is_empty() {
             break;
         }
 
@@ -388,7 +385,7 @@ fn parse_file(f: File, filename: &PathBuf) -> Request {
                     Ok(hv) => hv,
                     Err(e) => panic!("Invalid header value: {:?}: {}", from_utf8(&value).unwrap(), e),
                 };
-                headers.append(HeaderName::from_bytes(key.as_str().as_bytes()).unwrap(), hv);
+                headers.append(HeaderName::from_bytes(key.as_bytes()).unwrap(), hv);
             }
 
             let key = parts[0].to_string();
@@ -401,8 +398,7 @@ fn parse_file(f: File, filename: &PathBuf) -> Request {
 
     if let Some((key, value)) = current {
         debug!("Pushing unfinished header: {:#?}: {:#?}", key, from_utf8(&value).unwrap());
-        headers
-            .append(HeaderName::from_bytes(key.as_str().as_bytes()).unwrap(), HeaderValue::from_bytes(&value).unwrap());
+        headers.append(HeaderName::from_bytes(key.as_bytes()).unwrap(), HeaderValue::from_bytes(&value).unwrap());
     }
 
     let mut body: Vec<u8> = Vec::new();

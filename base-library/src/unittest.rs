@@ -1,21 +1,19 @@
 use {
-    super::signature::{
-        canonicalize_uri_path, normalize_query_parameters, normalize_uri_path_component, sigv4_verify, Request,
-        SignatureError, SigningKey, SigningKeyKind,
+    super::{
+        chronoutil::ParseISO8601,
+        signature::{
+            canonicalize_uri_path, normalize_query_parameters, normalize_uri_path_component, sigv4_verify, Request,
+            SignatureError, SigningKey, SigningKeyKind,
+        },
     },
-    std::fmt::Write,
-};
-
-use {
-    super::chronoutil::ParseISO8601,
     chrono::{Date, DateTime, Datelike, NaiveDate, Timelike, Utc},
     http::{
         header::{HeaderMap, HeaderValue},
         uri::{PathAndQuery, Uri},
     },
     scratchstack_aws_principal::PrincipalActor,
+    std::fmt::Write,
     test_log::{self, test},
-    tokio,
 };
 
 const TEST_REGION: &str = "us-east-1";
@@ -108,28 +106,28 @@ macro_rules! expect_err {
 
 #[test]
 fn canonicalize_uri_path_empty() {
-    assert_eq!(canonicalize_uri_path(&"").unwrap(), "/".to_string());
-    assert_eq!(canonicalize_uri_path(&"/").unwrap(), "/".to_string());
+    assert_eq!(canonicalize_uri_path("").unwrap(), "/".to_string());
+    assert_eq!(canonicalize_uri_path("/").unwrap(), "/".to_string());
 }
 
 #[test]
 fn canonicalize_valid() {
-    assert_eq!(canonicalize_uri_path(&"/hello/world").unwrap(), "/hello/world".to_string());
-    assert_eq!(canonicalize_uri_path(&"/hello///world").unwrap(), "/hello/world".to_string());
-    assert_eq!(canonicalize_uri_path(&"/hello/./world").unwrap(), "/hello/world".to_string());
-    assert_eq!(canonicalize_uri_path(&"/hello/foo/../world").unwrap(), "/hello/world".to_string());
-    assert_eq!(canonicalize_uri_path(&"/hello/%77%6F%72%6C%64").unwrap(), "/hello/world".to_string());
-    assert_eq!(canonicalize_uri_path(&"/hello/w*rld").unwrap(), "/hello/w%2Arld".to_string());
-    assert_eq!(canonicalize_uri_path(&"/hello/w%2arld").unwrap(), "/hello/w%2Arld".to_string());
-    assert_eq!(canonicalize_uri_path(&"/hello/w+rld").unwrap(), "/hello/w%20rld".to_string());
+    assert_eq!(canonicalize_uri_path("/hello/world").unwrap(), "/hello/world".to_string());
+    assert_eq!(canonicalize_uri_path("/hello///world").unwrap(), "/hello/world".to_string());
+    assert_eq!(canonicalize_uri_path("/hello/./world").unwrap(), "/hello/world".to_string());
+    assert_eq!(canonicalize_uri_path("/hello/foo/../world").unwrap(), "/hello/world".to_string());
+    assert_eq!(canonicalize_uri_path("/hello/%77%6F%72%6C%64").unwrap(), "/hello/world".to_string());
+    assert_eq!(canonicalize_uri_path("/hello/w*rld").unwrap(), "/hello/w%2Arld".to_string());
+    assert_eq!(canonicalize_uri_path("/hello/w%2arld").unwrap(), "/hello/w%2Arld".to_string());
+    assert_eq!(canonicalize_uri_path("/hello/w+rld").unwrap(), "/hello/w%20rld".to_string());
 }
 
 #[test]
 fn canonicalize_invalid() {
-    let e = expect_err!(canonicalize_uri_path(&"hello/world"), InvalidURIPath);
-    assert!(format!("{}", e).starts_with("Invalid URI path:"));
+    let e = expect_err!(canonicalize_uri_path("hello/world"), InvalidURIPath);
+    assert!(e.starts_with("Invalid URI path:"));
 
-    expect_err!(canonicalize_uri_path(&"/hello/../../world"), InvalidURIPath);
+    expect_err!(canonicalize_uri_path("/hello/../../world"), InvalidURIPath);
 }
 
 #[test]
@@ -163,20 +161,16 @@ fn normalize_empty() {
     assert_eq!(foo.len(), 1);
     assert_eq!(foo[0], "bar");
 
-    assert!(v.get("").is_none());
+    assert!(!v.contains_key(""));
 }
 
 #[test]
 fn normalize_invalid_hex() {
     let e = expect_err!(normalize_uri_path_component("abcd%yy"), InvalidURIPath);
-    assert!(format!("{}", e).starts_with("Invalid URI path:"));
-
+    assert!(e.starts_with("Invalid URI path:"));
     expect_err!(normalize_uri_path_component("abcd%yy"), InvalidURIPath);
-
     expect_err!(normalize_uri_path_component("abcd%0"), InvalidURIPath);
-
     expect_err!(normalize_uri_path_component("abcd%"), InvalidURIPath);
-
     assert_eq!(normalize_uri_path_component("abcd%65").unwrap(), "abcde");
 }
 

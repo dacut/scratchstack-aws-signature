@@ -30,7 +30,6 @@ mod tests {
             task::{Context, Poll},
             time::Duration,
         },
-        test_env_log, tokio,
         tower::{BoxError, Service},
     };
 
@@ -64,16 +63,13 @@ mod tests {
                         eprintln!("Response from server: {:?}", r.status);
 
                         let mut body = r.body;
-                        loop {
-                            match body.next().await {
-                                Some(b_result) => match b_result {
-                                    Ok(bytes) => eprint!("{:?}", bytes),
-                                    Err(e) => {
-                                        eprintln!("Error while ready body: {:?}", e);
-                                        break;
-                                    }
-                                },
-                                None => break,
+                        while let Some(b_result) = body.next().await {
+                            match b_result {
+                                Ok(bytes) => eprint!("{:?}", bytes),
+                                Err(e) => {
+                                    eprintln!("Error while ready body: {:?}", e);
+                                    break;
+                                }
                             }
                         }
                         eprintln!();
@@ -81,8 +77,6 @@ mod tests {
                     }
                     Err(e) => panic!("Error from server: {:?}", e),
                 };
-
-                ()
             })
             .await
         {
@@ -117,16 +111,13 @@ mod tests {
                         eprintln!("Response from server: {:?}", r.status);
 
                         let mut body = r.body;
-                        loop {
-                            match body.next().await {
-                                Some(b_result) => match b_result {
-                                    Ok(bytes) => eprint!("{:?}", bytes),
-                                    Err(e) => {
-                                        eprintln!("Error while ready body: {:?}", e);
-                                        break;
-                                    }
-                                },
-                                None => break,
+                        while let Some(b_result) = body.next().await {
+                            match b_result {
+                                Ok(bytes) => eprint!("{:?}", bytes),
+                                Err(e) => {
+                                    eprintln!("Error while ready body: {:?}", e);
+                                    break;
+                                }
                             }
                         }
                         eprintln!();
@@ -134,8 +125,6 @@ mod tests {
                     }
                     Err(e) => panic!("Error from server: {:?}", e),
                 };
-
-                ()
             })
             .await
         {
@@ -166,16 +155,13 @@ mod tests {
                         eprintln!("Response from server: {:?}", r.status);
 
                         let mut body = r.body;
-                        loop {
-                            match body.next().await {
-                                Some(b_result) => match b_result {
-                                    Ok(bytes) => eprint!("{:?}", bytes),
-                                    Err(e) => {
-                                        eprintln!("Error while ready body: {:?}", e);
-                                        break;
-                                    }
-                                },
-                                None => break,
+                        while let Some(b_result) = body.next().await {
+                            match b_result {
+                                Ok(bytes) => eprint!("{:?}", bytes),
+                                Err(e) => {
+                                    eprintln!("Error while ready body: {:?}", e);
+                                    break;
+                                }
                             }
                         }
                         eprintln!();
@@ -183,8 +169,6 @@ mod tests {
                     }
                     Err(e) => panic!("Error from server: {:?}", e),
                 };
-
-                ()
             })
             .await
         {
@@ -212,8 +196,7 @@ mod tests {
         } else {
             Err(SignatureError::UnknownAccessKey {
                 access_key,
-            }
-            .into())
+            })
         }
     }
 

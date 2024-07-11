@@ -783,15 +783,15 @@ impl Request {
                     })
                 } else {
                     let result = split_authorization_header_parameters(parameters)?;
-                    if result.get(CREDENTIAL).is_none() {
+                    if !result.contains_key(CREDENTIAL) {
                         Err(SignatureError::MalformedSignature {
                             message: "invalid Authorization header: missing Credential".to_string(),
                         })
-                    } else if result.get(SIGNATURE).is_none() {
+                    } else if !result.contains_key(SIGNATURE) {
                         Err(SignatureError::MalformedSignature {
                             message: "invalid Authorization header: missing Signature".to_string(),
                         })
-                    } else if result.get(SIGNEDHEADERS).is_none() {
+                    } else if !result.contains_key(SIGNEDHEADERS) {
                         Err(SignatureError::MalformedSignature {
                             message: "invalid Authorization header: missing SignedHeaders".to_string(),
                         })
