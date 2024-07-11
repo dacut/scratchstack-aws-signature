@@ -2,7 +2,7 @@
 name = "scratchstack-aws-signature-hyper"
 description = "AWS SigV4 signature verification integration with Hyper"
 keywords = ["AWS", "Amazon", "Hyper"]
-version = "0.10.4"
+version = "0.10.5"
 authors = ["David Cuthbert <dacut@kanga.org>"]
 homepage = "https://github.com/dacut/scratchstack-aws-signature"
 repository = "https://github.com/dacut/scratchstack-aws-signature"
