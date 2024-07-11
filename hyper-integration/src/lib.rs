@@ -3,35 +3,36 @@ pub use crate::service::AwsSigV4VerifierService;
 
 #[cfg(test)]
 mod tests {
-    use crate::AwsSigV4VerifierService;
-    use chrono::{Date, Utc};
-    use futures::stream::StreamExt;
-    use http::StatusCode;
-    use hyper::{
-        client::{connect::dns::GaiResolver, HttpConnector},
-        server::conn::AddrStream,
-        service::{make_service_fn, service_fn},
-        Body, Request, Response, Server,
+    use {
+        crate::AwsSigV4VerifierService,
+        chrono::{Date, Utc},
+        futures::stream::StreamExt,
+        http::StatusCode,
+        hyper::{
+            client::{connect::dns::GaiResolver, HttpConnector},
+            server::conn::AddrStream,
+            service::{make_service_fn, service_fn},
+            Body, Request, Response, Server,
+        },
+        log::debug,
+        rusoto_core::{DispatchSignedRequest, HttpClient, Region},
+        rusoto_credential::AwsCredentials,
+        rusoto_signature::SignedRequest,
+        scratchstack_aws_principal::PrincipalActor,
+        scratchstack_aws_signature::{
+            get_signing_key_fn, GetSigningKeyRequest, SignatureError, SigningKey, SigningKeyKind,
+        },
+        std::{
+            convert::Infallible,
+            future::Future,
+            net::{Ipv6Addr, SocketAddr, SocketAddrV6},
+            pin::Pin,
+            task::{Context, Poll},
+            time::Duration,
+        },
+        test_env_log, tokio,
+        tower::{BoxError, Service},
     };
-    use log::debug;
-    use rusoto_core::{DispatchSignedRequest, HttpClient, Region};
-    use rusoto_credential::AwsCredentials;
-    use rusoto_signature::SignedRequest;
-    use scratchstack_aws_principal::PrincipalActor;
-    use scratchstack_aws_signature::{
-        get_signing_key_fn, GetSigningKeyRequest, SignatureError, SigningKey, SigningKeyKind,
-    };
-    use std::{
-        convert::Infallible,
-        future::Future,
-        net::{Ipv6Addr, SocketAddr, SocketAddrV6},
-        pin::Pin,
-        task::{Context, Poll},
-        time::Duration,
-    };
-    use test_env_log;
-    use tokio;
-    use tower::{BoxError, Service};
 
     #[test_log::test(tokio::test)]
     async fn test_fn_wrapper() {
@@ -210,7 +211,7 @@ mod tests {
             Ok((principal, k_secret.derive(signing_key_kind, &request_date, region, service)))
         } else {
             Err(SignatureError::UnknownAccessKey {
-                access_key: access_key,
+                access_key,
             }
             .into())
         }

@@ -1,18 +1,22 @@
-use super::signature::{
-    canonicalize_uri_path, normalize_query_parameters, normalize_uri_path_component, sigv4_verify, Request,
-    SignatureError, SigningKey, SigningKeyKind,
+use {
+    super::signature::{
+        canonicalize_uri_path, normalize_query_parameters, normalize_uri_path_component, sigv4_verify, Request,
+        SignatureError, SigningKey, SigningKeyKind,
+    },
+    std::fmt::Write,
 };
-use std::fmt::Write;
 
-use super::chronoutil::ParseISO8601;
-use chrono::{Date, DateTime, Datelike, NaiveDate, Timelike, Utc};
-use http::{
-    header::{HeaderMap, HeaderValue},
-    uri::{PathAndQuery, Uri},
+use {
+    super::chronoutil::ParseISO8601,
+    chrono::{Date, DateTime, Datelike, NaiveDate, Timelike, Utc},
+    http::{
+        header::{HeaderMap, HeaderValue},
+        uri::{PathAndQuery, Uri},
+    },
+    scratchstack_aws_principal::PrincipalActor,
+    test_log::{self, test},
+    tokio,
 };
-use scratchstack_aws_principal::PrincipalActor;
-use test_log::{self, test};
-use tokio;
 
 const TEST_REGION: &str = "us-east-1";
 const TEST_SERVICE: &str = "service";
@@ -191,8 +195,8 @@ fn duplicate_headers() {
     let uri = Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap();
     let request = Request {
         request_method: "GET".to_string(),
-        uri: uri,
-        headers: headers,
+        uri,
+        headers,
         body: None,
     };
 
@@ -244,8 +248,8 @@ async fn run_auth_test_get_err(auth_str: &str) -> SignatureError {
     let uri = Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap();
     let request = Request {
         request_method: "GET".to_string(),
-        uri: uri,
-        headers: headers,
+        uri,
+        headers,
         body: None,
     };
 
@@ -379,8 +383,8 @@ async fn test_multiple_algorithms() {
     let uri = Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap();
     let request = Request {
         request_method: "GET".to_string(),
-        uri: uri,
-        headers: headers,
+        uri,
+        headers,
         body: None,
     };
 
@@ -401,7 +405,7 @@ async fn duplicate_query_parameter() {
             .path_and_query(PathAndQuery::from_static("/?X-Amz-Signature=1234&X-Amz-Signature=1234"))
             .build()
             .unwrap(),
-        headers: headers,
+        headers,
         body: None,
     };
 
@@ -418,7 +422,7 @@ fn missing_header() {
     let request = Request {
         request_method: "GET".to_string(),
         uri: Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap(),
-        headers: headers,
+        headers,
         body: None,
     };
 
@@ -435,7 +439,7 @@ fn missing_date() {
     let request = Request {
         request_method: "GET".to_string(),
         uri: Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap(),
-        headers: headers,
+        headers,
         body: None,
     };
 
@@ -453,7 +457,7 @@ fn invalid_date() {
     let request = Request {
         request_method: "GET".to_string(),
         uri: Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap(),
-        headers: headers,
+        headers,
         body: None,
     };
 
@@ -466,7 +470,7 @@ fn invalid_date() {
     let request = Request {
         request_method: "GET".to_string(),
         uri: Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap(),
-        headers: headers,
+        headers,
         body: None,
     };
 
@@ -476,7 +480,7 @@ fn invalid_date() {
     let request = Request {
         request_method: "GET".to_string(),
         uri: Uri::builder().path_and_query(PathAndQuery::from_static("/?X-Amz-Date=zzzz")).build().unwrap(),
-        headers: headers,
+        headers,
         body: None,
     };
 

@@ -19,21 +19,22 @@ use std::{
     task::{Context, Poll},
 };
 
-use chrono::{Date, DateTime, Duration, Utc};
-use http::{
-    header::{HeaderMap, HeaderValue},
-    request::Parts,
-    Uri,
+use {
+    chrono::{Date, DateTime, Duration, Utc},
+    http::{
+        header::{HeaderMap, HeaderValue},
+        request::Parts,
+        Uri,
+    },
+    lazy_static::lazy_static,
+    log::trace,
+    regex::Regex,
+    ring::digest::{digest, SHA256},
+    scratchstack_aws_principal::PrincipalActor,
+    tower::{BoxError, Service},
 };
-use lazy_static::lazy_static;
-use log::trace;
-use regex::Regex;
-use ring::digest::{digest, SHA256};
-use scratchstack_aws_principal::PrincipalActor;
-use tower::{BoxError, Service};
 
-use crate::chronoutil::parse_date_str;
-use crate::hmac::hmac_sha256;
+use crate::{chronoutil::parse_date_str, hmac::hmac_sha256};
 
 /// Content-Type string for HTML forms
 const APPLICATION_X_WWW_FORM_URLENCODED: &str = "application/x-www-form-urlencoded";
