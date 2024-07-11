@@ -1,6 +1,6 @@
 use {
     crate::{get_signing_key_fn, sigv4_verify_at, Request, SignatureError, SigningKey, SigningKeyKind},
-    chrono::{Date, DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc},
+    chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc},
     http::{
         header::{HeaderMap, HeaderName, HeaderValue},
         uri::{PathAndQuery, Uri},
@@ -267,8 +267,8 @@ async fn run(basename: &str) {
     // Create a service for getting the signing key.
     let mut signing_key_svc = get_signing_key_fn(get_signing_key);
 
-    let test_time = DateTime::<Utc>::from_utc(
-        NaiveDateTime::new(NaiveDate::from_ymd(2015, 8, 30), NaiveTime::from_hms(12, 36, 0)),
+    let test_time = DateTime::<Utc>::from_naive_utc_and_offset(
+        NaiveDateTime::new(NaiveDate::from_ymd_opt(2015, 8, 30).unwrap(), NaiveTime::from_hms_opt(12, 36, 0).unwrap()),
         Utc,
     );
     let mismatch = Some(Duration::seconds(300));
@@ -302,7 +302,7 @@ async fn get_signing_key(
     kind: SigningKeyKind,
     _access_key_id: String,
     _session_token: Option<String>,
-    req_date: Date<Utc>,
+    req_date: DateTime<Utc>,
     region: String,
     service: String,
 ) -> Result<(PrincipalActor, SigningKey), SignatureError> {

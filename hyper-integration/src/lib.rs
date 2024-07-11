@@ -5,7 +5,7 @@ pub use crate::service::AwsSigV4VerifierService;
 mod tests {
     use {
         crate::AwsSigV4VerifierService,
-        chrono::{Date, Utc},
+        chrono::{DateTime, Utc},
         futures::stream::StreamExt,
         http::StatusCode,
         hyper::{
@@ -181,7 +181,7 @@ mod tests {
         signing_key_kind: SigningKeyKind,
         access_key: String,
         _session_token: Option<String>,
-        request_date: Date<Utc>,
+        request_date: DateTime<Utc>,
         region: String,
         service: String,
     ) -> Result<(PrincipalActor, SigningKey), SignatureError> {

@@ -20,7 +20,7 @@ use std::{
 };
 
 use {
-    chrono::{Date, DateTime, Duration, Utc},
+    chrono::{DateTime, Duration, Utc},
     http::{
         header::{HeaderMap, HeaderValue},
         request::Parts,
@@ -332,7 +332,7 @@ impl SigningKey {
     pub fn try_derive<R, S>(
         &self,
         derived_key_kind: SigningKeyKind,
-        req_date: &Date<Utc>,
+        req_date: &DateTime<Utc>,
         region: R,
         service: S,
     ) -> Result<Self, SignatureError>
@@ -357,7 +357,12 @@ impl SigningKey {
     /// Return a KService key given a KService, KRegion, KDate, or KSecret key.
     ///
     /// This function returns an error if given a KSigning key.
-    pub fn try_to_kservice_key<R, S>(&self, req_date: &Date<Utc>, region: R, service: S) -> Result<Self, SignatureError>
+    pub fn try_to_kservice_key<R, S>(
+        &self,
+        req_date: &DateTime<Utc>,
+        region: R,
+        service: S,
+    ) -> Result<Self, SignatureError>
     where
         R: AsRef<str>,
         S: AsRef<str>,
@@ -380,7 +385,7 @@ impl SigningKey {
     /// Return a KRegion key given a KRegion, KDate, or KSecret key.
     ///
     /// This function returns an error if given a KSigning or KService key.
-    pub fn try_to_kregion_key<R>(&self, req_date: &Date<Utc>, region: R) -> Result<Self, SignatureError>
+    pub fn try_to_kregion_key<R>(&self, req_date: &DateTime<Utc>, region: R) -> Result<Self, SignatureError>
     where
         R: AsRef<str>,
     {
@@ -402,7 +407,7 @@ impl SigningKey {
     /// Return a KDate key given a KDate or KSecret key.
     ///
     /// This function returns an error if given a KRegion, KSigning, or KService key.
-    pub fn try_to_kdate_key(&self, req_date: &Date<Utc>) -> Result<Self, SignatureError> {
+    pub fn try_to_kdate_key(&self, req_date: &DateTime<Utc>) -> Result<Self, SignatureError> {
         match self.kind {
             // Already the same type.
             SigningKeyKind::KDate => Ok(self.clone()),
@@ -431,7 +436,13 @@ impl SigningKey {
     ///
     /// This function panics if the existing key cannot be derived into the dervied key kind. Use `try_derive` for
     /// a non-panicking version.
-    pub fn derive<R, S>(&self, derived_key_kind: SigningKeyKind, req_date: &Date<Utc>, region: R, service: S) -> Self
+    pub fn derive<R, S>(
+        &self,
+        derived_key_kind: SigningKeyKind,
+        req_date: &DateTime<Utc>,
+        region: R,
+        service: S,
+    ) -> Self
     where
         R: AsRef<str>,
         S: AsRef<str>,
@@ -445,7 +456,7 @@ impl SigningKey {
     /// Return a KSigning key given a KSigning, KService, KRegion, KDate, or KSecret key.
     ///
     /// This function is infallible (does not panic).
-    pub fn to_ksigning_key<R, S>(&self, req_date: &Date<Utc>, region: R, service: S) -> Self
+    pub fn to_ksigning_key<R, S>(&self, req_date: &DateTime<Utc>, region: R, service: S) -> Self
     where
         R: AsRef<str>,
         S: AsRef<str>,
@@ -465,7 +476,7 @@ impl SigningKey {
     /// Return a KService key given a KService, KRegion, KDate, or KSecret key.
     ///
     /// This function panics an error if given a KSigning key. Use `try_to_kservice_key` for a non-panicking version,.
-    pub fn to_kservice_key<R, S>(&self, req_date: &Date<Utc>, region: R, service: S) -> Self
+    pub fn to_kservice_key<R, S>(&self, req_date: &DateTime<Utc>, region: R, service: S) -> Self
     where
         R: AsRef<str>,
         S: AsRef<str>,
@@ -480,7 +491,7 @@ impl SigningKey {
     ///
     /// This function panics if given a KSigning or KService key. Use `try_to_kregion_key` for a for a non-panicking
     /// version.
-    pub fn to_kregion_key<R>(&self, req_date: &Date<Utc>, region: R) -> Self
+    pub fn to_kregion_key<R>(&self, req_date: &DateTime<Utc>, region: R) -> Self
     where
         R: AsRef<str>,
     {
@@ -494,7 +505,7 @@ impl SigningKey {
     ///
     /// This function panics if given a KRegion, KSigning, or KService key. Use `try_to_kdate_key` for a non-panicking
     /// version.
-    pub fn to_kdate_key(&self, req_date: &Date<Utc>) -> Self {
+    pub fn to_kdate_key(&self, req_date: &DateTime<Utc>) -> Self {
         match self.try_to_kdate_key(req_date) {
             Ok(s) => s,
             Err(e) => panic!("{}", e),
@@ -510,7 +521,7 @@ pub struct GetSigningKeyRequest {
     pub signing_key_kind: SigningKeyKind,
     pub access_key: String,
     pub session_token: Option<String>,
-    pub request_date: Date<Utc>,
+    pub request_date: DateTime<Utc>,
     pub region: String,
     pub service: String,
 }
@@ -547,7 +558,7 @@ impl<F> Debug for GetSigningKeyFn<F> {
 
 impl<F, Fut, E> Service<GetSigningKeyRequest> for GetSigningKeyFn<F>
 where
-    F: FnMut(SigningKeyKind, String, Option<String>, Date<Utc>, String, String) -> Fut,
+    F: FnMut(SigningKeyKind, String, Option<String>, DateTime<Utc>, String, String) -> Fut,
     Fut: Future<Output = Result<(PrincipalActor, SigningKey), E>> + Send + Sync,
     E: Into<BoxError>,
 {
@@ -877,9 +888,9 @@ impl Request {
     }
 
     /// The date of the request.
-    pub(crate) fn get_request_date(&self) -> Result<Date<Utc>, SignatureError> {
+    pub(crate) fn get_request_date(&self) -> Result<DateTime<Utc>, SignatureError> {
         let timestamp = self.get_request_timestamp()?;
-        Ok(timestamp.date())
+        Ok(timestamp)
     }
 
     /// The timestamp of the request.
@@ -945,7 +956,7 @@ impl Request {
         A2: AsRef<str>,
     {
         let ts = self.get_request_timestamp()?;
-        let date = ts.date().format("%Y%m%d");
+        let date = ts.date_naive().format("%Y%m%d");
         Ok(format!("{}/{}/{}/{}", date, region.as_ref(), service.as_ref(), AWS4_REQUEST))
     }
 

@@ -1,13 +1,12 @@
-use std::{error::Error, str::FromStr};
-
 use {
     chrono::{
         format::{ParseError, ParseResult},
-        offset::{FixedOffset, TimeZone},
-        DateTime, Utc,
+        offset::FixedOffset,
+        DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc,
     },
     lazy_static::lazy_static,
     regex::Regex,
+    std::{error::Error, str::FromStr},
 };
 
 lazy_static! {
@@ -95,7 +94,22 @@ impl ParseISO8601<DateTime<FixedOffset>> for DateTime<FixedOffset> {
                 sign * (hour * 3600 + min * 60)
             };
 
-            Ok(FixedOffset::east(offset_secs).ymd(year, month, day).and_hms_nano(hour, minute, second, nanos))
+            let date = NaiveDate::from_ymd_opt(year, month, day).unwrap_or_else(|| {
+                panic!("Invalid date: {}-{}-{}", year, month, day);
+            });
+            let time = NaiveTime::from_hms_nano_opt(hour, minute, second, nanos).unwrap_or_else(|| {
+                panic!("Invalid time: {}:{}:{}.{:09}", hour, minute, second, nanos);
+            });
+            let datetime = NaiveDateTime::new(date, time);
+            let offset = FixedOffset::east_opt(offset_secs).unwrap_or_else(|| {
+                panic!("Invalid offset: {}", offset_secs);
+            });
+
+            let datetime = datetime.and_local_timezone(offset);
+            let datetime = datetime.single().unwrap_or_else(|| {
+                panic!("Invalid datetime: {:?}", datetime);
+            });
+            Ok(datetime)
         } else {
             Err(*INVALID)
         }

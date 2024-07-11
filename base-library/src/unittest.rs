@@ -6,7 +6,7 @@ use {
             SignatureError, SigningKey, SigningKeyKind,
         },
     },
-    chrono::{Date, DateTime, Datelike, NaiveDate, Timelike, Utc},
+    chrono::{DateTime, Datelike, NaiveDate, Timelike, Utc},
     http::{
         header::{HeaderMap, HeaderValue},
         uri::{PathAndQuery, Uri},
@@ -220,7 +220,7 @@ async fn run_auth_test_get_err_get_signing_key(
     kind: SigningKeyKind,
     _access_key_id: String,
     _session_token: Option<String>,
-    req_date: Date<Utc>,
+    req_date: DateTime<Utc>,
     region: String,
     service: String,
 ) -> Result<(PrincipalActor, SigningKey), SignatureError> {
@@ -247,7 +247,8 @@ async fn run_auth_test_get_err(auth_str: &str) -> SignatureError {
         body: None,
     };
 
-    let test_date = Date::<Utc>::from_utc(NaiveDate::from_ymd(2015, 8, 30), Utc);
+    let test_date =
+        DateTime::<Utc>::from_naive_utc_and_offset(NaiveDate::from_ymd_opt(2015, 8, 30).unwrap().into(), Utc);
     let (_principal, k_signing) = run_auth_test_get_err_get_signing_key(
         SigningKeyKind::KSigning,
         "".to_string(),
