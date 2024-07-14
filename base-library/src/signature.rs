@@ -7,20 +7,8 @@
 //! and [SigV4S3](https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-authenticating-requests.html)
 //! algorithms.
 //!
-use std::{
-    any::type_name,
-    collections::{BTreeMap, HashMap},
-    convert::{From, Into},
-    error::Error,
-    fmt::{Debug, Display, Formatter, Result as FmtResult},
-    future::Future,
-    io::{Error as IOError, Write},
-    str::from_utf8,
-    task::{Context, Poll},
-};
-
 use {
-    chrono::{DateTime, Duration, Utc},
+    chrono::{DateTime, Duration, NaiveDate, Utc},
     http::{
         header::{HeaderMap, HeaderValue},
         request::Parts,
@@ -31,6 +19,18 @@ use {
     regex::Regex,
     ring::digest::{digest, SHA256},
     scratchstack_aws_principal::PrincipalActor,
+    std::{
+        any::type_name,
+        collections::{BTreeMap, HashMap},
+        convert::{From, Into},
+        error::Error,
+        fmt::{Debug, Display, Formatter, Result as FmtResult},
+        future::Future,
+        io::{Error as IOError, Write},
+        str::from_utf8,
+        task::{Context, Poll},
+    },
+    subtle::ConstantTimeEq,
     tower::{BoxError, Service},
 };
 
@@ -93,6 +93,9 @@ const X_AMZ_SIGNATURE: &str = "X-Amz-Signature";
 /// Query parameter specifying the signed headers
 const X_AMZ_SIGNEDHEADERS: &str = "X-Amz-SignedHeaders";
 
+/// Length of a SigV4 signature string.
+const SIGV4_SIGNATURE_LEN: usize = 64;
+
 lazy_static! {
     /// Multiple slash pattern for condensing URIs
     static ref MULTISLASH: Regex = Regex::new("//+").unwrap();
@@ -112,6 +115,7 @@ pub enum SignatureError {
 
     /// The request body used an unsupported character set encoding. Currently only UTF-8 is supported.
     InvalidBodyEncoding {
+        /// A message describing the error.
         message: String,
     },
 
@@ -119,6 +123,7 @@ pub enum SignatureError {
     /// credential scope (in the form `<code>_date_/_region_/_service_/aws4_request</code>`) did not match the
     /// expected value for the server.
     InvalidCredential {
+        /// A message describing the error.
         message: String,
     },
 
@@ -127,17 +132,20 @@ pub enum SignatureError {
 
     /// The signature passed in the request did not match the calculated signature value.
     InvalidSignature {
+        /// A message describing the error.
         message: String,
     },
 
     /// The type of signing key is incorrect for this operation.
     InvalidSigningKeyKind {
+        /// A message describing the error.
         message: String,
     },
 
     /// The URI path includes invalid components. This can be a malformed hex encoding (e.g. `%0J`), a non-absolute
     /// URI path (`foo/bar`), or a URI path that attempts to navigate above the root (`/x/../../../y`).
     InvalidURIPath {
+        /// A message describing the error.
         message: String,
     },
 
@@ -145,6 +153,7 @@ pub enum SignatureError {
     /// not allowed (e.g. the `content-type` header), or the header could not be parsed (e.g., the `date` header is
     /// not a valid date).
     MalformedHeader {
+        /// A message describing the error.
         message: String,
     },
 
@@ -152,51 +161,64 @@ pub enum SignatureError {
     /// this is not allowed (e.g. a signature parameter), or the parameter could not be parsed (e.g., the `X-Amz-Date`
     ///  parameter is not a valid date).
     MalformedParameter {
+        /// A message describing the error.
         message: String,
     },
 
     /// The AWS SigV4 signature was malformed in some way. This can include invalid timestamp formats, missing
     /// authorization components, or unparseable components.
     MalformedSignature {
+        /// A message describing the error.
         message: String,
     },
 
     /// A required HTTP header (and its equivalent in the query string) is missing.
     MissingHeader {
+        /// The name of the missing header.
         header: String,
     },
 
     /// A required query parameter is missing. This is used internally in the library; external callers only see
     /// `MissingHeader`.
     MissingParameter {
+        /// The name of the missing query parameter.
         parameter: String,
     },
 
     /// An HTTP header that can be specified only once was specified multiple times.
     MultipleHeaderValues {
+        /// The name of the header.
         header: String,
     },
 
     /// A query parameter that can be specified only once was specified multiple times.
     MultipleParameterValues {
+        /// The name of the query parameter.
         parameter: String,
     },
 
     /// The timestamp in the request is out of the allowed range.
     TimestampOutOfRange {
+        /// The minimum allowed timestamp.
         minimum: DateTime<Utc>,
+
+        /// The maximum allowed timestamp.
         maximum: DateTime<Utc>,
+
+        /// The timestamp received in the request.
         received: DateTime<Utc>,
     },
 
     /// The access key specified in the request is unknown.
     UnknownAccessKey {
+        /// The unknown access key.
         access_key: String,
     },
 
     /// The signature algorithm requested by the caller is unknown. This library only supports the `AWS4-HMAC-SHA256`
     /// algorithm.
     UnknownSignatureAlgorithm {
+        /// The unknown signature algorithm.
         algorithm: String,
     },
 }
@@ -279,21 +301,24 @@ impl From<IOError> for SignatureError {
 }
 
 /// The types of signing key available.
+///
+/// See [`SigningKey`] for information on the types of keys and how they are derived.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SigningKeyKind {
-    /// KSecret: secret key prepended with "AWS4". Avoid using.
+    /// KSecret: the raw secret key.
     KSecret,
 
-    /// KDate: HMAC(KSecret, requestDate)
+    /// KDate: `HMAC_SHA256("AWS4" + KSecret, request_date)`, where `request_date` is the date of
+    /// the request in the UTC time zone formatted as "YYYYMMDD".
     KDate,
 
-    /// KRegion: HMAC(KDate, region)
+    /// KRegion: `HMAC_SHA256(KDate, region)`.
     KRegion,
 
-    /// KService: HMAC(KRegion, service)
+    /// KService: `HMAC_SHA256(KRegion, service)`.
     KService,
 
-    /// KSigning: HMAC(KService, "aws4_request"). Preferred.
+    /// KSigning: `HMAC_SHA256(KService, "aws4_request")`.
     KSigning,
 }
 
@@ -309,10 +334,37 @@ impl Display for SigningKeyKind {
     }
 }
 
-/// A signing key of some type.
+/// An AWS SigV4 key for signing requests.
+///
+/// Signing keys are derived from a secret key and are used to sign requests made to AWS services.
+/// The raw secret key is hashed with other attributes in the request to derive the signing key.
+///
+/// In the table below, `HMAC_SHA256(key, data)` denotes the HMAC SHA-256 function with the given
+/// key and data.
+///
+/// The stages of derivation are:
+/// * [`KSecret`][SigningKeyKind::KSecret]: The raw secret key.
+/// * [`KDate`][SigningKeyKind::KDate]: The secret key hashed with the request date in UTC formatted
+///   as "YYYYMMDD". This is calculated as `HMAC_SHA256("AWS4" + KSecret, request_date)`.
+/// * [`KRegion`][SigningKeyKind::KRegion]: The KDate key hashed with the region name. This is
+///   calculated as `HMAC_SHA256(KDate, region)`.
+/// * [`KService`][SigningKeyKind::KService]: The KRegion key hashed with the service name. This is
+///   calculated as `HMAC_SHA256(KRegion, service)`.
+/// * [`KSigning`][SigningKeyKind::KSigning]: The KService key hashed with the string
+///   `"aws4_request"`. This is calculated as `HMAC_SHA256(KService, "aws4_request")`.
+///
+/// The `KSigning` key is the most secure key type. If the key is leaked, an attacker can only sign
+/// requests for the given date, region, and service. Key store services should never vend anything
+/// other than the `KSigning` key to an application service.
+///
+/// It is not possible to derive an earlier key from a later key—e.g., you cannot derive a
+/// `KRegion` key from a `KService` key. However, you can derive a later key from an earlier key.
 #[derive(Clone)]
 pub struct SigningKey {
+    /// The type of signing key.
     pub kind: SigningKeyKind,
+
+    /// The key itself.
     pub key: Vec<u8>,
 }
 
@@ -328,11 +380,15 @@ impl Debug for SigningKey {
 impl SigningKey {
     /// Convert this key into the specified kind of key.
     ///
-    /// This function returns an error if the existing key cannot be derived into the dervied key kind.
+    /// It is safe to call this function with the same kind of key as the existing key; this will
+    /// return a copy of the existing key.
+    ///
+    /// # Errors
+    /// This function returns an error if the existing key is
     pub fn try_derive<R, S>(
         &self,
         derived_key_kind: SigningKeyKind,
-        req_date: &DateTime<Utc>,
+        req_date: &NaiveDate,
         region: R,
         service: S,
     ) -> Result<Self, SignatureError>
@@ -356,13 +412,10 @@ impl SigningKey {
 
     /// Return a KService key given a KService, KRegion, KDate, or KSecret key.
     ///
-    /// This function returns an error if given a KSigning key.
-    pub fn try_to_kservice_key<R, S>(
-        &self,
-        req_date: &DateTime<Utc>,
-        region: R,
-        service: S,
-    ) -> Result<Self, SignatureError>
+    /// # Errors
+    /// [`SignatureError::InvalidSigningKeyKind`] is returned if derivation to an earlier
+    /// kind is attempted, e.g. [`KRegion`][SigningKeyKind::KRegion] into [`KDate`][SigningKeyKind::KDate].
+    pub fn try_to_kservice_key<R, S>(&self, req_date: &NaiveDate, region: R, service: S) -> Result<Self, SignatureError>
     where
         R: AsRef<str>,
         S: AsRef<str>,
@@ -382,10 +435,14 @@ impl SigningKey {
         }
     }
 
-    /// Return a KRegion key given a KRegion, KDate, or KSecret key.
+    /// Return a [`KRegion`][SigningKeyKind::KRegion] key given a
+    /// [`KRegion`][SigningKeyKind::KRegion], [`KDate`][SigningKeyKind::KDate], or
+    /// [`KSecret`][SigningKeyKind::KSecret] key.
     ///
-    /// This function returns an error if given a KSigning or KService key.
-    pub fn try_to_kregion_key<R>(&self, req_date: &DateTime<Utc>, region: R) -> Result<Self, SignatureError>
+    /// # Errors
+    /// [`SignatureError::InvalidSigningKeyKind`] is returned if this is given a
+    /// [`KSigning`][SigningKeyKind::KSigning] key.
+    pub fn try_to_kregion_key<R>(&self, req_date: &NaiveDate, region: R) -> Result<Self, SignatureError>
     where
         R: AsRef<str>,
     {
@@ -404,10 +461,17 @@ impl SigningKey {
         }
     }
 
-    /// Return a KDate key given a KDate or KSecret key.
+    /// Return a [`KDate`][SigningKeyKind::KDate] key given a [`KDate`][SigningKeyKind::KDate] or
+    /// [`KSecret`][SigningKeyKind::KSecret] key.
+    ///
+    /// # Errors
+    /// [`SignatureError::InvalidSigningKeyKind`] is returned if this is given a
+    /// [`KRegion`][SigningKeyKind::KRegion],
+    /// [`KService`][SigningKeyKind::KService], or
+    /// [`KSigning`][SigningKeyKind::KSigning] key.
     ///
     /// This function returns an error if given a KRegion, KSigning, or KService key.
-    pub fn try_to_kdate_key(&self, req_date: &DateTime<Utc>) -> Result<Self, SignatureError> {
+    pub fn try_to_kdate_key(&self, req_date: &NaiveDate) -> Result<Self, SignatureError> {
         match self.kind {
             // Already the same type.
             SigningKeyKind::KDate => Ok(self.clone()),
@@ -434,15 +498,10 @@ impl SigningKey {
 
     /// Convert this key into the specified kind of key.
     ///
-    /// This function panics if the existing key cannot be derived into the dervied key kind. Use `try_derive` for
-    /// a non-panicking version.
-    pub fn derive<R, S>(
-        &self,
-        derived_key_kind: SigningKeyKind,
-        req_date: &DateTime<Utc>,
-        region: R,
-        service: S,
-    ) -> Self
+    /// # Panics
+    /// This function panics if the existing key cannot be derived into the dervied key kind. Use
+    /// [`try_derive`][SigningKey::try_derive] for a non-panicking version.
+    pub fn derive<R, S>(&self, derived_key_kind: SigningKeyKind, req_date: &NaiveDate, region: R, service: S) -> Self
     where
         R: AsRef<str>,
         S: AsRef<str>,
@@ -453,10 +512,16 @@ impl SigningKey {
         }
     }
 
-    /// Return a KSigning key given a KSigning, KService, KRegion, KDate, or KSecret key.
+    /// Return a [`KSigning`][SigningKeyKind::KSigning] key given a
+    /// [`KSigning`][SigningKeyKind::KSigning],
+    /// [`KService`][SigningKeyKind::KService],
+    /// [`KRegion`][SigningKeyKind::KRegion],
+    /// [`KDate`][SigningKeyKind::KDate], or
+    /// [`KSecret`][SigningKeyKind::KSecret] key.
     ///
-    /// This function is infallible (does not panic).
-    pub fn to_ksigning_key<R, S>(&self, req_date: &DateTime<Utc>, region: R, service: S) -> Self
+    /// This function is infallible; an equivalent `try_to_signing_key()` method does not exist as
+    /// as result.
+    pub fn to_ksigning_key<R, S>(&self, req_date: &NaiveDate, region: R, service: S) -> Self
     where
         R: AsRef<str>,
         S: AsRef<str>,
@@ -473,10 +538,16 @@ impl SigningKey {
         }
     }
 
-    /// Return a KService key given a KService, KRegion, KDate, or KSecret key.
+    /// Return a [`KService`][SigningKeyKind::KService] key given a
+    /// [`KService`][SigningKeyKind::KService],
+    /// [`KRegion`][SigningKeyKind::KRegion],
+    /// [`KDate`][SigningKeyKind::KDate], or
+    /// [`KSecret`][SigningKeyKind::KSecret] key.
     ///
-    /// This function panics an error if given a KSigning key. Use `try_to_kservice_key` for a non-panicking version,.
-    pub fn to_kservice_key<R, S>(&self, req_date: &DateTime<Utc>, region: R, service: S) -> Self
+    /// # Panics
+    /// This function will panic if given a [`KSigning`][SigningKeyKind::KSigning] key. Use
+    /// [`try_to_kservice_key`][SigningKey::try_to_kservice_key] for a non-panicking version.
+    pub fn to_kservice_key<R, S>(&self, req_date: &NaiveDate, region: R, service: S) -> Self
     where
         R: AsRef<str>,
         S: AsRef<str>,
@@ -487,11 +558,16 @@ impl SigningKey {
         }
     }
 
-    /// Return a KRegion key given a KRegion, KDate, or KSecret key.
+    /// Return a [`KRegion`][SigningKeyKind::KRegion] key given a
+    /// [`KRegion`][SigningKeyKind::KRegion],
+    /// [`KDate`][SigningKeyKind::KDate], or
+    /// [`KSecret`][SigningKeyKind::KSecret] key.
     ///
-    /// This function panics if given a KSigning or KService key. Use `try_to_kregion_key` for a for a non-panicking
-    /// version.
-    pub fn to_kregion_key<R>(&self, req_date: &DateTime<Utc>, region: R) -> Self
+    /// # Panics
+    /// This function will panic if given a [`KSigning`][SigningKeyKind::KSigning] or
+    /// [`KService`][SigningKeyKind::KService] key. Use
+    /// [`try_to_kregion_key`][SigningKey::try_to_kregion_key] for a non-panicking version.
+    pub fn to_kregion_key<R>(&self, req_date: &NaiveDate, region: R) -> Self
     where
         R: AsRef<str>,
     {
@@ -501,11 +577,16 @@ impl SigningKey {
         }
     }
 
-    /// Return a KDate key given a KDate or KSecret key.
+    /// Return a [`KDate`][SigningKeyKind::KDate] key given a
+    /// [`KDate`][SigningKeyKind::KDate], or
+    /// [`KSecret`][SigningKeyKind::KSecret] key.
     ///
-    /// This function panics if given a KRegion, KSigning, or KService key. Use `try_to_kdate_key` for a non-panicking
-    /// version.
-    pub fn to_kdate_key(&self, req_date: &DateTime<Utc>) -> Self {
+    /// # Panics
+    /// This function will panic if given a [`KSigning`][SigningKeyKind::KSigning],
+    /// [`KService`][SigningKeyKind::KService], or
+    /// [`KRegion`][SigningKeyKind::KRegion] key. Use
+    /// [`try_to_kdate_key`][SigningKey::try_to_kdate_key] for a non-panicking version.
+    pub fn to_kdate_key(&self, req_date: &NaiveDate) -> Self {
         match self.try_to_kdate_key(req_date) {
             Ok(s) => s,
             Err(e) => panic!("{}", e),
@@ -517,12 +598,24 @@ impl SigningKey {
 /// additional data (e.g. a database connection) to look up a key, use this to implement a struct.
 pub trait GetSigningKey {}
 
+/// A request for retrieving a signing key from an outside source.
 pub struct GetSigningKeyRequest {
+    /// The type of signing key to retrieve.
     pub signing_key_kind: SigningKeyKind,
+
+    /// The access key to use to retrieve the signing key.
     pub access_key: String,
+
+    /// An optional session token to use to retrieve the signing key.
     pub session_token: Option<String>,
-    pub request_date: DateTime<Utc>,
+
+    /// The date of the request.
+    pub request_date: NaiveDate,
+
+    /// The region of the service being accessed.
     pub region: String,
+
+    /// The service being accessed.
     pub service: String,
 }
 
@@ -534,6 +627,11 @@ where
 {
 }
 
+/// A wrapper for a function that retrieves a signing key.
+///
+/// To construct a `GetSigningKeyFn`, use the [`get_signing_key_fn`] function.
+///
+/// This implements [`Service<GetSigningKeyRequest>`][tower::Service].
 #[derive(Clone, Copy)]
 pub struct GetSigningKeyFn<F> {
     f: F,
@@ -542,8 +640,19 @@ pub struct GetSigningKeyFn<F> {
 /// Wrap an async function taking a signing request and returns a result into a `GetSigningKey` trait implementation.
 ///
 /// The function signature should look like:
-/// `async fn ..(kind: SigningKeyKind, access_key: String, session_token: Option<String>, request_date: Date<Utc>,
-/// region: String, service: String) -> Result<(PrincipalActor, SigningKey), SignatureError>`
+/// ```no_run
+/// # use { chrono::{DateTime, Utc}, scratchstack_aws_signature::{SignatureError, SigningKey, SigningKeyKind} };
+/// use scratchstack_aws_principal::PrincipalActor;
+///
+/// async fn get_key(
+///     kind: SigningKeyKind,
+///     access_key: String,
+///     session_token: Option<String>,
+///     request_date: DateTime<Utc>,
+///     region: String, service: String)
+/// -> Result<(PrincipalActor, SigningKey), SignatureError>
+/// # { todo!() }
+/// ```
 pub fn get_signing_key_fn<F>(f: F) -> GetSigningKeyFn<F> {
     GetSigningKeyFn {
         f,
@@ -556,9 +665,12 @@ impl<F> Debug for GetSigningKeyFn<F> {
     }
 }
 
+/// Implementation of a [`Service`] for [`GetSigningKeyFn`].
+///
+/// To send the request, use the [`call`][Service::call] method.
 impl<F, Fut, E> Service<GetSigningKeyRequest> for GetSigningKeyFn<F>
 where
-    F: FnMut(SigningKeyKind, String, Option<String>, DateTime<Utc>, String, String) -> Fut,
+    F: FnMut(SigningKeyKind, String, Option<String>, NaiveDate, String, String) -> Fut,
     Fut: Future<Output = Result<(PrincipalActor, SigningKey), E>> + Send + Sync,
     E: Into<BoxError>,
 {
@@ -570,6 +682,46 @@ where
         Poll::Ready(Ok(()))
     }
 
+    /// Invoke the underlying function to retrieve a signing key.
+    ///
+    /// # Example
+    /// ```rust
+    /// # use chrono::{NaiveDate, Utc};
+    /// # use scratchstack_aws_signature::{GetSigningKeyRequest, SignatureError, SigningKey, SigningKeyKind, get_signing_key_fn};
+    /// # use scratchstack_aws_principal::PrincipalActor;
+    /// use tower::Service;
+    ///
+    /// async fn get_key(
+    ///     kind: SigningKeyKind,
+    ///     access_key: String,
+    ///     session_token: Option<String>,
+    ///     request_date: NaiveDate,
+    ///     region: String,
+    ///     service: String)
+    /// -> Result<(PrincipalActor, SigningKey), SignatureError> {
+    ///     // Replace with your implementation for obtaining a key.
+    ///     let actor = PrincipalActor::user(
+    ///         "aws", "123456789012", "/", "user", "AIDAQXZEAEXAMPLEUSER").unwrap();
+    ///     let key = SigningKey {
+    ///         kind: SigningKeyKind::KSecret,
+    ///         key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY".as_bytes().to_vec()
+    ///     };
+    ///     Ok((actor, key.try_derive(kind, &request_date, region, service)?))
+    /// }
+    ///
+    /// let mut get_key_service = get_signing_key_fn(get_key);
+    /// let req = GetSigningKeyRequest {
+    ///     signing_key_kind: SigningKeyKind::KSigning,
+    ///     access_key: "AKIAIOSFODNN7EXAMPLE".to_string(),
+    ///     session_token: None,
+    ///     request_date: NaiveDate::from_ymd_opt(2021, 1, 1).unwrap(),
+    ///     region: "us-east-1".to_string(),
+    ///     service: "example".to_string(),
+    /// };
+    /// # tokio_test::block_on(async {
+    /// let (actor, key) = get_key_service.call(req).await.unwrap();
+    /// # });
+    /// ```
     fn call(&mut self, req: GetSigningKeyRequest) -> Self::Future {
         (self.f)(req.signing_key_kind, req.access_key, req.session_token, req.request_date, req.region, req.service)
     }
@@ -577,6 +729,9 @@ where
 
 /// A data structure containing the elements of the request (some client-supplied, some service-supplied) involved in
 /// the SigV4 verification process.
+///
+/// This is typically populated from the HTTP request headers and body by using the
+/// [`Request::from_http_request_parts`] method.
 #[derive(Debug)]
 pub struct Request {
     /// The request method (GET, PUT, POST) (client).
@@ -594,6 +749,16 @@ pub struct Request {
 
 impl Request {
     /// Create a Request from an HTTP request.
+    ///
+    /// # Example
+    /// ```rust
+    /// # use scratchstack_aws_signature::Request;
+    /// let http_req = http::Request::get("https://example.com")
+    ///     .header("X-Amz-Date", "20210101T000000Z")
+    ///     .body(())
+    ///     .unwrap();
+    /// let req = Request::from_http_request_parts(&http_req.into_parts().0, None);
+    /// ```
     pub fn from_http_request_parts(parts: &Parts, body: Option<Vec<u8>>) -> Self {
         Self {
             request_method: parts.method.as_str().to_string(),
@@ -603,6 +768,31 @@ impl Request {
         }
     }
 
+    /// Returns a [`GetSigningKeyRequest`] from this request.
+    ///
+    /// This is used to request a signing key from an external source.
+    ///
+    /// # Example
+    /// ```rust
+    /// # use chrono::NaiveDate;
+    /// # use scratchstack_aws_signature::{GetSigningKeyRequest, Request, SignatureError, SigningKeyKind};
+    /// # let http_req = http::Request::get("https://example.com")
+    /// #     .header("X-Amz-Date", "20210101T000000Z")
+    /// #     .header("Authorization", "AWS4-HMAC-SHA256 \
+    /// # Credential=AKIAIOSFODNN7EXAMPLE/20210101/us-east-1/example/aws4_request, \
+    /// # SignedHeaders=host;x-amz-date, \
+    /// # Signature=3ea4679d2ecf5a8293e1fb10298c82988f024a2e937e9b37876b34bb119da0bc")
+    /// #     .body(())
+    /// #     .unwrap();
+    /// # let req = Request::from_http_request_parts(&http_req.into_parts().0, None);
+    /// let gsk_req = req.to_get_signing_key_request(
+    ///     SigningKeyKind::KSigning, "us-east-1", "example").unwrap();
+    /// assert_eq!(gsk_req.signing_key_kind, SigningKeyKind::KSigning);
+    /// assert_eq!(gsk_req.access_key, "AKIAIOSFODNN7EXAMPLE");
+    /// assert_eq!(gsk_req.request_date, NaiveDate::from_ymd_opt(2021, 1, 1).unwrap());
+    /// assert_eq!(gsk_req.region, "us-east-1");
+    /// assert_eq!(gsk_req.service, "example");
+    /// ```
     pub fn to_get_signing_key_request<A1, A2>(
         &self,
         signing_key_kind: SigningKeyKind,
@@ -624,6 +814,13 @@ impl Request {
     }
 
     /// Retrieve a header value, requiring exactly one value be present.
+    ///
+    /// # Errors
+    /// If the header is missing, a `SignatureError::MissingHeader` error is returned.
+    ///
+    /// If the header contains multiple values, a `SignatureError::MultipleHeaderValues` error is returned.
+    ///
+    /// If the header value is not valid UTF-8, a `SignatureError::MalformedHeader` error is returned.
     pub(crate) fn get_header_one<S: Into<String>>(&self, header: S) -> Result<String, SignatureError> {
         let header = header.into();
         let mut iter = self.headers.get_all(&header).iter();
@@ -645,7 +842,8 @@ impl Request {
         }
     }
 
-    /// The query parameters from the request, normalized, in a mapping format.
+    /// Return query parameters from the request, normalized, as a `HashMap` of parameter names to the list of
+    /// values for that parameter.
     pub(crate) fn get_query_parameters(&self) -> Result<HashMap<String, Vec<String>>, SignatureError> {
         match self.uri.query() {
             Some(s) => normalize_query_parameters(s),
@@ -888,9 +1086,9 @@ impl Request {
     }
 
     /// The date of the request.
-    pub(crate) fn get_request_date(&self) -> Result<DateTime<Utc>, SignatureError> {
+    pub(crate) fn get_request_date(&self) -> Result<NaiveDate, SignatureError> {
         let timestamp = self.get_request_timestamp()?;
-        Ok(timestamp)
+        Ok(timestamp.naive_utc().date())
     }
 
     /// The timestamp of the request.
@@ -906,7 +1104,41 @@ impl Request {
     /// However, the AWS SigV4 test suite includes a variety of date formats,
     /// including RFC 2822, RFC 3339, and ISO 8601. This routine allows all
     /// of these formats.
-    pub(crate) fn get_request_timestamp(&self) -> Result<DateTime<Utc>, SignatureError> {
+    ///
+    /// This is unlikely to be useful in regular code; it is exposed for testing purposes.
+    ///
+    /// # Errors
+    /// If the `X-Amz-Date`` query parameter is present but is not a valid timestamp,
+    /// [`SignatureError::MalformedParameter`] is returned.
+    ///
+    /// If the `X-Amz-Date` query parameter is missing and the `X-Amz-Date` header is present but is not a valid
+    /// timestamp, [`SignatureError::MalformedHeader`] is returned.
+    ///
+    /// If the `X-Amz-Date` query parameter and `X-Amz-Date` header are missing and the `Date` header is present
+    /// but is not a valid timestamp, [`SignatureError::MalformedHeader`] is returned.
+    ///
+    /// If none of the above are present, [`SignatureError::MissingHeader`] is returned.
+    ///
+    /// # Example
+    /// ```rust
+    /// use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
+    /// use http::Request;
+    /// use scratchstack_aws_signature::Request as SigRequest;
+    ///
+    /// let req = Request::get("https://example.com")
+    ///     .header("X-Amz-Date", "20210101T000000Z")
+    ///     .body(())
+    ///     .unwrap();
+    /// let req = SigRequest::from_http_request_parts(&req.into_parts().0, None);
+    /// let expected = DateTime::<Utc>::from_naive_utc_and_offset(
+    ///     NaiveDateTime::new(
+    ///         NaiveDate::from_ymd_opt(2021, 1, 1).unwrap(),
+    ///         NaiveTime::from_hms_opt(0, 0, 0).unwrap()),
+    ///     Utc
+    /// );
+    /// assert_eq!(req.get_request_timestamp().unwrap(), expected);
+    /// ```
+    pub fn get_request_timestamp(&self) -> Result<DateTime<Utc>, SignatureError> {
         // It turns out that unrolling this logic is the most straightforward way to return sensible error messages.
 
         match self.get_query_param_one(X_AMZ_DATE) {
@@ -1183,6 +1415,16 @@ where
 /// signature.
 ///
 /// This is mainly for unit testing. For general purpose use, use `sigv4_verify`.
+///
+/// # Errors
+/// If the request timestamp is outside the allowed timestamp mismatch, a `SignatureError::TimestampOutOfRange` error
+/// is returned.
+///
+/// If the request signature does not match the expected signature, a `SignatureError::InvalidSignature` error is
+/// returned.
+///
+/// # Panics
+/// If the expected signature string is not 64 bytes long, this function will panic. This should never happen.
 pub fn sigv4_verify_at<A1, A2>(
     req: &Request,
     signing_key: &SigningKey,
@@ -1209,20 +1451,49 @@ where
         }
     }
 
-    let request_sig = req.get_request_signature()?;
-    let expected_sig = sigv4_get_expected_signature(req, signing_key, &region, &service)?;
+    let request_sig_str = req.get_request_signature()?;
+    let expected_sig_str = sigv4_get_expected_signature(req, signing_key, &region, &service)?;
 
-    if expected_sig != request_sig {
+    if request_sig_str.len() != SIGV4_SIGNATURE_LEN {
+        return Err(SignatureError::InvalidSignature {
+            message: format!("Expected {}-byte signature instead of {}", SIGV4_SIGNATURE_LEN, request_sig_str.len()),
+        });
+    }
+
+    if expected_sig_str.len() != SIGV4_SIGNATURE_LEN {
+        panic!("Expected signature is not {SIGV4_SIGNATURE_LEN} bytes long");
+    }
+
+    let mut request_sig: [u8; SIGV4_SIGNATURE_LEN] = [0; SIGV4_SIGNATURE_LEN];
+    let mut expected_sig: [u8; SIGV4_SIGNATURE_LEN] = [0; SIGV4_SIGNATURE_LEN];
+
+    request_sig.copy_from_slice(request_sig_str.as_bytes());
+    expected_sig.copy_from_slice(expected_sig_str.as_bytes());
+
+    // Cryptographically sensitive: we must compare every byte and not short-circuit this, or the
+    // we can be vulnerable to timing attacks. `ct_eq` comes from the `Subtle::ConstantTimeEq` trait.
+    if expected_sig.ct_eq(&request_sig).unwrap_u8() == 0 {
         Err(SignatureError::InvalidSignature {
-            message: format!("Expected {} instead of {}", expected_sig, request_sig),
+            message: format!("Expected {} instead of {}", expected_sig_str, request_sig_str),
         })
     } else {
         Ok(())
     }
 }
 
-/// Verify a SigV4 request. This verifies that the request timestamp is not beyond the allowed timestamp mismatch
-/// against the current time, and that the request signature matches our expected signature.
+/// Verify a SigV4 request. This verifies that the request timestamp is not beyond the
+/// allowed timestamp mismatch against the current time, and that the request signature matches our expected
+/// signature.
+///
+/// # Errors
+/// If the request timestamp is outside the allowed timestamp mismatch, a `SignatureError::TimestampOutOfRange` error
+/// is returned.
+///
+/// If the request signature does not match the expected signature, a `SignatureError::InvalidSignature` error is
+/// returned.
+///
+/// # Panics
+/// If the expected signature string is not 64 bytes long, this function will panic. This should never happen.
 pub fn sigv4_verify<A1, A2>(
     req: &Request,
     signing_key: &SigningKey,
@@ -1238,8 +1509,15 @@ where
 }
 
 /// Indicates whether the specified byte is RFC3986 unreserved -- i.e., can be represented without being
-/// percent-encoded, e.g. '?' -> '%3F'.
-pub fn is_rfc3986_unreserved(c: u8) -> bool {
+/// percent-encoded, e.g. `'?'` -> `'%3F'`.
+///
+/// # Example
+/// ```rust
+/// # use scratchstack_aws_signature::is_rfc3986_unreserved;
+/// assert!(is_rfc3986_unreserved(b'a'));
+/// assert!(!is_rfc3986_unreserved(b' '));
+/// ```
+pub const fn is_rfc3986_unreserved(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'-' || c == b'.' || c == b'_' || c == b'~'
 }
 
@@ -1247,10 +1525,19 @@ pub fn is_rfc3986_unreserved(c: u8) -> bool {
 /// * Alpha, digit, and the symbols `-`, `.`, `_`, and `~` (unreserved characters) are left alone.
 /// * Characters outside this range are percent-encoded.
 /// * Percent-encoded values are upper-cased (`%2a` becomes `%2A`)
-/// * Percent-encoded values in the unreserved space (`%41`-`%5A`, `%61`-`%7A`, `%30`-`%39`, `%2D`, `%2E`, `%5F`,
+/// * Percent-encoded values in the unreserved space (`%2D`, `%2E`, `%30`-`%39`, `%5F`, `%41`-`%5A`, `%61`-`%7A`,
 ///   `%7E`) are converted to normal characters.
+/// * Plus-encoded spaces (`+`) are converted to `%20`.
 ///
-/// If a percent encoding is incomplete, an error is returned.
+/// # Errors
+/// If a percent encoding is incomplete or is invalid, `SignatureError::InvalidURIPath` is returned.
+///
+/// # Example
+/// ```rust
+/// # use scratchstack_aws_signature::normalize_uri_path_component;
+/// assert_eq!(normalize_uri_path_component("a b").unwrap(), "a%20b");
+/// assert_eq!(normalize_uri_path_component("%61b").unwrap(), "ab");
+/// ```
 pub fn normalize_uri_path_component(path_component: &str) -> Result<String, SignatureError> {
     let path_component = path_component.as_bytes();
     let mut i = 0;
@@ -1305,6 +1592,19 @@ pub fn normalize_uri_path_component(path_component: &str) -> Result<String, Sign
 }
 
 /// Normalizes the specified URI path, removing redundant slashes and relative path components.
+///
+/// # Errors
+/// If the path is not absolute, a `SignatureError::InvalidURIPath` error is returned.
+///
+/// If any component of the path cannot be normalized per [`normalize_uri_path_component`], a
+/// `SignatureError::InvalidURIPath` error is returned.
+///
+/// # Example
+/// ```rust
+/// # use scratchstack_aws_signature::canonicalize_uri_path;
+/// assert_eq!(canonicalize_uri_path("/a//b/../c").unwrap(), "/a/c");
+/// assert_eq!(canonicalize_uri_path("/a/b/./c/../").unwrap(), "/a/b/");
+/// ```
 pub fn canonicalize_uri_path(uri_path: &str) -> Result<String, SignatureError> {
     // Special case: empty path is converted to '/'; also short-circuit the usual '/' path here.
     if uri_path.is_empty() || uri_path == "/" {
@@ -1362,10 +1662,26 @@ pub fn canonicalize_uri_path(uri_path: &str) -> Result<String, SignatureError> {
 }
 
 /// Normalize the query parameters by normalizing the keys and values of each parameter and return a `HashMap` mapping
-/// each key to a *vector* of values (since it is valid for a query parameters to appear multiple times).
+/// each key to a _vector_ of values (since it is valid for a query parameters to appear multiple times).
 ///
 /// The order of the values matches the order that they appeared in the query string -- this is important for SigV4
 /// validation.
+///
+/// Keys and values are normalized according to the rules of [`normalize_uri_path_component`].
+///
+/// # Errors
+/// If any key or value cannot be normalized as a URI path component, a `SignatureError::InvalidURIPath` error is
+/// returned.
+///
+/// # Example
+/// ```rust
+/// # use scratchstack_aws_signature::normalize_query_parameters;
+/// let result = normalize_query_parameters("a=1&b=2&a=3&c=4").unwrap();
+///
+/// assert_eq!(result.get("a").unwrap(), &vec!["1", "3"]);
+/// assert_eq!(result.get("b").unwrap(), &vec!["2"]);
+/// assert_eq!(result.get("c").unwrap(), &vec!["4"]);
+/// ```
 pub fn normalize_query_parameters(query_string: &str) -> Result<HashMap<String, Vec<String>>, SignatureError> {
     if query_string.is_empty() {
         return Ok(HashMap::new());
@@ -1405,8 +1721,16 @@ pub fn normalize_query_parameters(query_string: &str) -> Result<HashMap<String, 
     Ok(result)
 }
 
-/// Split Authorization header parameters from key=value parts into a HashMap.
-pub fn split_authorization_header_parameters(parameters: &str) -> Result<HashMap<String, String>, SignatureError> {
+/// Split `Authorization`` header parameters from key=value parts into a HashMap.
+///
+/// # Errors
+/// If the header is missing an '=' in what should be a `key=value` pair, `SignatureError::MalformedSignature` error
+/// is returned.
+///
+/// If the header contains duplicate keys, a `SignatureError::MalformedSignature` error is returned.
+pub(crate) fn split_authorization_header_parameters(
+    parameters: &str,
+) -> Result<HashMap<String, String>, SignatureError> {
     trace!("split_authorization_header_parameters: parameters={:?}", parameters);
     let mut result = HashMap::<String, String>::new();
     for parameter in parameters.split(',') {

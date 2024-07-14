@@ -302,7 +302,7 @@ async fn get_signing_key(
     kind: SigningKeyKind,
     _access_key_id: String,
     _session_token: Option<String>,
-    req_date: DateTime<Utc>,
+    req_date: NaiveDate,
     region: String,
     service: String,
 ) -> Result<(PrincipalActor, SigningKey), SignatureError> {
