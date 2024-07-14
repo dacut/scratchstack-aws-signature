@@ -1,5 +1,14 @@
 [workspace]
 members = [
     "base-library",
-    "hyper-integration",
 ]
+resolver = "2"
+
+[workspace.package]
+authors = ["David Cuthbert <dacut@kanga.org>"]
+edition = "2021"
+homepage = "https://github.com/dacut/scratchstack-aws-signature"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/dacut/scratchstack-aws-signature.git"
+version = "0.10.6"
