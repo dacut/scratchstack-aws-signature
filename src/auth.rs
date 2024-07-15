@@ -250,7 +250,7 @@ impl SigV4Authenticator {
 
         // Remove the access key from the credential to get the credential scope. This requires that prevalidate() has
         // been called.
-        let cscope = self.credential.splitn(2, '/').nth(1).expect("prevalidate should have been called first");
+        let cscope = self.credential.split_once('/').map(|x| x.1).expect("prevalidate should have been called first");
 
         result.extend(AWS4_HMAC_SHA256.as_bytes());
         result.push(b'\n');
@@ -295,7 +295,7 @@ impl SigV4Authenticator {
 impl Debug for SigV4Authenticator {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         f.debug_struct("SigV4Authenticator")
-            .field("canonical_request_sha256", &hex::encode(&self.canonical_request_sha256))
+            .field("canonical_request_sha256", &hex::encode(self.canonical_request_sha256))
             .field("session_token", &self.session_token)
             .field("signature", &self.signature)
             .field("request_timestamp", &self.request_timestamp)
@@ -385,7 +385,7 @@ mod tests {
         ring::digest::SHA256_OUTPUT_LEN,
         scratchstack_aws_principal::{Principal, User},
         scratchstack_errors::ServiceError,
-        std::{error::Error, fs::File},
+        std::{error::Error, fs::File, str::FromStr},
         tower::BoxError,
     };
 
@@ -470,7 +470,7 @@ mod tests {
         match request.access_key() {
             "AKIDEXAMPLE" => {
                 let principal = Principal::from(vec![User::new("aws", "123456789012", "/", "test").unwrap().into()]);
-                let k_secret = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
+                let k_secret = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY").unwrap();
                 let k_signing = k_secret.to_ksigning(request.request_date(), request.region(), request.service());
 
                 let response =

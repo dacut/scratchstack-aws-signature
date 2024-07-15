@@ -171,7 +171,7 @@ mod tests {
         lazy_static::lazy_static,
         scratchstack_aws_principal::{Principal, User},
         scratchstack_errors::ServiceError,
-        std::mem::transmute,
+        std::str::FromStr,
         tower::BoxError,
     };
 
@@ -216,7 +216,7 @@ mod tests {
     Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea";
 
     async fn get_signing_key(req: GetSigningKeyRequest) -> Result<GetSigningKeyResponse, BoxError> {
-        let k_secret = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
+        let k_secret = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY").unwrap();
         let k_signing = k_secret.to_ksigning(req.request_date(), req.region(), req.service());
 
         let principal = Principal::from(vec![User::new("aws", "123456789012", "/", "test").unwrap().into()]);
@@ -332,8 +332,8 @@ mod tests {
 
             if i == 0 {
                 unsafe {
-                    // Rewrite the path to be invalid.
-                    let pq_ptr: *mut PathAndQuerySimulate = transmute(&mut pq);
+                    // Rewrite the path to be invalid. This can't be done with the normal PathAndQuery API.
+                    let pq_ptr: *mut PathAndQuerySimulate = &mut pq as *mut PathAndQuery as *mut PathAndQuerySimulate;
                     (*pq_ptr).data = pq_path;
                 }
             }
@@ -499,8 +499,8 @@ mod tests {
 
             if i == 0 {
                 unsafe {
-                    // Rewrite the path to be invalid.
-                    let pq_ptr: *mut PathAndQuerySimulate = transmute(&mut pq);
+                    // Rewrite the path to be invalid. This cannot be done with the normal PathAndQuery API.
+                    let pq_ptr: *mut PathAndQuerySimulate = &mut pq as *mut PathAndQuery as *mut PathAndQuerySimulate;
                     (*pq_ptr).data = pq_path;
                 }
             }
@@ -706,7 +706,7 @@ mod tests {
             s3: true,
             ..Default::default()
         };
-        let opt3 = opt1.clone();
+        let opt3 = opt1;
         let opt4 = opt1;
         assert_eq!(opt1.s3, opt2.s3);
         assert_eq!(opt1.s3, opt3.s3);

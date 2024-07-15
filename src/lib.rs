@@ -36,6 +36,7 @@
 //!     GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, SignatureOptions,
 //!     SignedHeaderRequirements, service_for_signing_key_fn, sigv4_validate_request,
 //! };
+//! use std::str::FromStr;
 //! use tower::{BoxError, Service};
 //!
 //! const ACCESS_KEY: &str = "AKIAIOSFODNN7EXAMPLE";
@@ -67,7 +68,7 @@
 //!     assert_eq!(request.region(), REGION);
 //!     assert_eq!(request.service(), SERVICE);
 //!     let user = User::new(PARTITION, ACCOUNT_ID, PATH, USER_NAME)?;
-//!     let secret_key = KSecretKey::from_str(SECRET_KEY);
+//!     let secret_key = KSecretKey::from_str(SECRET_KEY).unwrap();
 //!     let signing_key = secret_key.to_ksigning(request.request_date(), REGION, SERVICE);
 //!     Ok(GetSigningKeyResponse::builder()
 //!            .principal(user)

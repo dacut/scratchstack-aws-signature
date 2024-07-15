@@ -174,9 +174,9 @@ impl CanonicalRequest {
         mut body: Bytes,
         options: SignatureOptions,
     ) -> Result<(Self, Parts, Bytes), SignatureError> {
-        let canonical_path = canonicalize_uri_path(&parts.uri.path(), options.s3)?;
+        let canonical_path = canonicalize_uri_path(parts.uri.path(), options.s3)?;
         let content_type = get_content_type_and_charset(&parts.headers);
-        let mut query_parameters = query_string_to_normalized_map(&parts.uri.query().unwrap_or(""))?;
+        let mut query_parameters = query_string_to_normalized_map(parts.uri.query().unwrap_or(""))?;
 
         if options.url_encode_form {
             // Treat requests with application/x-www-form-urlencoded bodies as if they were passed into the query string.
@@ -210,7 +210,7 @@ impl CanonicalRequest {
                         }
                     };
 
-                    query_parameters.extend(query_string_to_normalized_map(body_query.as_str())?.into_iter());
+                    query_parameters.extend(query_string_to_normalized_map(body_query.as_str())?);
                     // Rebuild the parts URI with the new query string.
                     let qs = canonicalize_query_to_string(&query_parameters);
                     trace!("Rebuilding URI with new query string: {}", qs);
@@ -320,12 +320,12 @@ impl CanonicalRequest {
 
     /// Get the SHA-256 hash of the [canonical request](https://docs.aws.amazon.com/general/latest/gr/sigv4-create-canonical-request.html).
     pub fn canonical_request_sha256(&self, signed_headers: &Vec<String>) -> [u8; SHA256_OUTPUT_LEN] {
-        let canonical_request = self.canonical_request(&signed_headers);
+        let canonical_request = self.canonical_request(signed_headers);
         let result_digest = digest(&SHA256, canonical_request.as_ref());
         let result_slice = result_digest.as_ref();
         assert!(result_slice.len() == SHA256_OUTPUT_LEN);
         let mut result: [u8; SHA256_OUTPUT_LEN] = [0; SHA256_OUTPUT_LEN];
-        result.as_mut_slice().clone_from_slice(&result_slice);
+        result.as_mut_slice().clone_from_slice(result_slice);
         result
     }
 
@@ -497,7 +497,7 @@ impl CanonicalRequest {
         }
 
         let mut signed_headers = if let Some(signed_headers) = parameter_map.get(SIGNED_HEADERS) {
-            signed_headers.split(|c| *c == b';').map(|s| latin1_to_string(s)).collect()
+            signed_headers.split(|c| *c == b';').map(latin1_to_string).collect()
         } else {
             missing_messages.push(MSG_AUTH_HEADER_REQ_SIGNED_HEADERS);
             Vec::new()
@@ -824,7 +824,7 @@ pub fn get_content_type_and_charset(headers: &HeaderMap<HeaderValue>) -> Option<
         None => return None,
     };
 
-    let mut parts = content_type_opts.split(|c| *c == b';').map(|s| trim_ascii(s));
+    let mut parts = content_type_opts.split(|c| *c == b';').map(trim_ascii);
     let content_type = latin1_to_string(parts.next().expect("split always returns at least one element"));
 
     for option in parts {
@@ -870,7 +870,7 @@ pub fn normalize_headers(headers: &HeaderMap<HeaderValue>) -> HashMap<String, Ve
     for (key, value) in headers.iter() {
         let key = key.as_str().to_lowercase();
         let value = normalize_header_value(value.as_bytes());
-        result.entry(key).or_insert_with(Vec::new).push(value);
+        result.entry(key).or_default().push(value);
     }
 
     result
@@ -886,7 +886,7 @@ fn normalize_header_value(value: &[u8]) -> Vec<u8> {
     for c in value {
         if *c == b' ' {
             if !last_was_space {
-                result.push(' ' as u8);
+                result.push(b' ');
                 last_was_space = true;
             }
         } else {
@@ -897,7 +897,7 @@ fn normalize_header_value(value: &[u8]) -> Vec<u8> {
 
     if last_was_space {
         // Remove trailing spaces.
-        while result.last() == Some(&(' ' as u8)) {
+        while result.last() == Some(&b' ') {
             result.pop();
         }
     }
@@ -1100,8 +1100,8 @@ fn unescape_uri_encoding(s: &str) -> String {
     while let Some(c) = chars.next() {
         if c == b'%' {
             let mut hex_digits = [0u8; 2];
-            hex_digits[0] = chars.next().expect(MSG_INCOMPLETE_TRAILING_ESCAPE) as u8;
-            hex_digits[1] = chars.next().expect(MSG_INCOMPLETE_TRAILING_ESCAPE) as u8;
+            hex_digits[0] = chars.next().expect(MSG_INCOMPLETE_TRAILING_ESCAPE);
+            hex_digits[1] = chars.next().expect(MSG_INCOMPLETE_TRAILING_ESCAPE);
             match u8::from_str_radix(from_utf8(&hex_digits).unwrap(), 16) {
                 Ok(c) => result.push(c as char),
                 Err(_) => panic!("{}{}{}", MSG_ILLEGAL_HEX_CHAR, hex_digits[0] as char, hex_digits[1] as char),
@@ -1132,7 +1132,7 @@ mod tests {
             uri::{PathAndQuery, Uri},
         },
         scratchstack_errors::ServiceError,
-        std::{collections::HashMap, mem::transmute},
+        std::collections::HashMap,
     };
 
     macro_rules! expect_err {
@@ -1252,7 +1252,7 @@ mod tests {
         assert_eq!(foo.len(), 1);
         assert_eq!(foo[0], "bar");
 
-        assert!(v.get("").is_none());
+        assert!(!v.contains_key(""));
     }
 
     #[test_log::test]
@@ -1273,22 +1273,23 @@ mod tests {
     #[test_log::test]
     fn normalize_invalid_hex_path_cr() {
         // The HTTP crate does its own validation; we need to hack into it to force invalid URI elements in there.
-        for (path, error_message) in vec![
+        for (path, error_message) in [
             ("/abcd%yy", "Illegal hex character in escape % pattern: %yy"),
             ("/abcd%0", "Incomplete trailing escape % sequence"),
             ("/abcd%", "Incomplete trailing escape % sequence"),
         ] {
             let mut fake_path = "/".to_string();
             while fake_path.len() < path.len() {
-                fake_path.push_str("a");
+                fake_path.push('a');
             }
 
             let mut pq = PathAndQuery::from_maybe_shared(fake_path.clone()).unwrap();
             let pq_path = Bytes::from_static(path.as_bytes());
 
             unsafe {
-                // Rewrite the path to be invalid.
-                let pq_ptr: *mut PathAndQuerySimulate = transmute(&mut pq);
+                // Rewrite the path to be invalid. This can't be done with the normal PathAndQuery
+                // API.
+                let pq_ptr: *mut PathAndQuerySimulate = &mut pq as *mut PathAndQuery as *mut PathAndQuerySimulate;
                 (*pq_ptr).data = pq_path;
             }
 
@@ -1313,14 +1314,14 @@ mod tests {
     #[test_log::test]
     fn normalize_invalid_hex_query_cr() {
         // The HTTP crate does its own validation; we need to hack into it to force invalid URI elements in there.
-        for (path, error_message) in vec![
+        for (path, error_message) in [
             ("/?x=abcd%yy", "Illegal hex character in escape % pattern: %yy"),
             ("/?x=abcd%0", "Incomplete trailing escape % sequence"),
             ("/?x=abcd%", "Incomplete trailing escape % sequence"),
         ] {
             let mut fake_path = "/?x=".to_string();
             while fake_path.len() < path.len() {
-                fake_path.push_str("a");
+                fake_path.push('a');
             }
 
             let mut pq = PathAndQuery::from_maybe_shared(fake_path.clone()).unwrap();
@@ -1328,7 +1329,7 @@ mod tests {
 
             unsafe {
                 // Rewrite the path to be invalid.
-                let pq_ptr: *mut PathAndQuerySimulate = transmute(&mut pq);
+                let pq_ptr: *mut PathAndQuerySimulate = &mut pq as *mut PathAndQuery as *mut PathAndQuerySimulate;
                 (*pq_ptr).data = pq_path;
             }
 
@@ -1487,7 +1488,7 @@ mod tests {
         let (parts, body) = request.into_parts();
 
         let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body, SignatureOptions::default()).unwrap();
-        assert!(cr.query_parameters.get("foo").is_none());
+        assert!(!cr.query_parameters.contains_key("foo"));
     }
 
     #[test_log::test]

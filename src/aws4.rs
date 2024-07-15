@@ -19,7 +19,7 @@ use {
         fs::File,
         io::{BufRead, BufReader, Read, Seek},
         path::PathBuf,
-        str::from_utf8,
+        str::{from_utf8, FromStr},
     },
     tower::BoxError,
 };
@@ -289,7 +289,7 @@ async fn run(basename: &str) {
 
 async fn get_signing_key(request: GetSigningKeyRequest) -> Result<GetSigningKeyResponse, BoxError> {
     let principal = Principal::from(User::new("aws", "123456789012", "/", "test").unwrap());
-    let k_secret = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
+    let k_secret = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY").unwrap();
     let k_signing = k_secret.to_ksigning(request.request_date(), request.region(), request.service());
 
     let response = GetSigningKeyResponse::builder().principal(principal).signing_key(k_signing).build().unwrap();

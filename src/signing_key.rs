@@ -5,8 +5,10 @@ use {
     ring::digest::SHA256_OUTPUT_LEN,
     scratchstack_aws_principal::{Principal, SessionData},
     std::{
+        convert::Infallible,
         fmt::{Debug, Display, Formatter, Result as FmtResult},
         future::Future,
+        str::FromStr,
     },
     tower::{service_fn, util::ServiceFn, BoxError},
 };
@@ -140,17 +142,21 @@ impl Display for KSigningKey {
     }
 }
 
-impl KSecretKey {
+impl FromStr for KSecretKey {
+    type Err = Infallible;
+
     /// Create a new `KSecretKey` from a raw AWS secret key.
-    pub fn from_str(raw: &str) -> Self {
+    fn from_str(raw: &str) -> Result<Self, Infallible> {
         let mut prefixed_key = Vec::with_capacity(4 + raw.len());
         prefixed_key.extend_from_slice(b"AWS4");
         prefixed_key.extend_from_slice(raw.as_bytes());
-        Self {
+        Ok(Self {
             prefixed_key,
-        }
+        })
     }
+}
 
+impl KSecretKey {
     /// Create a new `KDateKey` from this `KSecretKey` and a date.
     pub fn to_kdate(&self, date: NaiveDate) -> KDateKey {
         let date = date.format("%Y%m%d").to_string();
@@ -377,15 +383,16 @@ mod tests {
         crate::{GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey},
         chrono::NaiveDate,
         scratchstack_aws_principal::{AssumedRole, Principal},
+        std::str::FromStr,
     };
 
     #[test_log::test]
     fn test_signing_key_derived() {
         let date = NaiveDate::from_ymd_opt(2015, 8, 30).unwrap();
 
-        let ksecret1a = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
-        let ksecret1b = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY");
-        let ksecret2 = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCZEXAMPLEKEY");
+        let ksecret1a = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY").unwrap();
+        let ksecret1b = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY").unwrap();
+        let ksecret2 = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCZEXAMPLEKEY").unwrap();
 
         assert_eq!(ksecret1a, ksecret1b);
         assert_eq!(ksecret1a, ksecret1a.clone());
@@ -495,8 +502,11 @@ mod tests {
         assert_eq!(gsk_req1a.region, gsk_req1b.region);
         assert_eq!(gsk_req1a.service, gsk_req1b.service);
 
-        let signing_key =
-            KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY").to_ksigning(date, "us-east-1", "example");
+        let signing_key = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY").unwrap().to_ksigning(
+            date,
+            "us-east-1",
+            "example",
+        );
         let principal = Principal::from(AssumedRole::new("aws", "123456789012", "role", "session").unwrap());
 
         let gsk_resp1a =
@@ -520,8 +530,11 @@ mod tests {
     #[test_log::test]
     fn test_response_builder() {
         let date = NaiveDate::from_ymd_opt(2015, 8, 30).unwrap();
-        let signing_key =
-            KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY").to_ksigning(date, "us-east-1", "example");
+        let signing_key = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY").unwrap().to_ksigning(
+            date,
+            "us-east-1",
+            "example",
+        );
         let response = GetSigningKeyResponse::builder().signing_key(signing_key).build().unwrap();
         assert!(response.principal().is_empty());
         assert!(response.session_data().is_empty());
