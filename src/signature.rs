@@ -70,7 +70,7 @@ const ALLOWED_MISMATCH_MINUTES: i64 = 15;
 ///   is the current time, `Utc::now()`.
 /// * `required_headers` - The headers that are required to be signed in the request in addition to
 ///   the default SigV4 headers. If none, use
-///   [`&SignedHeaderRequirements::default()`][SignedHeaderRequirements::default].
+///   [`NO_ADDITIONAL_SIGNED_HEADERS`][crate::NO_ADDITIONAL_SIGNED_HEADERS].
 /// * `options` - [`SignatureOptions`]` that affect the behavior of the signature validation. For
 ///   most services, use `SignatureOptions::default()`.
 ///
