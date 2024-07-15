@@ -331,10 +331,10 @@ impl CanonicalRequest {
 
     /// Create a [SigV4Authenticator] for the request. This performs steps 1-8 from the AWS Auth Error Ordering
     /// workflow.
-    pub fn get_authenticator(
-        &self,
-        signed_header_requirements: &SignedHeaderRequirements,
-    ) -> Result<SigV4Authenticator, SignatureError> {
+    pub fn get_authenticator<S>(&self, signed_header_requirements: &S) -> Result<SigV4Authenticator, SignatureError>
+    where
+        S: SignedHeaderRequirements,
+    {
         let auth_params = self.get_auth_parameters(signed_header_requirements)?;
         self.get_authenticator_from_auth_parameters(auth_params)
     }
@@ -366,10 +366,10 @@ impl CanonicalRequest {
 
     /// Create an [AuthParams] structure, either from the `Authorization` header or the query strings as appropriate.
     /// This performs step 5 and either performs steps 6a-6d or 7a-7d from the AWS Auth Error Ordering workflow.
-    pub(crate) fn get_auth_parameters(
-        &self,
-        signed_header_requirements: &SignedHeaderRequirements,
-    ) -> Result<AuthParams, SignatureError> {
+    pub(crate) fn get_auth_parameters<S>(&self, signed_header_requirements: &S) -> Result<AuthParams, SignatureError>
+    where
+        S: SignedHeaderRequirements,
+    {
         let auth_header = self.headers.get(AUTHORIZATION);
         let sig_algs = self.query_parameters.get(X_AMZ_ALGORITHM);
 
@@ -614,99 +614,186 @@ impl Debug for CanonicalRequest {
 
 /// The Content-Type header value, along with the character set (if specified).
 pub struct ContentTypeCharset {
+    /// The content type of the body.
     pub content_type: String,
+
+    /// The encoding (charset) of the body.
     pub charset: Option<String>,
 }
 
-/// Requirement for a signed header.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct SignedHeaderRequirements {
-    /// Headers that must always be present in SignedHeaders.
-    always_present: Vec<String>,
+/// Trait for informing validation routines which headers must be signed.
+pub trait SignedHeaderRequirements {
+    /// Return the headers that must always be present in SignedHeaders.
+    fn always_present(&self) -> &[Cow<'_, str>];
 
-    /// Headers that must be present in SignedHeaders if they are present in the request.
-    if_in_request: Vec<String>,
+    /// Return the headers that must be present in SignedHeaders if they are present in the request.
+    fn if_in_request(&self) -> &[Cow<'_, str>];
 
-    /// Prefixes that must be present in SignedHeaders if any headers with that prefix are present in the request.
-    prefixes: Vec<String>,
+    /// Return the prefixes that must be present in SignedHeaders if any headers with that prefix.
+    fn prefixes(&self) -> &[Cow<'_, str>];
 }
 
-impl SignedHeaderRequirements {
-    /// Create a new `SignedHeaderRequirements` structure from the provided data.
-    ///
-    /// # Parameters
-    /// * `always_present`: Headers in addition to the standard AWS SigV4 headers that must be
-    ///   present and signed.
-    /// * `if_in_request`: Headers that must be signed if they are present in the request.
-    /// * `prefixes`: Prefixes that must be signed if any headers with that prefix are present in
-    ///   the request.
-    pub fn new(mut always_present: Vec<String>, mut if_in_request: Vec<String>, mut prefixes: Vec<String>) -> Self {
-        always_present.sort();
-        if_in_request.sort();
-        prefixes.sort();
+/// Static implementation of [SignedHeaderRequirements] that uses slices of string slices.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SliceSignedHeaderRequirements<'a, 'b, 'c> {
+    /// Headers that must always be present in SignedHeaders.
+    always_present: &'a [Cow<'a, str>],
 
-        SignedHeaderRequirements {
+    /// Headers that must be present in SignedHeaders if they are present in the request.
+    if_in_request: &'b [Cow<'b, str>],
+
+    /// Prefixes that must be present in SignedHeaders if any headers with that prefix are present in the request.
+    prefixes: &'c [Cow<'c, str>],
+}
+
+impl<'a, 'b, 'c> SignedHeaderRequirements for SliceSignedHeaderRequirements<'a, 'b, 'c> {
+    #[inline(always)]
+    fn always_present(&self) -> &[Cow<'_, str>] {
+        self.always_present
+    }
+
+    #[inline(always)]
+    fn if_in_request(&self) -> &[Cow<'_, str>] {
+        self.if_in_request
+    }
+
+    #[inline(always)]
+    fn prefixes(&self) -> &[Cow<'_, str>] {
+        self.prefixes
+    }
+}
+
+impl<'a, 'b, 'c> SliceSignedHeaderRequirements<'a, 'b, 'c> {
+    /// Create a new `SliceSignedHeaderRequirements` structure from the provided data.
+    pub const fn new(
+        always_present: &'a [Cow<'a, str>],
+        if_in_request: &'b [Cow<'b, str>],
+        prefixes: &'c [Cow<'c, str>],
+    ) -> Self {
+        SliceSignedHeaderRequirements {
+            always_present,
+            if_in_request,
+            prefixes,
+        }
+    }
+}
+
+/// SignedHeaderRequirements from constant slices.
+pub type ConstSignedHeaderRequirements = SliceSignedHeaderRequirements<'static, 'static, 'static>;
+
+/// Constant when no additional signed headers are required.
+pub const NO_ADDITIONAL_SIGNED_HEADERS: ConstSignedHeaderRequirements =
+    ConstSignedHeaderRequirements::new(&[], &[], &[]);
+
+/// `SignedHeaderRequirements` that can be dynamically changed.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct VecSignedHeaderRequirements {
+    /// Headers that must always be present in SignedHeaders.
+    always_present: Vec<Cow<'static, str>>,
+
+    /// Headers that must be present in SignedHeaders if they are present in the request.
+    if_in_request: Vec<Cow<'static, str>>,
+
+    /// Prefixes that must be present in SignedHeaders if any headers with that prefix are present in the request.
+    prefixes: Vec<Cow<'static, str>>,
+}
+
+impl SignedHeaderRequirements for VecSignedHeaderRequirements {
+    #[inline(always)]
+    fn always_present(&self) -> &[Cow<'_, str>] {
+        &self.always_present
+    }
+
+    #[inline(always)]
+    fn if_in_request(&self) -> &[Cow<'_, str>] {
+        &self.if_in_request
+    }
+
+    #[inline(always)]
+    fn prefixes(&self) -> &[Cow<'_, str>] {
+        &self.prefixes
+    }
+}
+
+impl VecSignedHeaderRequirements {
+    /// Create a new `VecSignedHeaderRequirements` structure from the provided data.
+    pub fn new<A, B, C>(always_present: &[&A], if_in_request: &[&B], prefixes: &[&C]) -> Self
+    where
+        for<'a> &'a A: Into<String>,
+        for<'b> &'b B: Into<String>,
+        for<'c> &'c C: Into<String>,
+        A: ?Sized,
+        B: ?Sized,
+        C: ?Sized,
+    {
+        let always_present = always_present.iter().map(|s| Cow::Owned((*s).into())).collect();
+        let if_in_request = if_in_request.iter().map(|s| Cow::Owned((*s).into())).collect();
+        let prefixes = prefixes.iter().map(|s| Cow::Owned((*s).into())).collect();
+
+        VecSignedHeaderRequirements {
             always_present,
             if_in_request,
             prefixes,
         }
     }
 
-    /// Return the headers that must always be present in SignedHeaders.
-    #[inline(always)]
-    pub fn always_present(&self) -> &[String] {
-        &self.always_present
-    }
-
-    /// Return the headers that must be present in SignedHeaders if they are present in the request.
-    #[inline(always)]
-    pub fn if_in_request(&self) -> &[String] {
-        &self.if_in_request
-    }
-
-    /// Return the prefixes that must be present in SignedHeaders if any headers with that prefix.
-    #[inline(always)]
-    pub fn prefixes(&self) -> &[String] {
-        &self.prefixes
-    }
-
-    /// Adds an additional header that must always be present in SignedHeaders.
+    /// Add a header that must always be present in `SignedHeaders`.
     pub fn add_always_present(&mut self, header: &str) {
-        self.always_present.push(header.to_string());
-        self.always_present.sort();
-        self.always_present.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+        let header_lower = header.to_ascii_lowercase();
+
+        for h in self.always_present.iter() {
+            if h == &header_lower {
+                return;
+            }
+        }
+
+        self.always_present.push(Cow::Owned(header.to_string()));
     }
 
-    /// Adds an additional header that must be present in SignedHeaders if it is present in the
-    /// request.
+    /// Add a header that must be present in `SignedHeaders` if it is present in the request.
     pub fn add_if_in_request(&mut self, header: &str) {
-        self.if_in_request.push(header.to_string());
-        self.if_in_request.sort();
-        self.if_in_request.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+        let header_lower = header.to_ascii_lowercase();
+
+        for h in self.if_in_request.iter() {
+            if h == &header_lower {
+                return;
+            }
+        }
+
+        self.if_in_request.push(Cow::Owned(header.to_string()));
     }
 
-    /// Adds an additional prefix that must be present in SignedHeaders if any headers with that
-    /// prefix are present in the request.
+    /// Add a prefix that must be present in `SignedHeaders` if any headers with that prefix are
+    /// present in the request.
     pub fn add_prefix(&mut self, prefix: &str) {
-        self.prefixes.push(prefix.to_string());
-        self.prefixes.sort();
-        self.prefixes.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+        let prefix_lower = prefix.to_ascii_lowercase();
+
+        for h in self.prefixes.iter() {
+            if h == &prefix_lower {
+                return;
+            }
+        }
+
+        self.prefixes.push(Cow::Owned(prefix.to_string()));
     }
 
-    /// Removes a header that must always be present in SignedHeaders.
+    /// Remove a header that must always be present in `SignedHeaders`.
     pub fn remove_always_present(&mut self, header: &str) {
-        self.always_present.retain(|h| !h.eq_ignore_ascii_case(header));
+        let header = header.to_ascii_lowercase();
+        self.always_present.retain(|h| h.to_ascii_lowercase() != header);
     }
 
-    /// Removes a header that must be present in SignedHeaders if it is present in the request.
+    /// Remove a header that must be present in `SignedHeaders` if it is present in the request.
     pub fn remove_if_in_request(&mut self, header: &str) {
-        self.if_in_request.retain(|h| !h.eq_ignore_ascii_case(header));
+        let header = header.to_ascii_lowercase();
+        self.if_in_request.retain(|h| h.to_ascii_lowercase() != header);
     }
 
-    /// Removes a prefix that must be present in SignedHeaders if any headers with that prefix are
+    /// Remove a prefix that must be present in `SignedHeaders` if any headers with that prefix are
     /// present in the request.
     pub fn remove_prefix(&mut self, prefix: &str) {
-        self.prefixes.retain(|p| !p.eq_ignore_ascii_case(prefix));
+        let prefix = prefix.to_ascii_lowercase();
+        self.prefixes.retain(|h| h.to_ascii_lowercase() != prefix);
     }
 }
 
@@ -1123,7 +1210,7 @@ mod tests {
                 canonicalize_query_to_string, canonicalize_uri_path, normalize_uri_path_component,
                 query_string_to_normalized_map, unescape_uri_encoding,
             },
-            CanonicalRequest, SignatureError, SignatureOptions, SignedHeaderRequirements,
+            CanonicalRequest, SignatureError, SignatureOptions, NO_ADDITIONAL_SIGNED_HEADERS,
         },
         bytes::Bytes,
         http::{
@@ -1393,8 +1480,7 @@ mod tests {
         );
         assert_eq!(cr.body_sha256(), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
 
-        let required_headers = SignedHeaderRequirements::default();
-        let params = cr.get_auth_parameters(&required_headers).unwrap();
+        let params = cr.get_auth_parameters(&NO_ADDITIONAL_SIGNED_HEADERS).unwrap();
         // Ensure we can debug print the auth parameters.
         let _ = format!("{:?}", params);
         assert_eq!(params.signed_headers, vec!["date", "host"]);
@@ -1649,8 +1735,7 @@ mod tests {
 
             let (cr, _, _) =
                 CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
-            let required_headers = SignedHeaderRequirements::default();
-            let e = cr.get_auth_parameters(&required_headers).unwrap_err();
+            let e = cr.get_auth_parameters(&NO_ADDITIONAL_SIGNED_HEADERS).unwrap_err();
             if let SignatureError::IncompleteSignature(msg) = e {
                 let error_message = format!("{} Authorization=AWS4-HMAC-SHA256", error_messages.join(" "));
                 assert_eq!(msg.as_str(), error_message.as_str());
@@ -1675,8 +1760,7 @@ mod tests {
 
         let (cr, _, _) =
             CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
-        let required_headers = SignedHeaderRequirements::default();
-        let e = cr.get_auth_parameters(&required_headers).unwrap_err();
+        let e = cr.get_auth_parameters(&NO_ADDITIONAL_SIGNED_HEADERS).unwrap_err();
         if let SignatureError::IncompleteSignature(msg) = e {
             assert_eq!(msg.as_str(), "'SignedHeadersdate;host' not a valid key=value pair (missing equal-sign) in Authorization header: 'AWS4-HMAC-SHA256 Credential=1234, SignedHeadersdate;host'");
         } else {
@@ -1727,8 +1811,7 @@ mod tests {
 
             let (cr, _, _) =
                 CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
-            let required_headers = SignedHeaderRequirements::default();
-            let e = cr.get_auth_parameters(&required_headers).unwrap_err();
+            let e = cr.get_auth_parameters(&NO_ADDITIONAL_SIGNED_HEADERS).unwrap_err();
             if let SignatureError::IncompleteSignature(msg) = e {
                 let error_message = format!("{} Re-examine the query-string parameters.", error_messages.join(" "));
                 assert_eq!(msg.as_str(), error_message.as_str());
@@ -1757,8 +1840,7 @@ mod tests {
 
         let (cr, _, _) =
             CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
-        let required_headers = SignedHeaderRequirements::default();
-        let auth = cr.get_auth_parameters(&required_headers).unwrap();
+        let auth = cr.get_auth_parameters(&NO_ADDITIONAL_SIGNED_HEADERS).unwrap();
         // Expect last component found
         assert_eq!(auth.builder.get_credential(), &Some("ABCD".to_string()));
         assert_eq!(auth.builder.get_signature(), &Some("DEFG".to_string()));
@@ -1778,8 +1860,7 @@ mod tests {
 
         let (cr, _, _) =
             CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
-        let required_headers = SignedHeaderRequirements::default();
-        let auth = cr.get_auth_parameters(&required_headers).unwrap();
+        let auth = cr.get_auth_parameters(&NO_ADDITIONAL_SIGNED_HEADERS).unwrap();
         // Expect first component found
         assert_eq!(auth.builder.get_credential(), &Some("1234".to_string()));
         assert_eq!(auth.builder.get_signature(), &Some("5678".to_string()));
@@ -1787,8 +1868,7 @@ mod tests {
         assert_eq!(auth.timestamp_str, "20150830T123600Z");
         assert_eq!(auth.signed_headers, vec!["date", "host"]);
 
-        let required_headers = SignedHeaderRequirements::default();
-        let auth = cr.get_authenticator(&required_headers);
+        let auth = cr.get_authenticator(&NO_ADDITIONAL_SIGNED_HEADERS);
         assert!(auth.is_ok());
     }
 
@@ -1808,8 +1888,8 @@ mod tests {
 
         let (cr, _, _) =
             CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
-        let required_headers = SignedHeaderRequirements::default();
-        let required_headers2 = required_headers.clone();
+        let required_headers = NO_ADDITIONAL_SIGNED_HEADERS;
+        let required_headers2 = required_headers;
         assert_eq!(&required_headers, &required_headers2);
         assert_eq!(format!("{:?}", required_headers), format!("{:?}", required_headers2));
         let e = cr.get_auth_parameters(&required_headers).unwrap_err();
@@ -1832,8 +1912,7 @@ mod tests {
 
         let (cr, _, _) =
             CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
-        let required_headers = SignedHeaderRequirements::default();
-        let e = cr.get_auth_parameters(&required_headers).unwrap_err();
+        let e = cr.get_auth_parameters(&NO_ADDITIONAL_SIGNED_HEADERS).unwrap_err();
         if let SignatureError::SignatureDoesNotMatch(msg) = e {
             let msg = msg.expect("Expected error message");
             assert_eq!(msg.as_str(), "'Host' or ':authority' must be a 'SignedHeader' in the AWS Authorization.");
@@ -1861,8 +1940,7 @@ mod tests {
 
         let (cr, _, _) =
             CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
-        let required_headers = SignedHeaderRequirements::default();
-        let a = cr.get_auth_parameters(&required_headers).unwrap();
+        let a = cr.get_auth_parameters(&NO_ADDITIONAL_SIGNED_HEADERS).unwrap();
         assert_eq!(a.signed_headers, vec!["a", "host", "x-amz-date"]);
         let cr_bytes = cr.canonical_request(&a.signed_headers);
         assert!(!cr_bytes.is_empty());
@@ -1885,8 +1963,7 @@ mod tests {
 
         let (cr, _, _) =
             CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
-        let required_headers = SignedHeaderRequirements::default();
-        let e = cr.get_auth_parameters(&required_headers).unwrap_err();
+        let e = cr.get_auth_parameters(&NO_ADDITIONAL_SIGNED_HEADERS).unwrap_err();
         if let SignatureError::MissingAuthenticationToken(msg) = e {
             assert_eq!(msg.as_str(), "Request is missing Authentication Token");
         } else {
@@ -1908,8 +1985,7 @@ mod tests {
 
         let (cr, _, _) =
             CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
-        let required_headers = SignedHeaderRequirements::default();
-        let e = cr.get_auth_parameters(&required_headers).unwrap_err();
+        let e = cr.get_auth_parameters(&NO_ADDITIONAL_SIGNED_HEADERS).unwrap_err();
         if let SignatureError::SignatureDoesNotMatch(ref msg) = e {
             assert!(msg.is_none());
             assert_eq!(e.to_string(), "");
@@ -1932,8 +2008,7 @@ mod tests {
 
         let (cr, _, _) =
             CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
-        let required_headers = SignedHeaderRequirements::default();
-        let e = cr.get_auth_parameters(&required_headers).unwrap_err();
+        let e = cr.get_auth_parameters(&NO_ADDITIONAL_SIGNED_HEADERS).unwrap_err();
         if let SignatureError::IncompleteSignature(msg) = e {
             assert_eq!(msg.as_str(), "Unsupported AWS 'algorithm': 'AWS3-HMAC-SHA256'.");
         } else {
@@ -1954,8 +2029,7 @@ mod tests {
 
         let (cr, _, _) =
             CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
-        let required_headers = SignedHeaderRequirements::default();
-        let e = cr.get_auth_parameters(&required_headers).unwrap_err();
+        let e = cr.get_auth_parameters(&NO_ADDITIONAL_SIGNED_HEADERS).unwrap_err();
         if let SignatureError::MissingAuthenticationToken(msg) = e {
             assert_eq!(msg.as_str(), "Request is missing Authentication Token");
         } else {

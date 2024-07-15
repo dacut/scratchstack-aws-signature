@@ -79,19 +79,20 @@ const ALLOWED_MISMATCH_MINUTES: i64 = 15;
 /// malformed or the request was not properly signed. The validation follows the
 /// [AWS Auth Error Ordering](https://github.com/dacut/scratchstack-aws-signature/blob/main/docs/AWS%20Auth%20Error%20Ordering.pdf)
 /// document.
-pub async fn sigv4_validate_request<B, S, F>(
+pub async fn sigv4_validate_request<B, G, F, S>(
     request: Request<B>,
     region: &str,
     service: &str,
-    get_signing_key: &mut S,
+    get_signing_key: &mut G,
     server_timestamp: DateTime<Utc>,
-    required_headers: &SignedHeaderRequirements,
+    required_headers: &S,
     options: SignatureOptions,
 ) -> Result<(Parts, Bytes, SigV4AuthenticatorResponse), BoxError>
 where
     B: IntoRequestBytes,
-    S: Service<GetSigningKeyRequest, Response = GetSigningKeyResponse, Error = BoxError, Future = F> + Send,
+    G: Service<GetSigningKeyRequest, Response = GetSigningKeyResponse, Error = BoxError, Future = F> + Send,
     F: Future<Output = Result<GetSigningKeyResponse, BoxError>> + Send,
+    S: SignedHeaderRequirements,
 {
     let (parts, body) = request.into_parts();
     let body = body.into_request_bytes().await?;
@@ -160,6 +161,7 @@ mod tests {
         crate::{
             service_for_signing_key_fn, sigv4_validate_request, GetSigningKeyRequest, GetSigningKeyResponse,
             KSecretKey, SigV4AuthenticatorResponse, SignatureError, SignatureOptions, SignedHeaderRequirements,
+            VecSignedHeaderRequirements, NO_ADDITIONAL_SIGNED_HEADERS,
         },
         bytes::Bytes,
         chrono::{DateTime, NaiveDate, Utc},
@@ -171,7 +173,7 @@ mod tests {
         lazy_static::lazy_static,
         scratchstack_aws_principal::{Principal, User},
         scratchstack_errors::ServiceError,
-        std::str::FromStr,
+        std::{borrow::Cow, str::FromStr},
         tower::BoxError,
     };
 
@@ -234,14 +236,13 @@ mod tests {
             .body(())
             .unwrap();
         let mut get_signing_key_svc = service_for_signing_key_fn(get_signing_key);
-        let required_headers = SignedHeaderRequirements::default();
         sigv4_validate_request(
             request,
             TEST_REGION,
             TEST_SERVICE,
             &mut get_signing_key_svc,
             *TEST_TIMESTAMP,
-            &required_headers,
+            &NO_ADDITIONAL_SIGNED_HEADERS,
             SignatureOptions::url_encode_form(),
         )
         .await
@@ -266,7 +267,6 @@ mod tests {
             .header("host", "localhost")
             .body(())
             .unwrap();
-        let required_headers = SignedHeaderRequirements::default();
         let e = expect_err!(
             sigv4_validate_request(
                 request,
@@ -274,7 +274,7 @@ mod tests {
                 TEST_SERVICE,
                 &mut gsk_service,
                 *TEST_TIMESTAMP,
-                &required_headers,
+                &NO_ADDITIONAL_SIGNED_HEADERS,
                 SignatureOptions::url_encode_form()
             )
             .await,
@@ -297,7 +297,6 @@ mod tests {
             .header("date", "zzzzzzzzz")
             .body(())
             .unwrap();
-        let required_headers = SignedHeaderRequirements::default();
         let e = expect_err!(
             sigv4_validate_request(
                 request,
@@ -305,7 +304,7 @@ mod tests {
                 TEST_SERVICE,
                 &mut gsk_service,
                 *TEST_TIMESTAMP,
-                &required_headers,
+                &NO_ADDITIONAL_SIGNED_HEADERS,
                 SignatureOptions::url_encode_form()
             )
             .await,
@@ -378,7 +377,7 @@ mod tests {
             }
 
             let request = builder.body(()).unwrap();
-            let mut required_headers = SignedHeaderRequirements::default();
+            let mut required_headers = VecSignedHeaderRequirements::default();
             required_headers.add_always_present("Content-Type");
             required_headers.add_always_present("Qwerty");
             required_headers.add_if_in_request("Foo");
@@ -547,12 +546,10 @@ mod tests {
             let body = Bytes::from_static(b"{}");
 
             let request = builder.body(body).unwrap();
-            let mut required_headers = SignedHeaderRequirements::new(
-                vec!["Content-Type".into(), "Qwerty".into()],
-                vec!["Foo".into(), "Bar".into(), "ETag".into()],
-                vec!["x-amz".into()],
-            );
+            let mut required_headers =
+                VecSignedHeaderRequirements::new(&["Content-Type", "Qwerty"], &["Foo", "Bar", "ETag"], &["x-amz"]);
             required_headers.remove_always_present("QWERTY");
+            assert!(!required_headers.always_present().contains(&Cow::Borrowed("Qwerty")));
             required_headers.remove_if_in_request("BAR");
             required_headers.remove_prefix("A-am2");
             let result = sigv4_validate_request(
@@ -740,7 +737,7 @@ mod tests {
             "service",
             &mut get_signing_key_svc,
             *TEST_TIMESTAMP,
-            &SignedHeaderRequirements::default(),
+            &NO_ADDITIONAL_SIGNED_HEADERS,
             SignatureOptions::default()
         )
         .await
@@ -762,7 +759,7 @@ mod tests {
             "service",
             &mut get_signing_key_svc,
             *TEST_TIMESTAMP,
-            &SignedHeaderRequirements::default(),
+            &NO_ADDITIONAL_SIGNED_HEADERS,
             SignatureOptions::S3,
         )
         .await

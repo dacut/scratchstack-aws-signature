@@ -33,8 +33,8 @@
 //! use http::Request;
 //! use scratchstack_aws_principal::{Principal, User};
 //! use scratchstack_aws_signature::{
-//!     GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, SignatureOptions,
-//!     SignedHeaderRequirements, service_for_signing_key_fn, sigv4_validate_request,
+//!     service_for_signing_key_fn, sigv4_validate_request, GetSigningKeyRequest,
+//!     GetSigningKeyResponse, KSecretKey, SignatureOptions, NO_ADDITIONAL_SIGNED_HEADERS,
 //! };
 //! use std::str::FromStr;
 //! use tower::{BoxError, Service};
@@ -92,7 +92,7 @@
 //!
 //! // The headers that _must_ be signed (beyond the default SigV4 headers) for this service.
 //! // In this case, we're not requiring any additional headers.
-//! let signed_headers = SignedHeaderRequirements::default();
+//! let signed_headers = NO_ADDITIONAL_SIGNED_HEADERS;
 //!
 //! // Signature options for the request. Defaults are typically used, except for S3.
 //! let signature_options = SignatureOptions::default();
@@ -122,20 +122,7 @@ mod error;
 mod signature;
 mod signing_key;
 
-pub use {
-    auth::{
-        SigV4Authenticator, SigV4AuthenticatorBuilder, SigV4AuthenticatorResponse, SigV4AuthenticatorResponseBuilder,
-        SigV4AuthenticatorResponseBuilderError,
-    },
-    canonical::{CanonicalRequest, SignedHeaderRequirements},
-    error::SignatureError,
-    signature::{sigv4_validate_request, SignatureOptions},
-    signing_key::{
-        service_for_signing_key_fn, GetSigningKeyRequest, GetSigningKeyRequestBuilder,
-        GetSigningKeyRequestBuilderError, GetSigningKeyResponse, GetSigningKeyResponseBuilder,
-        GetSigningKeyResponseBuilderError, KDateKey, KRegionKey, KSecretKey, KServiceKey, KSigningKey,
-    },
-};
+pub use {auth::*, canonical::*, error::*, signature::*, signing_key::*};
 
 #[cfg(test)]
 mod aws4;
