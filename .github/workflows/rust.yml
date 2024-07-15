@@ -1,15 +1,14 @@
 name: Rust
 
-on:
-  push:
-    branches:
-      - main
-  pull_request_target:
-    branches:
-      - main
+on: [push]
+env:
+  CARGO_INCREMENTAL: '0'
+  RUSTFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
+  RUSTDOCFLAGS: '-Zprofile -Ccodegen-units=1 -Cinline-threshold=0 -Clink-dead-code -Coverflow-checks=off -Cpanic=abort -Zpanic_abort_tests'
+
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
     - uses: actions/checkout@v2
@@ -19,22 +18,17 @@ jobs:
         toolchain: nightly
         override: true
         profile: default
-    - name: Install coverage-run dependencies
-      run: |
-        sudo apt-get install -y llvm
-        pip3 install --user toml
-        cargo install rustfilt
-    - name: Run Clippy check.
-      uses: actions-rs/clippy-check@v1
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        args: --all-features
-    - name: Run formatting check.
-      run: cargo fmt --check
-    - name: Build and test with coverage data
-      run: ./coverage-run.py --no-open --no-html
+    - name: Build
+      run: cargo build --verbose
+    - name: Run tests
+      run: cargo test --verbose
+    - name: Build documentation
+      run: cargo doc --verbose
+    - name: Generate coverage report
+      id: coverage
+      uses: actions-rs/grcov@v0.1
     - name: Upload coverage report to Coveralls
       uses: coverallsapp/github-action@master
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
-        path-to-lcov: scratchstack-aws-signature.lcov
+        path-to-lcov: ${{ steps.coverage.outputs.report }}
