@@ -632,6 +632,14 @@ pub struct SignedHeaderRequirements {
 }
 
 impl SignedHeaderRequirements {
+    /// Create a new `SignedHeaderRequirements` structure from the provided data.
+    ///
+    /// # Parameters
+    /// * `always_present`: Headers in addition to the standard AWS SigV4 headers that must be
+    ///   present and signed.
+    /// * `if_in_request`: Headers that must be signed if they are present in the request.
+    /// * `prefixes`: Prefixes that must be signed if any headers with that prefix are present in
+    ///   the request.
     pub fn new(mut always_present: Vec<String>, mut if_in_request: Vec<String>, mut prefixes: Vec<String>) -> Self {
         always_present.sort();
         if_in_request.sort();
@@ -644,47 +652,59 @@ impl SignedHeaderRequirements {
         }
     }
 
-    #[inline]
+    /// Return the headers that must always be present in SignedHeaders.
+    #[inline(always)]
     pub fn always_present(&self) -> &[String] {
         &self.always_present
     }
 
-    #[inline]
+    /// Return the headers that must be present in SignedHeaders if they are present in the request.
+    #[inline(always)]
     pub fn if_in_request(&self) -> &[String] {
         &self.if_in_request
     }
 
-    #[inline]
+    /// Return the prefixes that must be present in SignedHeaders if any headers with that prefix.
+    #[inline(always)]
     pub fn prefixes(&self) -> &[String] {
         &self.prefixes
     }
 
+    /// Adds an additional header that must always be present in SignedHeaders.
     pub fn add_always_present(&mut self, header: &str) {
         self.always_present.push(header.to_string());
         self.always_present.sort();
         self.always_present.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
     }
 
+    /// Adds an additional header that must be present in SignedHeaders if it is present in the
+    /// request.
     pub fn add_if_in_request(&mut self, header: &str) {
         self.if_in_request.push(header.to_string());
         self.if_in_request.sort();
         self.if_in_request.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
     }
 
+    /// Adds an additional prefix that must be present in SignedHeaders if any headers with that
+    /// prefix are present in the request.
     pub fn add_prefix(&mut self, prefix: &str) {
         self.prefixes.push(prefix.to_string());
         self.prefixes.sort();
         self.prefixes.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
     }
 
+    /// Removes a header that must always be present in SignedHeaders.
     pub fn remove_always_present(&mut self, header: &str) {
         self.always_present.retain(|h| !h.eq_ignore_ascii_case(header));
     }
 
+    /// Removes a header that must be present in SignedHeaders if it is present in the request.
     pub fn remove_if_in_request(&mut self, header: &str) {
         self.if_in_request.retain(|h| !h.eq_ignore_ascii_case(header));
     }
 
+    /// Removes a prefix that must be present in SignedHeaders if any headers with that prefix are
+    /// present in the request.
     pub fn remove_prefix(&mut self, prefix: &str) {
         self.prefixes.retain(|p| !p.eq_ignore_ascii_case(prefix));
     }

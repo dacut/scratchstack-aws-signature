@@ -23,14 +23,25 @@ pub struct SignatureOptions {
 }
 
 impl SignatureOptions {
-    #[inline]
-    pub fn url_encode_form() -> Self {
+    /// Create a `SignatureOptions` suitable for use with services that treat
+    /// `application/x-www-form-urlencoded` bodies as part of the query string.
+    ///
+    /// Some AWS services require this behavior. This typically happens when a query string is too
+    /// long to fit in the URL, so a `GET` request is transformed into a `POST` request with the
+    /// query string passed as an HTML form.
+    ///
+    /// This sets `s3` to `false` and `url_encode_form` to `true`.
+    pub const fn url_encode_form() -> Self {
         Self {
             s3: false,
             url_encode_form: true,
         }
     }
 
+    /// Create a `SignatureOptions` suitable for use with S3-type authentication.
+    ///
+    /// This sets `s3` to `true` and `url_encode_form` to `false`, resulting in AWS SigV4S3-style
+    /// canonicalization.
     pub const S3: Self = Self {
         s3: true,
         url_encode_form: false,
@@ -40,6 +51,34 @@ impl SignatureOptions {
 /// Default allowed timestamp mismatch in minutes.
 const ALLOWED_MISMATCH_MINUTES: i64 = 15;
 
+/// Validate an AWS SigV4 request.
+///
+/// This takes in an HTTP [`Request`] along with other service-specific paramters. If the
+/// validation is successful (i.e. the request is properly signed with a known access key), this
+/// returns:
+/// * The request headers (as HTTP [`Parts`]).
+/// * The request body (as a [`Bytes`] object, which is empty if no body was provided).
+/// * The [response from the authenticator][SigV4AuthenticatorResponse], which contains the
+///   principal and other session data.
+///
+/// # Parameters
+/// * `request` - The HTTP [`Request`] to validate.
+/// * `region` - The AWS region in which the request is being made.
+/// * `service` - The AWS service to which the request is being made.
+/// * `get_signing_key` - A service that can provide the signing key for the request.
+/// * `server_timestamp` - The timestamp of the server when the request was received. Usually this
+///   is the current time, `Utc::now()`.
+/// * `required_headers` - The headers that are required to be signed in the request in addition to
+///   the default SigV4 headers. If none, use
+///   [`&SignedHeaderRequirements::default()`][SignedHeaderRequirements::default].
+/// * `options` - [`SignatureOptions`]` that affect the behavior of the signature validation. For
+///   most services, use `SignatureOptions::default()`.
+///
+/// # Errors
+/// This function returns a [`SignatureError`][crate::SignatureError] if the HTTP request is
+/// malformed or the request was not properly signed. The validation follows the
+/// [AWS Auth Error Ordering](https://github.com/dacut/scratchstack-aws-signature/blob/main/docs/AWS%20Auth%20Error%20Ordering.pdf)
+/// document.
 pub async fn sigv4_validate_request<B, S, F>(
     request: Request<B>,
     region: &str,
@@ -73,27 +112,43 @@ where
     Ok((parts, body, sigv4_response))
 }
 
+/// A trait for converting various body types into a [`Bytes`] object.
+///
+/// This requires reading the entire body into memory.
 #[async_trait]
 pub trait IntoRequestBytes {
+    /// Convert this object into a [`Bytes`] object.
     async fn into_request_bytes(self) -> Result<Bytes, BoxError>;
 }
 
+/// Convert the unit type `()` into an empty [`Bytes`] object.
 #[async_trait]
 impl IntoRequestBytes for () {
+    /// Convert the unit type `()` into an empty [`Bytes`] object.
+    ///
+    /// This is infalliable.
     async fn into_request_bytes(self) -> Result<Bytes, BoxError> {
         Ok(Bytes::new())
     }
 }
 
+/// Convert a `Vec<u8>` into a [`Bytes`] object.
 #[async_trait]
 impl IntoRequestBytes for Vec<u8> {
+    /// Convert a `Vec<u8>` into a [`Bytes`] object.
+    ///
+    /// This is infalliable.
     async fn into_request_bytes(self) -> Result<Bytes, BoxError> {
         Ok(Bytes::from(self))
     }
 }
 
+/// Identity transformation: return the [`Bytes`] object as-is.
 #[async_trait]
 impl IntoRequestBytes for Bytes {
+    /// Identity transformation: return the [`Bytes`] object as-is.
+    ///
+    /// This is infalliable.
     async fn into_request_bytes(self) -> Result<Bytes, BoxError> {
         Ok(self)
     }

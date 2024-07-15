@@ -45,7 +45,7 @@ pub struct KServiceKey {
 /// The `kSigning` key: an AWS `kService` key, HMAC-SHA256 hashed with the "aws4_request" string.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct KSigningKey {
-    /// The raw key.
+    /// The resulting raw signing key.
     key: [u8; SHA256_OUTPUT_LEN],
 }
 
