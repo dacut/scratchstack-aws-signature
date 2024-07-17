@@ -1,11 +1,10 @@
 use {
-    crate::crypto::hmac_sha256,
+    crate::{crypto::hmac_sha256, KeyTooLongError},
     chrono::NaiveDate,
     derive_builder::Builder,
     ring::digest::SHA256_OUTPUT_LEN,
     scratchstack_aws_principal::{Principal, SessionData},
     std::{
-        convert::Infallible,
         fmt::{Debug, Display, Formatter, Result as FmtResult},
         future::Future,
         str::FromStr,
@@ -17,13 +16,16 @@ use {
 const AWS4_REQUEST: &str = "aws4_request";
 
 /// A raw AWS secret key (`kSecret`).
-#[derive(Clone, PartialEq, Eq)]
-pub struct KSecretKey {
-    /// The secret key prefixed with AWS4.
-    prefixed_key: Vec<u8>,
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct KSecretKey<const M: usize = 44> {
+    /// The secret key, prefixed with "AWS4".
+    prefixed_key: [u8; M],
+
+    /// The length of the key.
+    len: usize,
 }
 
-/// The `kDate` key: an AWS secret key, prefixed with "AWS4", then HMAC-SHA256 hashed with the date.
+/// The `kDate` key: `HMAC_SHA256("AWS4" + KSecretKey, "YYYYMMDD")`
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct KDateKey {
     /// The raw key.
@@ -53,8 +55,8 @@ pub struct KSigningKey {
 
 impl AsRef<[u8]> for KSecretKey {
     fn as_ref(&self) -> &[u8] {
-        // Remove the AWS4 prefix
-        &self.prefixed_key.as_slice()[4..]
+        // Remove the "AWS4" prefix.
+        &self.prefixed_key[4..self.len]
     }
 }
 
@@ -142,16 +144,23 @@ impl Display for KSigningKey {
     }
 }
 
-impl FromStr for KSecretKey {
-    type Err = Infallible;
+impl<const M: usize> FromStr for KSecretKey<M> {
+    type Err = KeyTooLongError;
 
     /// Create a new `KSecretKey` from a raw AWS secret key.
-    fn from_str(raw: &str) -> Result<Self, Infallible> {
-        let mut prefixed_key = Vec::with_capacity(4 + raw.len());
-        prefixed_key.extend_from_slice(b"AWS4");
-        prefixed_key.extend_from_slice(raw.as_bytes());
+    fn from_str(raw: &str) -> Result<Self, KeyTooLongError> {
+        let len = raw.len();
+        if len > M - 4 {
+            return Err(KeyTooLongError);
+        }
+
+        let mut prefixed_key = [0; M];
+
+        prefixed_key[..4].copy_from_slice(b"AWS4");
+        prefixed_key[4..].copy_from_slice(raw.as_bytes());
         Ok(Self {
             prefixed_key,
+            len: len + 4,
         })
     }
 }

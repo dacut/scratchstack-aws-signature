@@ -43,6 +43,7 @@ const ERR_CODE_SIGNATURE_DOES_NOT_MATCH: &str = "SignatureDoesNotMatch";
 
 /// Error returned when an attempt at validating an AWS SigV4 signature fails.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum SignatureError {
     /// The security token included with the request is expired.
     ExpiredToken(/* message */ String),
@@ -184,6 +185,18 @@ impl From<Box<dyn Error + Send + Sync>> for SignatureError {
         }
     }
 }
+
+/// Error returned by `KSecretKey::from_str` when the secret key cannot fit in the expected size.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct KeyTooLongError;
+
+impl Display for KeyTooLongError {
+    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+        f.write_str("Key too long")
+    }
+}
+
+impl Error for KeyTooLongError {}
 
 #[cfg(test)]
 mod tests {

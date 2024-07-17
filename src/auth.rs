@@ -1,12 +1,12 @@
 //! AWS API request signatures verification routines.
 //!
-//! This is essentially the server-side complement of [rusoto_signature](https://crates.io/crates/rusoto_signature)
-//! but follows the implementation of [python-aws-sig](https://github.com/dacut/python-aws-sig).
-//!
 //! This implements the AWS [SigV4](http://docs.aws.amazon.com/general/latest/gr/signature-version-4.html)
 //! and [SigV4S3](https://docs.aws.amazon.com/AmazonS3/latest/API/sig-v4-authenticating-requests.html)
-//! algorithms.
+//! server-side validation algorithms.
 //!
+//! **Stability of this module is not guaranteed except for items exposed at the crate root**.
+//! The functions and types are subject to change in minor/patch versions. This is exposed for
+//! testing purposes only.
 
 use {
     crate::{crypto::hmac_sha256, GetSigningKeyRequest, GetSigningKeyResponse, SignatureError},
@@ -49,6 +49,7 @@ const SHA256_EMPTY: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495
 const SHA256_HEX_LENGTH: usize = SHA256_EMPTY.len();
 
 /// Low-level structure for performing AWS SigV4 authentication after a canonical request has been generated.
+#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
 #[derive(Builder, Clone, Default)]
 #[builder(derive(Debug))]
 pub struct SigV4Authenticator {
@@ -56,8 +57,8 @@ pub struct SigV4Authenticator {
     canonical_request_sha256: [u8; SHA256_OUTPUT_LEN],
 
     /// The credential passed into the request, in the form of `keyid/date/region/service/aws4_request`.
-    /// This is allowed to be invalid upon creation since the validation of the credential is performed _after_ the
-    /// validation of the request timestamp.
+    /// The date must reflect that of the request timestamp in `YYYYMMDD` format, not the server's
+    /// date. Timestamp validation is performed separately.
     credential: String,
 
     /// The optional session token.
@@ -73,43 +74,51 @@ pub struct SigV4Authenticator {
 
 impl SigV4Authenticator {
     /// Create a builder for `SigV4Authenticator`.
+    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+    #[inline(always)]
     pub fn builder() -> SigV4AuthenticatorBuilder {
         SigV4AuthenticatorBuilder::default()
     }
 
     /// Retrieve the SHA-256 hash of the canonical request.
-    #[inline]
+    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+    #[inline(always)]
     pub fn canonical_request_sha256(&self) -> [u8; SHA256_OUTPUT_LEN] {
         self.canonical_request_sha256
     }
 
     /// Retrieve the credential passed into the request, in the form of `keyid/date/region/service/aws4_request`.
-    #[inline]
+    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+    #[inline(always)]
     pub fn credential(&self) -> &str {
         &self.credential
     }
 
     /// Retrieve the optional session token.
-    #[inline]
+    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+    #[inline(always)]
     pub fn session_token(&self) -> Option<&str> {
         self.session_token.as_deref()
     }
 
     /// Retrieve the signature passed into the request.
-    #[inline]
+    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+    #[inline(always)]
     pub fn signature(&self) -> &str {
         &self.signature
     }
 
     /// Retrieve the timestamp of the request.
-    #[inline]
+    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+    #[inline(always)]
     pub fn request_timestamp(&self) -> DateTime<Utc> {
         self.request_timestamp
     }
 
     /// Verify the request parameters make sense for the region, service, and specified timestamp.
-    /// This must be called successfully before calling [validate_signature].
-    fn prevalidate(
+    /// This must be called successfully before calling [validate_signature][Self::validate_signature].
+    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+    pub fn prevalidate(
         &self,
         region: &str,
         service: &str,
@@ -205,8 +214,9 @@ impl SigV4Authenticator {
     }
 
     /// Return the signing key (`kSigning` from the [AWS documentation](https://docs.aws.amazon.com/general/latest/gr/sigv4-calculate-signature.html))
-    /// for the re
-    async fn get_signing_key<S, F>(
+    /// for the request.
+    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+    pub async fn get_signing_key<S, F>(
         &self,
         region: &str,
         service: &str,
@@ -242,7 +252,9 @@ impl SigV4Authenticator {
         }
     }
 
-    pub(crate) fn get_string_to_sign(&self) -> Vec<u8> {
+    /// Return the string to sign for the request.
+    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+    pub fn get_string_to_sign(&self) -> Vec<u8> {
         let mut result = Vec::with_capacity(
             AWS4_HMAC_SHA256.len() + 1 + ISO8601_UTC_LENGTH + 1 + self.credential.len() + 1 + SHA256_HEX_LENGTH,
         );
@@ -263,6 +275,7 @@ impl SigV4Authenticator {
     }
 
     /// Validate the request signature.
+    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
     pub async fn validate_signature<S, F>(
         &self,
         region: &str,
@@ -303,18 +316,20 @@ impl Debug for SigV4Authenticator {
     }
 }
 
-#[allow(dead_code)] // used in tests
 impl SigV4AuthenticatorBuilder {
-    pub(crate) fn get_credential(&self) -> &Option<String> {
-        &self.credential
+    /// Retrieve the credential passed into the request.
+    pub fn get_credential(&self) -> Option<&str> {
+        self.credential.as_deref()
     }
 
-    pub(crate) fn get_signature(&self) -> &Option<String> {
-        &self.signature
+    /// Retrieve the signature passed into the request.
+    pub fn get_signature(&self) -> Option<&str> {
+        self.signature.as_deref()
     }
 
-    pub(crate) fn get_session_token(&self) -> &Option<Option<String>> {
-        &self.session_token
+    /// Retrieve the session token passed into the request.
+    pub fn get_session_token(&self) -> Option<&str> {
+        self.session_token.as_ref()?.as_deref()
     }
 }
 
@@ -377,8 +392,8 @@ mod tests {
     use {
         super::duration_to_string,
         crate::{
-            service_for_signing_key_fn, GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, SigV4Authenticator,
-            SigV4AuthenticatorBuilder, SigV4AuthenticatorResponse, SignatureError,
+            auth::{SigV4Authenticator, SigV4AuthenticatorBuilder, SigV4AuthenticatorResponse},
+            service_for_signing_key_fn, GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, SignatureError,
         },
         chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc},
         log::LevelFilter,

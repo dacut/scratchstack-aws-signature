@@ -1,6 +1,6 @@
 use {
     crate::{
-        service_for_signing_key_fn, sigv4_validate_request, CanonicalRequest, GetSigningKeyRequest,
+        canonical::CanonicalRequest, service_for_signing_key_fn, sigv4_validate_request, GetSigningKeyRequest,
         GetSigningKeyResponse, KSecretKey, SignatureOptions, NO_ADDITIONAL_SIGNED_HEADERS,
     },
     bytes::{Bytes, BytesMut},

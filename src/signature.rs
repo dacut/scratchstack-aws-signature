@@ -1,6 +1,6 @@
 use {
     crate::{
-        CanonicalRequest, GetSigningKeyRequest, GetSigningKeyResponse, SigV4AuthenticatorResponse,
+        auth::SigV4AuthenticatorResponse, canonical::CanonicalRequest, GetSigningKeyRequest, GetSigningKeyResponse,
         SignedHeaderRequirements,
     },
     async_trait::async_trait,
@@ -159,8 +159,8 @@ impl IntoRequestBytes for Bytes {
 mod tests {
     use {
         crate::{
-            service_for_signing_key_fn, sigv4_validate_request, GetSigningKeyRequest, GetSigningKeyResponse,
-            KSecretKey, SigV4AuthenticatorResponse, SignatureError, SignatureOptions, SignedHeaderRequirements,
+            auth::SigV4AuthenticatorResponse, service_for_signing_key_fn, sigv4_validate_request, GetSigningKeyRequest,
+            GetSigningKeyResponse, KSecretKey, SignatureError, SignatureOptions, SignedHeaderRequirements,
             VecSignedHeaderRequirements, NO_ADDITIONAL_SIGNED_HEADERS,
         },
         bytes::Bytes,
