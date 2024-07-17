@@ -9,11 +9,13 @@
 //! testing purposes only.
 
 use {
-    crate::{crypto::hmac_sha256, GetSigningKeyRequest, GetSigningKeyResponse, SignatureError},
+    crate::{
+        crypto::{hmac_sha256, SHA256_OUTPUT_LEN},
+        GetSigningKeyRequest, GetSigningKeyResponse, SignatureError,
+    },
     chrono::{DateTime, Duration, Utc},
     derive_builder::Builder,
     log::{debug, trace},
-    ring::digest::SHA256_OUTPUT_LEN,
     scratchstack_aws_principal::{Principal, SessionData},
     std::{
         fmt::{Debug, Formatter, Result as FmtResult},
@@ -393,11 +395,11 @@ mod tests {
         super::duration_to_string,
         crate::{
             auth::{SigV4Authenticator, SigV4AuthenticatorBuilder, SigV4AuthenticatorResponse},
+            crypto::SHA256_OUTPUT_LEN,
             service_for_signing_key_fn, GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, SignatureError,
         },
         chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc},
         log::LevelFilter,
-        ring::digest::SHA256_OUTPUT_LEN,
         scratchstack_aws_principal::{Principal, User},
         scratchstack_errors::ServiceError,
         std::{error::Error, fs::File, str::FromStr},

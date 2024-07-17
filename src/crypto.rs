@@ -1,18 +1,24 @@
-use ring::{
-    digest::{digest, Digest, SHA256},
-    hmac::{sign, Key, Tag, HMAC_SHA256},
+use {
+    hmac::{Hmac, Mac},
+    sha2::{Digest, Sha256},
 };
+
+/// The length of a SHA-256 digest in bytes.
+pub(crate) const SHA256_OUTPUT_LEN: usize = 32;
 
 /// Wrapper function to form a HMAC-SHA256 operation using ring.
 #[inline(always)]
-pub(crate) fn hmac_sha256(key: &[u8], value: &[u8]) -> Tag {
-    let hkey = Key::new(HMAC_SHA256, key);
-    sign(&hkey, value)
+pub(crate) fn hmac_sha256(key: &[u8], value: &[u8]) -> [u8; SHA256_OUTPUT_LEN] {
+    let mut mac = Hmac::<Sha256>::new_from_slice(key).expect("HMAC can take arbitrary key lengths");
+    mac.update(value);
+    mac.finalize().into_bytes().into()
 }
 
 #[inline(always)]
-pub(crate) fn sha256(value: &[u8]) -> Digest {
-    digest(&SHA256, value)
+pub(crate) fn sha256(value: &[u8]) -> [u8; SHA256_OUTPUT_LEN] {
+    let mut hasher = Sha256::new();
+    hasher.update(value);
+    hasher.finalize().into()
 }
 
 #[inline(always)]

@@ -11,7 +11,7 @@ use {
     crate::{
         auth::{SigV4Authenticator, SigV4AuthenticatorBuilder},
         chronoutil::ParseISO8601,
-        crypto::sha256_hex,
+        crypto::{sha256, sha256_hex, SHA256_OUTPUT_LEN},
         SignatureError, SignatureOptions,
     },
     bytes::Bytes,
@@ -25,7 +25,6 @@ use {
     lazy_static::lazy_static,
     log::trace,
     regex::Regex,
-    ring::digest::{digest, SHA256, SHA256_OUTPUT_LEN},
     std::{
         borrow::Cow,
         collections::HashMap,
@@ -356,7 +355,7 @@ impl CanonicalRequest {
     #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
     pub fn canonical_request_sha256(&self, signed_headers: &Vec<String>) -> [u8; SHA256_OUTPUT_LEN] {
         let canonical_request = self.canonical_request(signed_headers);
-        let result_digest = digest(&SHA256, canonical_request.as_ref());
+        let result_digest = sha256(&canonical_request);
         let result_slice = result_digest.as_ref();
         assert!(result_slice.len() == SHA256_OUTPUT_LEN);
         let mut result: [u8; SHA256_OUTPUT_LEN] = [0; SHA256_OUTPUT_LEN];

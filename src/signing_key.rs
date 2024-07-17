@@ -1,8 +1,10 @@
 use {
-    crate::{crypto::hmac_sha256, KeyTooLongError},
+    crate::{
+        crypto::{hmac_sha256, SHA256_OUTPUT_LEN},
+        KeyTooLongError,
+    },
     chrono::NaiveDate,
     derive_builder::Builder,
-    ring::digest::SHA256_OUTPUT_LEN,
     scratchstack_aws_principal::{Principal, SessionData},
     std::{
         fmt::{Debug, Display, Formatter, Result as FmtResult},
