@@ -24,6 +24,7 @@ use {
     },
     lazy_static::lazy_static,
     log::trace,
+    qualifier_attr::qualifiers,
     regex::Regex,
     std::{
         borrow::Cow,
@@ -149,8 +150,10 @@ lazy_static! {
 
 /// Authentication parameters extracted from the header or query string.
 #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+#[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+#[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 #[derive(Debug)]
-pub struct AuthParams {
+struct AuthParams {
     /// Builder for creating an authenticator.
     pub builder: SigV4AuthenticatorBuilder,
 
@@ -169,8 +172,10 @@ pub struct AuthParams {
 /// **The stability of this struct is not guaranteed.** The fields and methods are subject to
 /// change in minor/patch versions.
 #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+#[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+#[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 #[derive(Clone)]
-pub struct CanonicalRequest {
+struct CanonicalRequest {
     /// The HTTP method for the request (e.g., "GET", "POST", etc.)
     request_method: String,
 
@@ -195,7 +200,9 @@ pub struct CanonicalRequest {
 impl CanonicalRequest {
     /// Create a CanonicalRequest from an HTTP request [Parts] and a body of [Bytes].
     #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
-    pub fn from_request_parts(
+    #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+    #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
+    fn from_request_parts(
         mut parts: Parts,
         mut body: Bytes,
         options: SignatureOptions,
@@ -272,15 +279,19 @@ impl CanonicalRequest {
 
     /// Retrieve the HTTP request method.
     #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+    #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+    #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
-    pub fn request_method(&self) -> &str {
+    fn request_method(&self) -> &str {
         &self.request_method
     }
 
     /// Retrieve the canonicalized URI path from the request.
     #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+    #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+    #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
-    pub fn canonical_path(&self) -> &str {
+    fn canonical_path(&self) -> &str {
         &self.canonical_path
     }
 
@@ -288,39 +299,49 @@ impl CanonicalRequest {
     /// values in the request body if the request body is of type `application/x-www-form-urlencoded`. Values are
     /// normalized to be percent-encoded.
     #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+    #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+    #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
-    pub fn query_parameters(&self) -> &HashMap<String, Vec<String>> {
+    fn query_parameters(&self) -> &HashMap<String, Vec<String>> {
         &self.query_parameters
     }
 
     /// Retrieve the headers from the request. Values are ordered as they appear in the HTTP request.
     #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+    #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+    #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
-    pub fn headers(&self) -> &HashMap<String, Vec<Vec<u8>>> {
+    fn headers(&self) -> &HashMap<String, Vec<Vec<u8>>> {
         &self.headers
     }
 
     /// Retrieve the SHA-256 hash of the request body.
     #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+    #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+    #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
-    pub fn body_sha256(&self) -> &str {
+    fn body_sha256(&self) -> &str {
         &self.body_sha256
     }
 
     /// Get the canonical query string from the request.
     #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
-    pub fn canonical_query_string(&self) -> String {
+    #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+    #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
+    fn canonical_query_string(&self) -> String {
         canonicalize_query_to_string(&self.query_parameters)
     }
 
     /// Get the [canonical request to hash](https://docs.aws.amazon.com/general/latest/gr/sigv4-create-canonical-request.html)
     /// for the request.
     #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
-    pub fn canonical_request(&self, signed_headers: &Vec<String>) -> Vec<u8> {
+    #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+    #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
+    fn canonical_request(&self, signed_headers: &Vec<String>) -> Vec<u8> {
         let mut result = Vec::with_capacity(1024);
-        result.extend(self.request_method.as_bytes());
+        result.extend(self.request_method().as_bytes());
         result.push(b'\n');
-        result.extend(self.canonical_path.as_bytes());
+        result.extend(self.canonical_path().as_bytes());
         result.push(b'\n');
         result.extend(self.canonical_query_string().as_bytes());
         result.push(b'\n');
@@ -344,7 +365,7 @@ impl CanonicalRequest {
         result.push(b'\n');
         result.extend(signed_headers.join(";").as_bytes());
         result.push(b'\n');
-        result.extend(self.body_sha256.as_bytes());
+        result.extend(self.body_sha256().as_bytes());
 
         trace!("Canonical request:\n{}", String::from_utf8_lossy(&result));
 
@@ -353,7 +374,9 @@ impl CanonicalRequest {
 
     /// Get the SHA-256 hash of the [canonical request](https://docs.aws.amazon.com/general/latest/gr/sigv4-create-canonical-request.html).
     #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
-    pub fn canonical_request_sha256(&self, signed_headers: &Vec<String>) -> [u8; SHA256_OUTPUT_LEN] {
+    #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+    #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
+    fn canonical_request_sha256(&self, signed_headers: &Vec<String>) -> [u8; SHA256_OUTPUT_LEN] {
         let canonical_request = self.canonical_request(signed_headers);
         let result_digest = sha256(&canonical_request);
         let result_slice = result_digest.as_ref();
@@ -366,7 +389,9 @@ impl CanonicalRequest {
     /// Create a [SigV4Authenticator] for the request. This performs steps 1-8 from the AWS Auth Error Ordering
     /// workflow.
     #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
-    pub fn get_authenticator<S>(&self, signed_header_requirements: &S) -> Result<SigV4Authenticator, SignatureError>
+    #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+    #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
+    fn get_authenticator<S>(&self, signed_header_requirements: &S) -> Result<SigV4Authenticator, SignatureError>
     where
         S: SignedHeaderRequirements,
     {
@@ -376,7 +401,9 @@ impl CanonicalRequest {
 
     /// Create an authenticator based on the provided [`AuthParams`].
     #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
-    pub fn get_authenticator_from_auth_parameters(
+    #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+    #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
+    fn get_authenticator_from_auth_parameters(
         &self,
         auth_params: AuthParams,
     ) -> Result<SigV4Authenticator, SignatureError> {
@@ -404,12 +431,14 @@ impl CanonicalRequest {
     /// Create an [AuthParams] structure, either from the `Authorization` header or the query strings as appropriate.
     /// This performs step 5 and either performs steps 6a-6d or 7a-7d from the AWS Auth Error Ordering workflow.
     #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
-    pub fn get_auth_parameters<S>(&self, signed_header_requirements: &S) -> Result<AuthParams, SignatureError>
+    #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+    #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
+    fn get_auth_parameters<S>(&self, signed_header_requirements: &S) -> Result<AuthParams, SignatureError>
     where
         S: SignedHeaderRequirements,
     {
-        let auth_header = self.headers.get(AUTHORIZATION);
-        let sig_algs = self.query_parameters.get(X_AMZ_ALGORITHM);
+        let auth_header = self.headers().get(AUTHORIZATION);
+        let sig_algs = self.query_parameters().get(X_AMZ_ALGORITHM);
 
         // Rule 5: Either the Authorization header or X-Amz-Algorithm query parameter must be present, not both.
         let params = match (auth_header, sig_algs) {
@@ -473,6 +502,8 @@ impl CanonicalRequest {
     /// Create an [`AuthParams`] structure from the `Authorization` header. This performs steps 6a-6d of the AWS Auth
     /// Error Ordering workflow.
     #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+    #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+    #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     fn get_auth_parameters_from_auth_header<'a>(&'a self, auth_header: &'a [u8]) -> Result<AuthParams, SignatureError> {
         // Interpret the header as Latin-1, trimmed.
         let auth_header = trim_ascii(auth_header);
@@ -580,6 +611,8 @@ impl CanonicalRequest {
     /// Create an [`AuthParams`] structure from the query parameters. This performs steps 7a-7d of the AWS Auth
     /// Error Ordering workflow.
     #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+    #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+    #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     fn get_auth_parameters_from_query_parameters(&self, query_alg: &str) -> Result<AuthParams, SignatureError> {
         // Rule 7a: Make sure the X-Amz-Algorithm query parameter is "AWS4-HMAC-SHA256".
         if query_alg != AWS4_HMAC_SHA256 {
@@ -653,9 +686,11 @@ impl Debug for CanonicalRequest {
 }
 
 /// The Content-Type header value, along with the character set (if specified).
-#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ContentTypeCharset {
+#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+#[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+#[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
+struct ContentTypeCharset {
     /// The content type of the body.
     pub content_type: String,
 
@@ -843,13 +878,20 @@ impl VecSignedHeaderRequirements {
 /// Indicates whether we are normalizing a URI path element or a query string element. This is used to create the
 /// correct error message.
 #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+#[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+#[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 enum UriElement {
+    /// URI element represents a path
     Path,
+
+    /// URI element represents a query string
     Query,
 }
 
 /// Convert a [`HashMap`] of query parameters to a string for the canonical request.
 #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+#[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+#[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 pub fn canonicalize_query_to_string(query_parameters: &HashMap<String, Vec<String>>) -> String {
     let mut results = Vec::new();
 
@@ -869,6 +911,8 @@ pub fn canonicalize_query_to_string(query_parameters: &HashMap<String, Vec<Strin
 /// Normalizes the specified URI path, removing redundant slashes and relative path components (unless performing S3
 /// canonicalization).
 #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+#[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+#[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 pub fn canonicalize_uri_path(uri_path: &str, s3: bool) -> Result<String, SignatureError> {
     // Special case: empty path is converted to '/'; also short-circuit the usual '/' path here.
     if uri_path.is_empty() || uri_path == "/" {
@@ -930,6 +974,8 @@ pub fn canonicalize_uri_path(uri_path: &str, s3: bool) -> Result<String, Signatu
 
 /// Formats HTTP headers in a HashMap suitable for debugging.
 #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+#[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+#[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 fn debug_headers(headers: &HashMap<String, Vec<Vec<u8>>>) -> String {
     use std::io::Write;
     let mut result = Vec::new();
@@ -953,7 +999,9 @@ fn debug_headers(headers: &HashMap<String, Vec<Vec<u8>>>) -> String {
 
 /// Get the content type and character set used in the body
 #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
-pub fn get_content_type_and_charset(headers: &HeaderMap<HeaderValue>) -> Option<ContentTypeCharset> {
+#[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+#[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
+fn get_content_type_and_charset(headers: &HeaderMap<HeaderValue>) -> Option<ContentTypeCharset> {
     let content_type_opts = match headers.get(CONTENT_TYPE) {
         Some(value) => value.as_ref(),
         None => return None,
@@ -986,6 +1034,8 @@ pub fn get_content_type_and_charset(headers: &HeaderMap<HeaderValue>) -> Option<
 /// Indicates whether the specified byte is RFC3986 unreserved -- i.e., can be represented without being
 /// percent-encoded, e.g. '?' -> '%3F'.
 #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+#[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+#[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 #[inline(always)]
 pub fn is_rfc3986_unreserved(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'-' || c == b'.' || c == b'_' || c == b'~'
@@ -993,6 +1043,8 @@ pub fn is_rfc3986_unreserved(c: u8) -> bool {
 
 /// Convert a Latin-1 slice of bytes to a UTF-8 string.
 #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+#[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+#[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 pub fn latin1_to_string(bytes: &[u8]) -> String {
     let mut result = String::new();
     for b in bytes {
@@ -1003,6 +1055,8 @@ pub fn latin1_to_string(bytes: &[u8]) -> String {
 
 /// Returns a sorted dictionary containing the header names and their values.
 #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+#[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+#[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 pub fn normalize_headers(headers: &HeaderMap<HeaderValue>) -> HashMap<String, Vec<Vec<u8>>> {
     let mut result = HashMap::<String, Vec<Vec<u8>>>::new();
     for (key, value) in headers.iter() {
@@ -1016,6 +1070,8 @@ pub fn normalize_headers(headers: &HeaderMap<HeaderValue>) -> HashMap<String, Ve
 
 /// Normalizes a header value by trimming whitespace and converting multiple spaces to a single space.
 #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+#[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+#[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 pub fn normalize_header_value(value: &[u8]) -> Vec<u8> {
     let mut result = Vec::with_capacity(value.len());
 
@@ -1046,12 +1102,16 @@ pub fn normalize_header_value(value: &[u8]) -> Vec<u8> {
 
 /// Normalize a single element (key or value from key=value) of a query string.
 #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+#[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+#[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 pub fn normalize_query_string_element(element: &str) -> Result<String, SignatureError> {
     normalize_uri_element(element, UriElement::Query)
 }
 
 /// Normalizes a path element of a URI.
 #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+#[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+#[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 pub fn normalize_uri_path_component(path: &str) -> Result<String, SignatureError> {
     normalize_uri_element(path, UriElement::Path)
 }
@@ -1065,6 +1125,8 @@ pub fn normalize_uri_path_component(path: &str) -> Result<String, SignatureError
 ///
 /// If a percent encoding is incomplete, an error is returned.
 #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+#[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+#[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 fn normalize_uri_element(uri_el: &str, uri_el_type: UriElement) -> Result<String, SignatureError> {
     let path_component = uri_el.as_bytes();
     let mut i = 0;
@@ -1137,6 +1199,8 @@ fn normalize_uri_element(uri_el: &str, uri_el_type: UriElement) -> Result<String
 /// The order of the values matches the order that they appeared in the query string -- this is important for SigV4
 /// validation.
 #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+#[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+#[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 pub fn query_string_to_normalized_map(query_string: &str) -> Result<HashMap<String, Vec<String>>, SignatureError> {
     if query_string.is_empty() {
         return Ok(HashMap::new());
@@ -1183,6 +1247,8 @@ pub fn query_string_to_normalized_map(query_string: &str) -> Result<HashMap<Stri
 /// This is copied from the Rust standard library source until the
 /// [`byte_slice_trim_ascii` feature](https://github.com/rust-lang/rust/issues/94035) is stabilized.
 #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+#[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+#[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 pub const fn trim_ascii_start(bytes: &[u8]) -> &[u8] {
     let mut bytes = bytes;
     // Note: A pattern matching based approach (instead of indexing) allows
@@ -1204,6 +1270,8 @@ pub const fn trim_ascii_start(bytes: &[u8]) -> &[u8] {
 /// This is copied from the Rust standard library source until the
 /// [`byte_slice_trim_ascii` feature](https://github.com/rust-lang/rust/issues/94035) is stabilized.
 #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+#[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+#[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 pub const fn trim_ascii_end(bytes: &[u8]) -> &[u8] {
     let mut bytes = bytes;
     // Note: A pattern matching based approach (instead of indexing) allows
@@ -1225,12 +1293,16 @@ pub const fn trim_ascii_end(bytes: &[u8]) -> &[u8] {
 /// This is copied from the Rust standard library source until the
 /// [`byte_slice_trim_ascii` feature](https://github.com/rust-lang/rust/issues/94035) is stabilized.
 #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+#[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+#[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 pub const fn trim_ascii(bytes: &[u8]) -> &[u8] {
     trim_ascii_end(trim_ascii_start(bytes))
 }
 
 /// Convert a byte to uppercase hex representation.
 #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+#[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+#[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 #[inline(always)]
 pub const fn u8_to_upper_hex(b: u8) -> [u8; 2] {
     let result: [u8; 2] = [HEX_DIGITS_UPPER[((b >> 4) & 0xf) as usize], HEX_DIGITS_UPPER[(b & 0xf) as usize]];
@@ -1241,6 +1313,8 @@ pub const fn u8_to_upper_hex(b: u8) -> [u8; 2] {
 ///
 /// This function panics if the input string contains invalid percent encodings.
 #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+#[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+#[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 pub fn unescape_uri_encoding(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let mut chars = s.bytes();
@@ -1603,7 +1677,7 @@ mod tests {
 
         let (cr, _, _) =
             CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
-        assert_eq!(cr.query_parameters.get("foo").unwrap(), &vec!["bar%C3%BF".to_string()]);
+        assert_eq!(cr.query_parameters().get("foo").unwrap(), &vec!["bar%C3%BF".to_string()]);
 
         let uri = Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap();
         let request = Request::builder()
@@ -1618,7 +1692,7 @@ mod tests {
 
         let (cr, _, _) =
             CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
-        assert_eq!(cr.query_parameters.get("foo").unwrap(), &vec!["bar%C3%BF".to_string()]);
+        assert_eq!(cr.query_parameters().get("foo").unwrap(), &vec!["bar%C3%BF".to_string()]);
     }
 
     #[test_log::test]
@@ -1635,7 +1709,7 @@ mod tests {
         let (parts, body) = request.into_parts();
 
         let (cr, _, _) = CanonicalRequest::from_request_parts(parts, body, SignatureOptions::default()).unwrap();
-        assert!(!cr.query_parameters.contains_key("foo"));
+        assert!(!cr.query_parameters().contains_key("foo"));
     }
 
     #[test_log::test]

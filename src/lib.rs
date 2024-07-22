@@ -18,6 +18,12 @@
 //!
 //! Users migrating from version 0.10 to 0.11 should consult the [migration guide][migration].
 //!
+//! # Feature flags
+//! This crate has one feature flag:
+//! * `unstable`: Allows access to unstable APIs (structs, traits, functions) such as
+//!   [`canonical::normalize_uri_path_component`]. These APIs are not needed for normal use of
+//!   this crate; they are provided for others exploring AWS SigV4 internals.
+//!
 //! # Workflow
 //! This assumes you have a complete HTTP request (headers _and_ body) already. As a result, you may not be able to
 //! implement this as a middleware layer for a web server—those typically only provide the headers. Having the body is
@@ -123,28 +129,19 @@ mod error;
 mod signature;
 mod signing_key;
 
-#[cfg(not(any(feature = "unstable", doc)))]
-mod auth;
-
-#[cfg(not(any(feature = "unstable", doc)))]
-mod canonical;
-
-#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
-#[cfg(any(feature = "unstable", doc))]
 pub mod auth;
-
-#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
-#[cfg(any(feature = "unstable", doc))]
 pub mod canonical;
 
 pub use {
-    canonical::{
-        ConstSignedHeaderRequirements, SignedHeaderRequirements, SliceSignedHeaderRequirements,
-        VecSignedHeaderRequirements, NO_ADDITIONAL_SIGNED_HEADERS,
-    },
     error::*,
     signature::*,
     signing_key::*,
+};
+
+#[doc(inline)]
+pub use canonical::{
+    ConstSignedHeaderRequirements, SignedHeaderRequirements, SliceSignedHeaderRequirements,
+    VecSignedHeaderRequirements, NO_ADDITIONAL_SIGNED_HEADERS,
 };
 
 #[cfg(doc)]

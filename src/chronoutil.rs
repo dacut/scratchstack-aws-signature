@@ -24,7 +24,10 @@ lazy_static! {
     static ref INVALID: ParseError = DateTime::<FixedOffset>::from_str("").unwrap_err();
 }
 
+/// Trait for parsing a string as an ISO 8601 timestamp (including formats not supported by Chrono)
+/// into a `DateTime<FixedOffset>`.
 pub trait ParseISO8601<T> {
+    /// Parse a string as an ISO 8601 timestamp.
     fn parse_from_iso8601(s: &str) -> ParseResult<T>;
 }
 

@@ -16,6 +16,7 @@ use {
     chrono::{DateTime, Duration, Utc},
     derive_builder::Builder,
     log::{debug, trace},
+    qualifier_attr::qualifiers,
     scratchstack_aws_principal::{Principal, SessionData},
     std::{
         fmt::{Debug, Formatter, Result as FmtResult},
@@ -51,8 +52,10 @@ const SHA256_EMPTY: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495
 const SHA256_HEX_LENGTH: usize = SHA256_EMPTY.len();
 
 /// Low-level structure for performing AWS SigV4 authentication after a canonical request has been generated.
-#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
 #[derive(Builder, Clone, Default)]
+#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+#[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+#[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 #[builder(derive(Debug))]
 pub struct SigV4Authenticator {
     /// The SHA-256 hash of the canonical request.
@@ -77,49 +80,63 @@ pub struct SigV4Authenticator {
 impl SigV4Authenticator {
     /// Create a builder for `SigV4Authenticator`.
     #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+    #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+    #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
-    pub fn builder() -> SigV4AuthenticatorBuilder {
+    fn builder() -> SigV4AuthenticatorBuilder {
         SigV4AuthenticatorBuilder::default()
     }
 
     /// Retrieve the SHA-256 hash of the canonical request.
     #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+    #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+    #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
-    pub fn canonical_request_sha256(&self) -> [u8; SHA256_OUTPUT_LEN] {
+    fn canonical_request_sha256(&self) -> [u8; SHA256_OUTPUT_LEN] {
         self.canonical_request_sha256
     }
 
     /// Retrieve the credential passed into the request, in the form of `keyid/date/region/service/aws4_request`.
     #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+    #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+    #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
-    pub fn credential(&self) -> &str {
+    fn credential(&self) -> &str {
         &self.credential
     }
 
     /// Retrieve the optional session token.
     #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+    #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+    #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
-    pub fn session_token(&self) -> Option<&str> {
+    fn session_token(&self) -> Option<&str> {
         self.session_token.as_deref()
     }
 
     /// Retrieve the signature passed into the request.
     #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+    #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+    #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
-    pub fn signature(&self) -> &str {
+    fn signature(&self) -> &str {
         &self.signature
     }
 
     /// Retrieve the timestamp of the request.
     #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+    #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+    #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
-    pub fn request_timestamp(&self) -> DateTime<Utc> {
+    fn request_timestamp(&self) -> DateTime<Utc> {
         self.request_timestamp
     }
 
     /// Verify the request parameters make sense for the region, service, and specified timestamp.
     /// This must be called successfully before calling [validate_signature][Self::validate_signature].
     #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+    #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+    #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     pub fn prevalidate(
         &self,
         region: &str,
@@ -127,7 +144,7 @@ impl SigV4Authenticator {
         server_timestamp: DateTime<Utc>,
         allowed_mismatch: Duration,
     ) -> Result<(), SignatureError> {
-        let req_ts = self.request_timestamp;
+        let req_ts = self.request_timestamp();
         let min_ts = server_timestamp.checked_sub_signed(allowed_mismatch).unwrap_or(server_timestamp);
         let max_ts = server_timestamp.checked_add_signed(allowed_mismatch).unwrap_or(server_timestamp);
 
@@ -156,12 +173,12 @@ impl SigV4Authenticator {
         }
 
         // Rule 12: Credential scope must have exactly five elements.
-        let credential_parts = self.credential.split('/').collect::<Vec<&str>>();
+        let credential_parts = self.credential().split('/').collect::<Vec<&str>>();
         if credential_parts.len() != 5 {
             trace!("prevalidate: credential has {} parts, expected 5", credential_parts.len());
             return Err(SignatureError::IncompleteSignature(format!(
                 "{} got '{}'",
-                MSG_CREDENTIAL_MUST_HAVE_FIVE_PARTS, self.credential
+                MSG_CREDENTIAL_MUST_HAVE_FIVE_PARTS, self.credential()
             )));
         }
 
@@ -218,7 +235,9 @@ impl SigV4Authenticator {
     /// Return the signing key (`kSigning` from the [AWS documentation](https://docs.aws.amazon.com/general/latest/gr/sigv4-calculate-signature.html))
     /// for the request.
     #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
-    pub async fn get_signing_key<S, F>(
+    #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+    #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
+    async fn get_signing_key<S, F>(
         &self,
         region: &str,
         service: &str,
@@ -228,12 +247,12 @@ impl SigV4Authenticator {
         S: Service<GetSigningKeyRequest, Response = GetSigningKeyResponse, Error = BoxError, Future = F> + Send,
         F: Future<Output = Result<GetSigningKeyResponse, BoxError>> + Send,
     {
-        let access_key = self.credential.split('/').next().expect("prevalidate must been called first").to_string();
+        let access_key = self.credential().split('/').next().expect("prevalidate must been called first").to_string();
 
         let req = GetSigningKeyRequest::builder()
             .access_key(access_key)
-            .session_token(self.session_token.clone())
-            .request_date(self.request_timestamp.date_naive())
+            .session_token(self.session_token().map(|x| x.to_string()))
+            .request_date(self.request_timestamp().date_naive())
             .region(region)
             .service(service)
             .build()
@@ -256,19 +275,21 @@ impl SigV4Authenticator {
 
     /// Return the string to sign for the request.
     #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
-    pub fn get_string_to_sign(&self) -> Vec<u8> {
+    #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+    #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
+    fn get_string_to_sign(&self) -> Vec<u8> {
         let mut result = Vec::with_capacity(
-            AWS4_HMAC_SHA256.len() + 1 + ISO8601_UTC_LENGTH + 1 + self.credential.len() + 1 + SHA256_HEX_LENGTH,
+            AWS4_HMAC_SHA256.len() + 1 + ISO8601_UTC_LENGTH + 1 + self.credential().len() + 1 + SHA256_HEX_LENGTH,
         );
-        let hashed_canonical_request = hex::encode(self.canonical_request_sha256);
+        let hashed_canonical_request = hex::encode(self.canonical_request_sha256());
 
         // Remove the access key from the credential to get the credential scope. This requires that prevalidate() has
         // been called.
-        let cscope = self.credential.split_once('/').map(|x| x.1).expect("prevalidate should have been called first");
+        let cscope = self.credential().split_once('/').map(|x| x.1).expect("prevalidate should have been called first");
 
         result.extend(AWS4_HMAC_SHA256.as_bytes());
         result.push(b'\n');
-        result.extend(self.request_timestamp.format(ISO8601_COMPACT_FORMAT).to_string().as_bytes());
+        result.extend(self.request_timestamp().format(ISO8601_COMPACT_FORMAT).to_string().as_bytes());
         result.push(b'\n');
         result.extend(cscope.as_bytes());
         result.push(b'\n');
@@ -278,6 +299,8 @@ impl SigV4Authenticator {
 
     /// Validate the request signature.
     #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+    #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+    #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     pub async fn validate_signature<S, F>(
         &self,
         region: &str,
@@ -296,10 +319,10 @@ impl SigV4Authenticator {
         let response = self.get_signing_key(region, service, get_signing_key).await?;
         let expected_signature = hex::encode(hmac_sha256(response.signing_key().as_ref(), string_to_sign.as_ref()));
         let expected_signature_bytes = expected_signature.as_bytes();
-        let signature_bytes = self.signature.as_bytes();
+        let signature_bytes = self.signature().as_bytes();
         let is_equal: bool = signature_bytes.ct_eq(expected_signature_bytes).into();
         if !is_equal {
-            trace!("Signature mismatch: expected '{}', got '{}'", expected_signature, self.signature);
+            trace!("Signature mismatch: expected '{}', got '{}'", expected_signature, self.signature());
             Err(SignatureError::SignatureDoesNotMatch(Some(MSG_REQUEST_SIGNATURE_MISMATCH.to_string())))
         } else {
             Ok(response.into())
@@ -310,10 +333,10 @@ impl SigV4Authenticator {
 impl Debug for SigV4Authenticator {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         f.debug_struct("SigV4Authenticator")
-            .field("canonical_request_sha256", &hex::encode(self.canonical_request_sha256))
-            .field("session_token", &self.session_token)
-            .field("signature", &self.signature)
-            .field("request_timestamp", &self.request_timestamp)
+            .field("canonical_request_sha256", &hex::encode(self.canonical_request_sha256()))
+            .field("session_token", &self.session_token())
+            .field("signature", &self.signature())
+            .field("request_timestamp", &self.request_timestamp())
             .finish()
     }
 }
@@ -445,7 +468,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            auth2.canonical_request_sha256.as_slice(),
+            auth2.canonical_request_sha256().as_slice(),
             &[
                 0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27,
                 28, 29, 30, 31,
