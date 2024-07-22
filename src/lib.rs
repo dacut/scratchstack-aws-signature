@@ -136,6 +136,9 @@ pub use {
     error::*,
     signature::*,
     signing_key::*,
+    scratchstack_arn as arn,
+    scratchstack_errors as errors,
+    scratchstack_aws_principal as principal,
 };
 
 #[doc(inline)]
