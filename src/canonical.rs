@@ -759,7 +759,8 @@ impl<'a, 'b, 'c> SliceSignedHeaderRequirements<'a, 'b, 'c> {
 /// SignedHeaderRequirements from constant slices.
 pub type ConstSignedHeaderRequirements = SliceSignedHeaderRequirements<'static, 'static, 'static>;
 
-/// Constant when no additional signed headers are required.
+/// Constant [`SignedHeaderRequirements`] value to use when no additional signed headers are
+/// required.
 pub const NO_ADDITIONAL_SIGNED_HEADERS: ConstSignedHeaderRequirements =
     ConstSignedHeaderRequirements::new(&[], &[], &[]);
 
