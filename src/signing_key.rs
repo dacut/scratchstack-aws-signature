@@ -254,6 +254,7 @@ impl KServiceKey {
 /// GetSigningKeyRequest structs are immutable. Use [GetSigningKeyRequestBuilder] to programmatically construct a
 /// request.
 #[derive(Builder, Clone, Debug)]
+#[non_exhaustive]
 pub struct GetSigningKeyRequest {
     /// The access key used in the request.
     #[builder(setter(into))]
