@@ -1,4 +1,4 @@
-//! Migrating from 0.10 to 0.11
+//! # Migrating from 0.10 to 0.11
 //!
 //! Version 0.11 brings significant changes to the scratchstack-aws-signature crate. These changes
 //! are intended to make the crate more ergonomic (easier for consumers to use) and more efficient
