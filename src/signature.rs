@@ -3,7 +3,6 @@ use {
         auth::SigV4AuthenticatorResponse, canonical::CanonicalRequest, GetSigningKeyRequest, GetSigningKeyResponse,
         SignedHeaderRequirements,
     },
-    async_trait::async_trait,
     bytes::Bytes,
     chrono::{DateTime, Duration, Utc},
     http::request::{Parts, Request},
@@ -116,14 +115,12 @@ where
 /// A trait for converting various body types into a [`Bytes`] object.
 ///
 /// This requires reading the entire body into memory.
-#[async_trait]
 pub trait IntoRequestBytes {
     /// Convert this object into a [`Bytes`] object.
-    async fn into_request_bytes(self) -> Result<Bytes, BoxError>;
+    fn into_request_bytes(self) -> impl Future<Output = Result<Bytes, BoxError>> + Send + Sync;
 }
 
 /// Convert the unit type `()` into an empty [`Bytes`] object.
-#[async_trait]
 impl IntoRequestBytes for () {
     /// Convert the unit type `()` into an empty [`Bytes`] object.
     ///
@@ -134,7 +131,6 @@ impl IntoRequestBytes for () {
 }
 
 /// Convert a `Vec<u8>` into a [`Bytes`] object.
-#[async_trait]
 impl IntoRequestBytes for Vec<u8> {
     /// Convert a `Vec<u8>` into a [`Bytes`] object.
     ///
@@ -145,7 +141,6 @@ impl IntoRequestBytes for Vec<u8> {
 }
 
 /// Identity transformation: return the [`Bytes`] object as-is.
-#[async_trait]
 impl IntoRequestBytes for Bytes {
     /// Identity transformation: return the [`Bytes`] object as-is.
     ///
