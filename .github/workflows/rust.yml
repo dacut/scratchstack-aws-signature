@@ -11,13 +11,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v5
     - name: Install Rust nightly
-      uses: actions-rs/toolchain@v1
+      uses: dtolnay/rust-toolchain@stable
       with:
         toolchain: nightly
-        override: true
-        profile: default
     - name: Build
       run: cargo build --verbose
     - name: Run tests
@@ -26,7 +24,7 @@ jobs:
       run: cargo doc --verbose
     - name: Generate coverage report
       id: coverage
-      uses: actions-rs/grcov@v0.1
+      uses: dacut/rust-grcov@v0.2.0
     - name: Upload coverage report to Coveralls
       uses: coverallsapp/github-action@master
       with:
