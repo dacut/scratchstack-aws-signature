@@ -1,7 +1,7 @@
 use {
     crate::{
         crypto::{hmac_sha256, SHA256_OUTPUT_LEN},
-        KeyTooLongError,
+        KeyLengthError,
     },
     chrono::NaiveDate,
     derive_builder::Builder,
@@ -147,13 +147,16 @@ impl Display for KSigningKey {
 }
 
 impl<const M: usize> FromStr for KSecretKey<M> {
-    type Err = KeyTooLongError;
+    type Err = KeyLengthError;
 
     /// Create a new `KSecretKey` from a raw AWS secret key.
-    fn from_str(raw: &str) -> Result<Self, KeyTooLongError> {
+    fn from_str(raw: &str) -> Result<Self, KeyLengthError> {
         let len = raw.len();
         if len > M - 4 {
-            return Err(KeyTooLongError);
+            return Err(KeyLengthError::TooLong);
+        }
+        if len + 4 < M {
+            return Err(KeyLengthError::TooShort);
         }
 
         let mut prefixed_key = [0; M];

@@ -188,15 +188,23 @@ impl From<Box<dyn Error + Send + Sync>> for SignatureError {
 
 /// Error returned by `KSecretKey::from_str` when the secret key cannot fit in the expected size.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct KeyTooLongError;
+pub enum KeyLengthError {
+    /// The key is too long.
+    TooLong,
+    /// The key is too short.
+    TooShort,
+}
 
-impl Display for KeyTooLongError {
+impl Display for KeyLengthError {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        f.write_str("Key too long")
+        match self {
+            KeyLengthError::TooLong => f.write_str("Key too long"),
+            KeyLengthError::TooShort => f.write_str("Key too short"),
+        }
     }
 }
 
-impl Error for KeyTooLongError {}
+impl Error for KeyLengthError {}
 
 #[cfg(test)]
 mod tests {
