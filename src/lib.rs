@@ -133,11 +133,7 @@ pub mod auth;
 pub mod canonical;
 
 pub use {
-    error::*,
-    signature::*,
-    signing_key::*,
-    scratchstack_errors as errors,
-    scratchstack_aws_principal as principal,
+    error::*, scratchstack_aws_principal as principal, scratchstack_errors as errors, signature::*, signing_key::*,
 };
 
 #[doc(inline)]

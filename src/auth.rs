@@ -178,7 +178,8 @@ impl SigV4Authenticator {
             trace!("prevalidate: credential has {} parts, expected 5", credential_parts.len());
             return Err(SignatureError::IncompleteSignature(format!(
                 "{} got '{}'",
-                MSG_CREDENTIAL_MUST_HAVE_FIVE_PARTS, self.credential()
+                MSG_CREDENTIAL_MUST_HAVE_FIVE_PARTS,
+                self.credential()
             )));
         }
 

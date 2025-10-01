@@ -52,12 +52,12 @@
 //! These types have fixed sizes. [`KSecretKey`][crate::KSecretKey] has a const parameter that
 //! specifies the maximum secret key size (including the `"AWS4"` prefix), which defaults to 44
 //! (the size of AWS-issued secret keys).
-//! 
+//!
 //! ### Signing key functions changed
 //! Previously, `get_signing_key_fn()` was used to convert a function into a
 //! [Tower `Service`][tower::Service] that could be used to get signing keys. This is now called
 //! [`service_for_signing_key_fn()`][crate::service_for_signing_key_fn].
-//! 
+//!
 //! In addition, the signature of the function passed in has changed. Previously, parameters to
 //! the function were broken out separately:
 //! ```ignore
@@ -70,7 +70,7 @@
 //!    service: String)
 //! -> Result<(PrincipalActor, SigningKey), SignatureError>
 //! ```
-//! 
+//!
 //! These parameters are now encapsulated in the (non-exhaustive)
 //! [`GetSigningKeyRequest`][crate::GetSigningKeyRequest] type, and the tuple of
 //! `(PrincipalActor, SigningKey)` is now encapsulated in the
@@ -78,21 +78,21 @@
 //! ```
 //! # use scratchstack_aws_signature::{GetSigningKeyRequest, GetSigningKeyResponse};
 //! use tower::BoxError;
-//! 
+//!
 //! async fn get_signing_key(req: GetSigningKeyRequest) -> Result<GetSigningKeyResponse, BoxError>
 //! # {
 //! # Ok(GetSigningKeyResponse::default())
 //! # }
 //! ```
-//! 
+//!
 //! Both of these types have builder APIs to construct them.
-//! 
+//!
 //! ### Principal types updated
 //! This crate uses the [`Principal`][scratchstack_aws_principal::Principal] type from
 //! scratchstack_aws_principal v0.4. Previously, the `PrincipalActor` from v0.3 of that crate was
 //! used. In v0.4, only actor principals are supported; v0.3 attempted to support both actor and
 //! policy principals, but this was riddled with implementation errors.
-//! 
+//!
 //! ### Type-dependencies from other crates exposed
 //! This crate now uses types two other crates in its APIs: [`scratchstack_aws_principal`] and
 //! [`scratchstack_errors`]. To reduce the possibility of accidentally using a different version
