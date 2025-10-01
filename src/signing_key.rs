@@ -17,9 +17,12 @@ use {
 /// String included at the end of the AWS SigV4 credential scope
 const AWS4_REQUEST: &str = "aws4_request";
 
+/// The default length of an AWS secret key, including the "AWS4" prefix.
+pub(crate) static KSECRETKEY_LENGTH: usize = 44;
+
 /// A raw AWS secret key (`kSecret`).
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub struct KSecretKey<const M: usize = 44> {
+pub struct KSecretKey<const M: usize = KSECRETKEY_LENGTH> {
     /// The secret key, prefixed with "AWS4".
     prefixed_key: [u8; M],
 
@@ -395,7 +398,7 @@ where
 #[cfg(test)]
 mod tests {
     use {
-        crate::{GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey},
+        crate::{GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, KSECRETKEY_LENGTH},
         chrono::NaiveDate,
         scratchstack_aws_principal::{AssumedRole, Principal},
         std::str::FromStr,
@@ -553,5 +556,15 @@ mod tests {
         let response = GetSigningKeyResponse::builder().signing_key(signing_key).build().unwrap();
         assert!(response.principal().is_empty());
         assert!(response.session_data().is_empty());
+    }
+
+    #[test]
+    fn test_key_from_str_length() {
+        assert_eq!(KSecretKey::from_str("123"), Err(crate::KeyLengthError::TooShort));
+        assert_eq!(
+            KSecretKey::from_str("123456789012345678901234567890123456789012345"),
+            Err(crate::KeyLengthError::TooLong)
+        );
+        assert!(KSecretKey::<KSECRETKEY_LENGTH>::from_str("1234567890123456789012345678901234567890").is_ok());
     }
 }
