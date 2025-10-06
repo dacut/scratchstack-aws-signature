@@ -429,10 +429,13 @@ fn build_canonical_request(
 
 #[cfg(test)]
 mod tests {
-    use std::{borrow::Cow, str::FromStr};
-
     use super::*;
-    use crate::auth::ISO8601_COMPACT_FORMAT;
+    use crate::aws4::{TEST_REGION, TEST_SERVICE};
+    use crate::{auth::ISO8601_COMPACT_FORMAT, canonical::X_AMZ_DATE};
+    use hmac::{Hmac, Mac};
+    use sha2::{Digest, Sha256};
+    use std::sync::LazyLock;
+    use std::{borrow::Cow, str::FromStr};
 
     use crate::{
         canonical::X_AMZ_DATE_LOWER, service_for_signing_key_fn, KSecretKey, VecSignedHeaderRequirements,
@@ -442,9 +445,6 @@ mod tests {
     use http::{header::HOST, uri::PathAndQuery, Method, Uri};
     use lazy_static::lazy_static;
     use scratchstack_aws_principal::{Principal, User};
-
-    const TEST_REGION: &str = "us-east-1";
-    const TEST_SERVICE: &str = "service";
 
     lazy_static! {
         static ref TEST_TIMESTAMP: DateTime<Utc> = DateTime::from_naive_utc_and_offset(
@@ -478,10 +478,14 @@ mod tests {
         };
     }
 
-    const VALID_AUTH_HEADER: &str = "AWS4-HMAC-SHA256 \
-    Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, \
+    const VALID_AUTH_HEADER: LazyLock<String> = LazyLock::new(|| {
+        format!(
+            "AWS4-HMAC-SHA256 \
+    Credential=AKIDEXAMPLE/20150830/{TEST_REGION}/{TEST_SERVICE}/aws4_request, \
     SignedHeaders=host;x-amz-date, \
-    Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea";
+    Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea"
+        )
+    });
 
     async fn get_signing_key(req: GetSigningKeyRequest) -> Result<GetSigningKeyResponse, BoxError> {
         let k_secret = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY").unwrap();
@@ -529,7 +533,7 @@ mod tests {
         let request = Request::builder()
             .method(Method::GET)
             .uri(uri)
-            .header(AUTHORIZATION, VALID_AUTH_HEADER)
+            .header(AUTHORIZATION, VALID_AUTH_HEADER.as_str())
             .header(HOST, "localhost")
             .body(())
             .unwrap();
@@ -559,7 +563,7 @@ mod tests {
         let request = Request::builder()
             .method(Method::GET)
             .uri(uri)
-            .header(AUTHORIZATION, VALID_AUTH_HEADER)
+            .header(AUTHORIZATION, VALID_AUTH_HEADER.as_str())
             .header("date", "zzzzzzzzz")
             .body(())
             .unwrap();
@@ -999,8 +1003,8 @@ mod tests {
 
         assert!(sigv4_validate_request(
             req,
-            "us-east-1",
-            "service",
+            TEST_REGION,
+            TEST_SERVICE,
             &mut get_signing_key_svc,
             *TEST_TIMESTAMP,
             &NO_ADDITIONAL_SIGNED_HEADERS,
@@ -1013,16 +1017,16 @@ mod tests {
         let req = Request::builder()
             .method(Method::GET)
             .uri("/a/path/../to//something") // Becomes /a/to/something.
-            .header("Host", "example.amazonaws.com")
-            .header("X-Amz-Date", "20150830T123600Z")
-            .header("Authorization", "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, Signature=b475de2c96e7bfdfe03bd784d948218730ef62f48ac8bb9f2922af9a44f8657c, SignedHeaders=host;x-amz-date")
+            .header(HOST, "example.amazonaws.com")
+            .header(X_AMZ_DATE, "20150830T123600Z")
+            .header(AUTHORIZATION, "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, Signature=b475de2c96e7bfdfe03bd784d948218730ef62f48ac8bb9f2922af9a44f8657c, SignedHeaders=host;x-amz-date")
             .body(())
             .unwrap();
 
         assert!(sigv4_validate_request(
             req,
-            "us-east-1",
-            "service",
+            TEST_REGION,
+            TEST_SERVICE,
             &mut get_signing_key_svc,
             *TEST_TIMESTAMP,
             &NO_ADDITIONAL_SIGNED_HEADERS,
@@ -1035,9 +1039,6 @@ mod tests {
     #[test_log::test(tokio::test)]
     #[cfg(feature = "streaming")]
     async fn test_sigv4_validate_streaming_request_success() {
-        use hmac::{Hmac, Mac};
-        use sha2::{Digest, Sha256};
-
         use crate::auth::ISO8601_COMPACT_FORMAT;
 
         // Arrange
@@ -1124,8 +1125,8 @@ mod tests {
         assert!(result.is_ok(), "expected streaming request to validate successfully");
         let (_parts, body, authz) = result.unwrap();
         assert!(body.is_empty(), "expected empty body");
-        // Just sanity check that a principal was returned (do not depend on internal layout too much)
-        assert!(authz.principal().is_some(), "expected a principal in authenticator response");
+        // Sanity check that principal set is non-empty
+        assert!(!authz.principal().is_empty(), "expected a principal in authenticator response");
     }
 
     #[test_log::test(tokio::test)]
@@ -1183,9 +1184,9 @@ mod tests {
             'a'
         });
 
-    // Use correct date format (YYYYMMDD) expected by parser
-    let credential_date = TEST_TIMESTAMP.format(ISO8601_DATE_FORMAT);
-    let authorization = format!("AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/{}/{}/service/aws4_request, SignedHeaders=host;x-amz-date, Signature={}", credential_date, region, signature);
+        // Use correct date format (YYYYMMDD) expected by parser
+        let credential_date = TEST_TIMESTAMP.format(ISO8601_DATE_FORMAT);
+        let authorization = format!("AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/{}/{}/service/aws4_request, SignedHeaders=host;x-amz-date, Signature={}", credential_date, region, signature);
 
         let uri = Uri::builder().path_and_query(PathAndQuery::from_static(path)).build().unwrap();
         let request = Request::builder()
@@ -1224,12 +1225,11 @@ mod tests {
     #[cfg(feature = "streaming")]
     async fn test_sigv4_validate_streaming_request_missing_headers() {
         let mut get_signing_key_svc = service_for_signing_key_fn(get_signing_key);
-        let region = TEST_REGION;
-        let service = TEST_SERVICE;
+
         let x_amz_date = TEST_TIMESTAMP.format(ISO8601_COMPACT_FORMAT).to_string();
 
         // Deliberately omit x-amz-content-sha256 header
-        let authorization = format!("{AWS4_HMAC_SHA256} Credential=AKIDEXAMPLE/{}/us-east-1/service/{AWS4_REQUEST}, SignedHeaders=host;{X_AMZ_DATE_LOWER}, Signature=deadbeef", TEST_TIMESTAMP.format(ISO8601_DATE_FORMAT));
+        let authorization = format!("{AWS4_HMAC_SHA256} Credential=AKIDEXAMPLE/{}/{TEST_REGION}/{TEST_SERVICE}/{AWS4_REQUEST}, SignedHeaders=host;{X_AMZ_DATE_LOWER}, Signature=deadbeef", TEST_TIMESTAMP.format(ISO8601_DATE_FORMAT));
         let uri = Uri::builder().path_and_query(PathAndQuery::from_static("/missing-hdr")).build().unwrap();
         let request = Request::builder()
             .method(Method::GET)
@@ -1242,8 +1242,8 @@ mod tests {
         let (parts, _) = request.into_parts();
         let result = super::sigv4_validate_streaming_request(
             parts,
-            region,
-            service,
+            TEST_REGION,
+            TEST_SERVICE,
             &mut get_signing_key_svc,
             *TEST_TIMESTAMP,
             &NO_ADDITIONAL_SIGNED_HEADERS,

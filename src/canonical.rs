@@ -111,7 +111,7 @@ const X_AMZ_ALGORITHM: &str = "X-Amz-Algorithm";
 const X_AMZ_CREDENTIAL: &str = "X-Amz-Credential";
 
 /// Query parameter for delivering the date
-const X_AMZ_DATE: &str = "X-Amz-Date";
+pub(crate) const X_AMZ_DATE: &str = "X-Amz-Date";
 
 /// Header for delivering the alternate date
 pub(crate) const X_AMZ_DATE_LOWER: &str = "x-amz-date";
