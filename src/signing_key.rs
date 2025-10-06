@@ -399,7 +399,10 @@ where
 #[cfg(test)]
 mod tests {
     use {
-        crate::{GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, KSECRETKEY_LENGTH},
+        crate::{
+            aws4::{TEST_REGION, TEST_SERVICE},
+            GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, KSECRETKEY_LENGTH,
+        },
         chrono::NaiveDate,
         scratchstack_aws_principal::{AssumedRole, Principal},
         std::str::FromStr,
@@ -437,9 +440,9 @@ mod tests {
         assert_eq!(format!("{:?}", kdate1a).as_str(), "KDateKey");
         assert_eq!(format!("{}", kdate1a).as_str(), "KDateKey");
 
-        let kregion1a = kdate1a.to_kregion("us-east-1");
-        let kregion1b = kdate1b.to_kregion("us-east-1");
-        let kregion2 = kdate2.to_kregion("us-east-1");
+        let kregion1a = kdate1a.to_kregion(TEST_REGION);
+        let kregion1b = kdate1b.to_kregion(TEST_REGION);
+        let kregion2 = kdate2.to_kregion(TEST_REGION);
         assert_eq!(
             kregion1a.as_ref(),
             &[
@@ -488,12 +491,12 @@ mod tests {
         assert_eq!(format!("{:?}", ksigning1a).as_str(), "KSigningKey");
         assert_eq!(format!("{}", ksigning1a).as_str(), "KSigningKey");
 
-        assert_eq!(ksecret1a.to_kregion(date, "us-east-1"), kregion1a);
-        assert_eq!(ksecret1a.to_kservice(date, "us-east-1", "example"), kservice1a);
-        assert_eq!(ksecret1a.to_ksigning(date, "us-east-1", "example"), ksigning1a);
+        assert_eq!(ksecret1a.to_kregion(date, TEST_REGION), kregion1a);
+        assert_eq!(ksecret1a.to_kservice(date, TEST_REGION, "example"), kservice1a);
+        assert_eq!(ksecret1a.to_ksigning(date, TEST_REGION, "example"), ksigning1a);
 
-        assert_eq!(kdate1a.to_kservice("us-east-1", "example"), kservice1a);
-        assert_eq!(kdate1a.to_ksigning("us-east-1", "example"), ksigning1a);
+        assert_eq!(kdate1a.to_kservice(TEST_REGION, "example"), kservice1a);
+        assert_eq!(kdate1a.to_ksigning(TEST_REGION, "example"), ksigning1a);
 
         assert_eq!(kregion1a.to_kservice("example"), kservice1a);
     }
@@ -506,8 +509,8 @@ mod tests {
             access_key: "AKIDEXAMPLE".to_string(),
             session_token: Some("token".to_string()),
             request_date: date,
-            region: "us-east-1".to_string(),
-            service: "example".to_string(),
+            region: TEST_REGION.to_string(),
+            service: TEST_SERVICE.to_string(),
         };
 
         // Make sure we can debug print the request.
@@ -523,8 +526,8 @@ mod tests {
 
         let signing_key = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY").unwrap().to_ksigning(
             date,
-            "us-east-1",
-            "example",
+            TEST_REGION,
+            TEST_SERVICE,
         );
         let principal = Principal::from(AssumedRole::new("aws", "123456789012", "role", "session").unwrap());
 
@@ -551,8 +554,8 @@ mod tests {
         let date = NaiveDate::from_ymd_opt(2015, 8, 30).unwrap();
         let signing_key = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY").unwrap().to_ksigning(
             date,
-            "us-east-1",
-            "example",
+            TEST_REGION,
+            TEST_SERVICE,
         );
         let response = GetSigningKeyResponse::builder().signing_key(signing_key).build().unwrap();
         assert!(response.principal().is_empty());

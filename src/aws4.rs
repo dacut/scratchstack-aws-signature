@@ -24,8 +24,8 @@ use {
     tower::BoxError,
 };
 
-const TEST_REGION: &str = "us-east-1";
-const TEST_SERVICE: &str = "service";
+pub(crate) const TEST_REGION: &str = "us-east-1";
+pub(crate) const TEST_SERVICE: &str = "service";
 
 #[test_log::test(tokio::test)]
 async fn get_header_key_duplicate_get_header_key_duplicate() {

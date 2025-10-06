@@ -421,6 +421,7 @@ mod tests {
         super::duration_to_string,
         crate::{
             auth::{SigV4Authenticator, SigV4AuthenticatorBuilder, SigV4AuthenticatorResponse},
+            aws4::TEST_REGION,
             crypto::SHA256_OUTPUT_LEN,
             service_for_signing_key_fn, GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, SignatureError,
         },
@@ -571,7 +572,7 @@ mod tests {
             .expect("failed to build SigV4Authenticator");
 
         let e = auth
-            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .validate_signature(TEST_REGION, "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
             .await
             .unwrap_err();
 
@@ -596,7 +597,7 @@ mod tests {
             .expect("failed to build SigV4Authenticator");
 
         let e = auth
-            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .validate_signature(TEST_REGION, "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
             .await
             .unwrap_err();
 
@@ -621,7 +622,7 @@ mod tests {
             .expect("failed to build SigV4Authenticator");
 
         let e = auth
-            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .validate_signature(TEST_REGION, "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
             .await
             .unwrap_err();
 
@@ -646,7 +647,7 @@ mod tests {
             .expect("failed to build SigV4Authenticator");
 
         let e = auth
-            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .validate_signature(TEST_REGION, "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
             .await
             .unwrap_err();
 
@@ -671,7 +672,7 @@ mod tests {
             .expect("failed to build SigV4Authenticator");
 
         let e = auth
-            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .validate_signature(TEST_REGION, "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
             .await
             .unwrap_err();
 
@@ -693,7 +694,7 @@ mod tests {
             .expect("failed to build SigV4Authenticator");
 
         let e = auth
-            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .validate_signature(TEST_REGION, "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
             .await
             .unwrap_err();
 
@@ -715,7 +716,7 @@ mod tests {
             .expect("failed to build SigV4Authenticator");
 
         let e = auth
-            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .validate_signature(TEST_REGION, "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
             .await
             .unwrap_err();
 
@@ -738,7 +739,7 @@ mod tests {
             .expect("failed to build SigV4Authenticator");
 
         let e = auth
-            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .validate_signature(TEST_REGION, "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
             .await
             .unwrap_err();
 
@@ -767,7 +768,7 @@ mod tests {
             .expect("failed to build SigV4Authenticator");
 
         let e = auth
-            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .validate_signature(TEST_REGION, "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
             .await
             .unwrap_err();
 
@@ -789,7 +790,7 @@ mod tests {
             .expect("failed to build SigV4Authenticator");
 
         let e = auth
-            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .validate_signature(TEST_REGION, "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
             .await
             .unwrap_err();
 
@@ -811,7 +812,7 @@ mod tests {
             .expect("failed to build SigV4Authenticator");
 
         let _ = auth
-            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .validate_signature(TEST_REGION, "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
             .await
             .unwrap();
     }
