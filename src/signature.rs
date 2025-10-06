@@ -1,21 +1,30 @@
+#[cfg(feature = "streaming")]
+use http::header::AUTHORIZATION;
 use {
     crate::{
         auth::SigV4AuthenticatorResponse, canonical::CanonicalRequest, GetSigningKeyRequest, GetSigningKeyResponse,
-        SignatureError, SignedHeaderRequirements,
+        SignedHeaderRequirements,
     },
     bytes::Bytes,
-    chrono::{DateTime, Duration, NaiveDateTime, Utc},
-    http::{
-        header::AUTHORIZATION,
-        request::{Parts, Request},
-    },
-    log::{debug, trace},
+    chrono::{DateTime, Duration, Utc},
+    http::request::{Parts, Request},
+    log::trace,
     std::future::Future,
-    tower::{BoxError, Service, ServiceExt},
+    tower::{BoxError, Service},
 };
 
+#[cfg(feature = "streaming")]
+use crate::SignatureError;
+#[cfg(feature = "streaming")]
+use chrono::NaiveDateTime;
+#[cfg(feature = "streaming")]
 use hmac::{Hmac, Mac};
+#[cfg(feature = "streaming")]
+use log::debug;
+#[cfg(feature = "streaming")]
 use sha2::Sha256;
+#[cfg(feature = "streaming")]
+use tower::ServiceExt;
 
 /// Options that can be used to configure the signature service.
 #[derive(Clone, Copy, Debug, Default)]
@@ -149,6 +158,7 @@ where
 /// malformed or the request was not properly signed. The validation follows the
 /// [AWS Auth Error Ordering](https://github.com/dacut/scratchstack-aws-signature/blob/main/docs/AWS%20Auth%20Error%20Ordering.pdf)
 /// document.
+#[cfg(feature = "streaming")]
 pub async fn sigv4_validate_streaming_request<G, F, S>(
     parts: Parts,
     region: &str,
@@ -312,6 +322,7 @@ impl IntoRequestBytes for Bytes {
 }
 
 /// Compute string to sign
+#[cfg(feature = "streaming")]
 fn compute_string_to_sign(timestamp: &DateTime<Utc>, region: &str, canonical_request_hash: &str) -> String {
     let credential_scope = format!("{}/{}/s3/aws4_request", timestamp.format("%Y%m%d"), region);
 
@@ -325,6 +336,7 @@ fn compute_string_to_sign(timestamp: &DateTime<Utc>, region: &str, canonical_req
 
 /// Parse AWS Authorization header to extract components
 /// Format: AWS4-HMAC-SHA256 Credential=ACCESS_KEY/DATE/REGION/SERVICE/aws4_request, SignedHeaders=..., Signature=...
+#[cfg(feature = "streaming")]
 fn parse_authorization_header(auth_header: &str) -> Result<(String, String, Vec<String>, String), SignatureError> {
     // Extract credential
     let credential = auth_header.split("Credential=").nth(1).and_then(|s| s.split(',').next()).ok_or_else(|| {
@@ -369,6 +381,7 @@ mod tests {
         bytes::Bytes,
         chrono::{DateTime, NaiveDate, Utc},
         http::{
+            header::{AUTHORIZATION, HOST},
             method::Method,
             request::{Parts, Request},
             uri::{PathAndQuery, Uri},
@@ -433,8 +446,8 @@ mod tests {
         let request = Request::builder()
             .method(Method::GET)
             .uri(uri)
-            .header("authorization", auth_str)
-            .header("host", "example.amazonaws.com")
+            .header(AUTHORIZATION, auth_str)
+            .header(HOST, "example.amazonaws.com")
             .header("x-amz-date", "20150830T123600Z")
             .body(())
             .unwrap();
@@ -466,8 +479,8 @@ mod tests {
         let request = Request::builder()
             .method(Method::GET)
             .uri(uri)
-            .header("authorization", VALID_AUTH_HEADER)
-            .header("host", "localhost")
+            .header(AUTHORIZATION, VALID_AUTH_HEADER)
+            .header(HOST, "localhost")
             .body(())
             .unwrap();
         let e = expect_err!(
@@ -496,7 +509,7 @@ mod tests {
         let request = Request::builder()
             .method(Method::GET)
             .uri(uri)
-            .header("authorization", VALID_AUTH_HEADER)
+            .header(AUTHORIZATION, VALID_AUTH_HEADER)
             .header("date", "zzzzzzzzz")
             .body(())
             .unwrap();
@@ -549,7 +562,7 @@ mod tests {
 
             if i > 1 {
                 builder = builder.header(
-                    "authorization",
+                    AUTHORIZATION,
                     match i {
                         2 => "AWS5-HMAC-SHA256 FooBar, BazBurp",
                         3 => "AWS4-HMAC-SHA256 FooBar, BazBurp",
@@ -970,6 +983,7 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
+    #[cfg(feature = "streaming")]
     async fn test_sigv4_validate_streaming_request_success() {
         use hmac::{Hmac, Mac};
         use sha2::{Digest, Sha256};
@@ -1063,6 +1077,7 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
+    #[cfg(feature = "streaming")]
     async fn test_sigv4_validate_streaming_request_bad_signature() {
         use hmac::{Hmac, Mac};
         use sha2::{Digest, Sha256};
@@ -1140,6 +1155,7 @@ mod tests {
     }
 
     #[test_log::test(tokio::test)]
+    #[cfg(feature = "streaming")]
     async fn test_sigv4_validate_streaming_request_missing_headers() {
         let mut get_signing_key_svc = service_for_signing_key_fn(get_signing_key);
         let region = TEST_REGION;
@@ -1152,8 +1168,8 @@ mod tests {
         let request = Request::builder()
             .method(Method::GET)
             .uri(uri)
-            .header("authorization", authorization)
-            .header("host", "example.amazonaws.com")
+            .header(AUTHORIZATION, authorization)
+            .header(HOST, "example.amazonaws.com")
             .header("x-amz-date", &x_amz_date)
             .body(())
             .unwrap();
