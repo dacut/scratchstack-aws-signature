@@ -18,6 +18,7 @@ Cargo.lock
 coverage-html
 lcov.info
 lcov-html/
+tarpaulin-report.html
 
 # Visual Studio Code
 .vscode/
