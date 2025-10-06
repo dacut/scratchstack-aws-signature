@@ -358,52 +358,6 @@ fn parse_authorization_header(auth_header: &str) -> Result<(String, String, Vec<
     Ok((access_key, date, signed_headers, signature))
 }
 
-/// Build canonical request for streaming uploads
-/// Uses the literal x-amz-content-sha256 header value instead of computing SHA256
-#[allow(dead_code)]
-fn build_canonical_request(parts: &http::request::Parts, signed_headers: &[String], body_hash: &str) -> String {
-    let mut canonical = String::new();
-
-    // Method
-    canonical.push_str(parts.method.as_str());
-    canonical.push('\n');
-
-    // Canonical URI (S3-specific: don't double-encode)
-    canonical.push_str(parts.uri.path());
-    canonical.push('\n');
-
-    // Canonical query string (must be sorted by parameter name)
-    if let Some(query) = parts.uri.query() {
-        let mut params: Vec<&str> = query.split('&').collect();
-        params.sort_unstable();
-        canonical.push_str(&params.join("&"));
-    }
-    canonical.push('\n');
-
-    // Canonical headers (only signed headers, sorted)
-    for header_name in signed_headers {
-        if let Some(header_value) = parts.headers.get(header_name) {
-            canonical.push_str(header_name);
-            canonical.push(':');
-            if let Ok(value_str) = header_value.to_str() {
-                canonical.push_str(value_str.trim());
-            }
-            canonical.push('\n');
-        }
-    }
-    canonical.push('\n');
-
-    // Signed headers list (must match what client sent in Authorization header)
-    canonical.push_str(&signed_headers.join(";"));
-    canonical.push('\n');
-
-    // Body hash (literal value from x-amz-content-sha256)
-    canonical.push_str(body_hash);
-
-    debug!("Canonical request for streaming:\n{}", canonical);
-    canonical
-}
-
 #[cfg(test)]
 mod tests {
     use {
