@@ -26,6 +26,9 @@ use sha2::Sha256;
 #[cfg(feature = "streaming")]
 use tower::ServiceExt;
 
+/// The `x-amz-content-sha256` header name.
+pub const X_AMZ_CONTENT_SHA256: &str = "x-amz-content-sha256";
+
 /// Options that can be used to configure the signature service.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SignatureOptions {
@@ -174,6 +177,9 @@ where
     S: SignedHeaderRequirements,
 {
     // we pass in an empty body because we don't need it for streaming signature validation
+
+    use crate::{auth::ISO8601_COMPACT_FORMAT, canonical::X_AMZ_DATE_LOWER};
+
     let (canonical_request, parts, _) = CanonicalRequest::from_request_parts(parts, Bytes::new(), options)?;
 
     // Get Authorization header
@@ -186,13 +192,17 @@ where
     // Parse Authorization header
     let (access_key_id, date_str, signed_headers, provided_signature) = parse_authorization_header(auth_header)?;
 
+    let date = chrono::NaiveDate::parse_from_str(&date_str, "%Y%m%d").map_err(|e| {
+        SignatureError::IncompleteSignature(format!("Invalid date in Credential: error={} input={}", e, date_str))
+    })?;
+
     // Get secret key from credential store
     let signing_key: GetSigningKeyResponse = get_signing_key
         .oneshot(
             GetSigningKeyRequest::builder()
             .access_key(&access_key_id)
             // .session_token(self.session_token().map(|x| x.to_string()))
-            .request_date(date_str.parse()?)
+            .request_date(date)
             .region(region)
             .service(service)
             .build()
@@ -204,45 +214,41 @@ where
 
     // Get x-amz-content-sha256 header value (literal string to use in canonical request)
     let body_hash =
-        parts.headers.get("x-amz-content-sha256").and_then(|h| h.to_str().ok()).ok_or_else(|| {
+        parts.headers.get(X_AMZ_CONTENT_SHA256).and_then(|h| h.to_str().ok()).ok_or_else(|| {
             SignatureError::MissingAuthenticationToken("Missing x-amz-content-sha256 header".to_string())
         })?;
 
     // Get timestamp from x-amz-date header
     let header_timestamp_str = parts
         .headers
-        .get("x-amz-date")
+        .get(X_AMZ_DATE_LOWER)
         .and_then(|h| h.to_str().ok())
         .ok_or_else(|| SignatureError::MissingAuthenticationToken("Missing x-amz-date header".to_string()))?;
 
-    let header_timestamp = NaiveDateTime::parse_from_str(header_timestamp_str, "%Y%m%dT%H%M%SZ").map_err(|e| {
-        SignatureError::IncompleteSignature(format!(
-            "Invalid x-amz-date format: error={} input={}",
-            e, header_timestamp_str
-        ))
-    })?;
+    let header_timestamp =
+        NaiveDateTime::parse_from_str(header_timestamp_str, ISO8601_COMPACT_FORMAT).map_err(|e| {
+            SignatureError::IncompleteSignature(format!(
+                "Invalid x-amz-date format: error={} input={}",
+                e, header_timestamp_str
+            ))
+        })?;
 
     let header_timestamp: DateTime<Utc> = DateTime::from_naive_utc_and_offset(header_timestamp, Utc);
 
     if server_timestamp - header_timestamp > Duration::minutes(ALLOWED_MISMATCH_MINUTES) {
+        use crate::auth::ISO8601_COMPACT_FORMAT;
+
         return Err(Box::new(SignatureError::SignatureDoesNotMatch(Some(format!(
             "Signature expired: {} is now earlier than {} ({} - {} min.)",
-            header_timestamp.format("%Y%m%dT%H%M%SZ"),
-            (server_timestamp - Duration::minutes(ALLOWED_MISMATCH_MINUTES)).format("%Y%m%dT%H%M%SZ"),
-            server_timestamp.format("%Y%m%dT%H%M%SZ"),
+            header_timestamp.format(ISO8601_COMPACT_FORMAT),
+            (server_timestamp - Duration::minutes(ALLOWED_MISMATCH_MINUTES)).format(ISO8601_COMPACT_FORMAT),
+            server_timestamp.format(ISO8601_COMPACT_FORMAT),
             ALLOWED_MISMATCH_MINUTES
         )))));
     }
 
     // Build canonical request using literal body hash
-    let mut canonical_request_str =
-        format!("{}\n{}\n", canonical_request.request_method(), canonical_request.canonical_path());
-    if !canonical_request.canonical_query_string().is_empty() {
-        canonical_request_str.push_str(&canonical_request.canonical_query_string());
-        canonical_request_str.push('\n');
-    };
-    canonical_request_str.push_str(body_hash);
-    debug!("Canonical request:\n{}", canonical_request_str);
+    let canonical_request_str = build_canonical_request(&canonical_request, &parts, &signed_headers, body_hash);
 
     // Compute SHA256 of canonical request
     let canonical_request_hash = {
@@ -276,11 +282,7 @@ where
         ))));
     }
 
-    // Create principal
-    let principal = scratchstack_aws_principal::User::new("aws", "000000", "/", &access_key_id)
-        .map_err(|e| SignatureError::MissingAuthenticationToken(format!("Failed to create principal: {}", e)))?;
-
-    Ok((parts, Bytes::new(), SigV4AuthenticatorResponse::builder().principal(principal).build()?))
+    Ok((parts, Bytes::new(), signing_key.into()))
 }
 
 /// A trait for converting various body types into a [`Bytes`] object.
@@ -324,11 +326,13 @@ impl IntoRequestBytes for Bytes {
 /// Compute string to sign
 #[cfg(feature = "streaming")]
 fn compute_string_to_sign(timestamp: &DateTime<Utc>, region: &str, canonical_request_hash: &str) -> String {
+    use crate::auth::ISO8601_COMPACT_FORMAT;
+
     let credential_scope = format!("{}/{}/s3/aws4_request", timestamp.format("%Y%m%d"), region);
 
     format!(
         "AWS4-HMAC-SHA256\n{}\n{}\n{}",
-        timestamp.format("%Y%m%dT%H%M%SZ"),
+        timestamp.format(ISO8601_COMPACT_FORMAT),
         credential_scope,
         canonical_request_hash
     )
@@ -370,28 +374,67 @@ fn parse_authorization_header(auth_header: &str) -> Result<(String, String, Vec<
     Ok((access_key, date, signed_headers, signature))
 }
 
+fn build_canonical_request(
+    _canonical_request: &CanonicalRequest,
+    parts: &http::request::Parts,
+    signed_headers: &[String],
+    body_hash: &str,
+) -> String {
+    let mut canonical = String::new();
+
+    // Method
+    canonical.push_str(parts.method.as_str());
+    canonical.push('\n');
+
+    // Canonical URI (S3-specific: don't double-encode)
+    canonical.push_str(parts.uri.path());
+    canonical.push('\n');
+
+    // Canonical query string (must be sorted by parameter name)
+    if let Some(query) = parts.uri.query() {
+        let mut params: Vec<&str> = query.split('&').collect();
+        params.sort_unstable();
+        canonical.push_str(&params.join("&"));
+    }
+    canonical.push('\n');
+
+    // Canonical headers (only signed headers, sorted)
+    for header_name in signed_headers {
+        if let Some(header_value) = parts.headers.get(header_name) {
+            canonical.push_str(header_name);
+            canonical.push(':');
+            if let Ok(value_str) = header_value.to_str() {
+                canonical.push_str(value_str.trim());
+            }
+            canonical.push('\n');
+        }
+    }
+    canonical.push('\n');
+
+    // Signed headers list (must match what client sent in Authorization header)
+    canonical.push_str(&signed_headers.join(";"));
+    canonical.push('\n');
+
+    // Body hash (literal value from x-amz-content-sha256)
+    canonical.push_str(body_hash);
+
+    debug!("Canonical request for streaming:\n{}", canonical);
+    canonical
+}
+
 #[cfg(test)]
 mod tests {
-    use {
-        crate::{
-            auth::SigV4AuthenticatorResponse, service_for_signing_key_fn, sigv4_validate_request, GetSigningKeyRequest,
-            GetSigningKeyResponse, KSecretKey, SignatureError, SignatureOptions, SignedHeaderRequirements,
-            VecSignedHeaderRequirements, NO_ADDITIONAL_SIGNED_HEADERS,
-        },
-        bytes::Bytes,
-        chrono::{DateTime, NaiveDate, Utc},
-        http::{
-            header::{AUTHORIZATION, HOST},
-            method::Method,
-            request::{Parts, Request},
-            uri::{PathAndQuery, Uri},
-        },
-        lazy_static::lazy_static,
-        scratchstack_aws_principal::{Principal, User},
-        scratchstack_errors::ServiceError,
-        std::{borrow::Cow, str::FromStr},
-        tower::BoxError,
+    use std::{borrow::Cow, str::FromStr};
+
+    use super::*;
+    use crate::{
+        canonical::X_AMZ_DATE_LOWER, service_for_signing_key_fn, KSecretKey, VecSignedHeaderRequirements,
+        NO_ADDITIONAL_SIGNED_HEADERS,
     };
+    use chrono::NaiveDate;
+    use http::{header::HOST, uri::PathAndQuery, Method, Uri};
+    use lazy_static::lazy_static;
+    use scratchstack_aws_principal::{Principal, User};
 
     const TEST_REGION: &str = "us-east-1";
     const TEST_SERVICE: &str = "service";
@@ -448,7 +491,7 @@ mod tests {
             .uri(uri)
             .header(AUTHORIZATION, auth_str)
             .header(HOST, "example.amazonaws.com")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .body(())
             .unwrap();
         let mut get_signing_key_svc = service_for_signing_key_fn(get_signing_key);
@@ -586,10 +629,10 @@ mod tests {
 
             match i {
                 0..=7 => (),
-                8..=12 => builder = builder.header("x-amz-date", "2015/08/30T12/36/00Z"),
-                13 => builder = builder.header("x-amz-date", "20150830T122059Z"),
-                14 => builder = builder.header("x-amz-date", "20150830T125101Z"),
-                _ => builder = builder.header("x-amz-date", "20150830T122100Z"),
+                8..=12 => builder = builder.header(X_AMZ_DATE_LOWER, "2015/08/30T12/36/00Z"),
+                13 => builder = builder.header(X_AMZ_DATE_LOWER, "20150830T122059Z"),
+                14 => builder = builder.header(X_AMZ_DATE_LOWER, "20150830T125101Z"),
+                _ => builder = builder.header(X_AMZ_DATE_LOWER, "20150830T122100Z"),
             }
 
             let request = builder.body(()).unwrap();
@@ -753,10 +796,10 @@ mod tests {
 
             match i {
                 0..=7 => (),
-                8..=12 => builder = builder.header("x-amz-date", "2015/08/30T12/36/00Z"),
-                13 => builder = builder.header("x-amz-date", "20150830T122059Z"),
-                14 => builder = builder.header("x-amz-date", "20150830T125101Z"),
-                _ => builder = builder.header("x-amz-date", "20150830T122100Z"),
+                8..=12 => builder = builder.header(X_AMZ_DATE_LOWER, "2015/08/30T12/36/00Z"),
+                13 => builder = builder.header(X_AMZ_DATE_LOWER, "20150830T122059Z"),
+                14 => builder = builder.header(X_AMZ_DATE_LOWER, "20150830T125101Z"),
+                _ => builder = builder.header(X_AMZ_DATE_LOWER, "20150830T122100Z"),
             }
 
             let body = Bytes::from_static(b"{}");
@@ -988,6 +1031,8 @@ mod tests {
         use hmac::{Hmac, Mac};
         use sha2::{Digest, Sha256};
 
+        use crate::auth::ISO8601_COMPACT_FORMAT;
+
         // Arrange
         let mut get_signing_key_svc = service_for_signing_key_fn(get_signing_key);
         let region = TEST_REGION;
@@ -1000,7 +1045,7 @@ mod tests {
         // Define headers required for streaming validation
         let method = Method::GET;
         let path = "/test-object"; // simple path, no query
-        let x_amz_date = TEST_TIMESTAMP.format("%Y%m%dT%H%M%SZ").to_string();
+        let x_amz_date = TEST_TIMESTAMP.format(ISO8601_COMPACT_FORMAT).to_string();
         // For streaming chunked uploads the body hash is often the literal string "STREAMING-AWS4-HMAC-SHA256-PAYLOAD"
         // but our implementation just uses whatever the client sets in x-amz-content-sha256. Use a simple constant.
         let body_hash_literal = "UNSIGNED-PAYLOAD"; // keep small & deterministic
@@ -1044,8 +1089,8 @@ mod tests {
             .uri(uri)
             .header("authorization", authorization)
             .header("host", "example.amazonaws.com")
-            .header("x-amz-date", &x_amz_date)
-            .header("x-amz-content-sha256", body_hash_literal)
+            .header(X_AMZ_DATE_LOWER, &x_amz_date)
+            .header(X_AMZ_CONTENT_SHA256, body_hash_literal)
             .body(())
             .unwrap();
         let (parts, _) = request.into_parts();
@@ -1082,6 +1127,8 @@ mod tests {
         use hmac::{Hmac, Mac};
         use sha2::{Digest, Sha256};
 
+        use crate::auth::ISO8601_COMPACT_FORMAT;
+
         let mut get_signing_key_svc = service_for_signing_key_fn(get_signing_key);
         let region = TEST_REGION;
         let service = TEST_SERVICE;
@@ -1089,7 +1136,7 @@ mod tests {
         // Prepare canonical pieces (same as success test) but we will intentionally corrupt the signature later.
         let method = Method::GET;
         let path = "/bad-sig";
-        let x_amz_date = TEST_TIMESTAMP.format("%Y%m%dT%H%M%SZ").to_string();
+        let x_amz_date = TEST_TIMESTAMP.format(ISO8601_COMPACT_FORMAT).to_string();
         let body_hash_literal = "UNSIGNED-PAYLOAD";
 
         let mut canonical_request_str = format!("{}\n{}\n", method.as_str(), path);
@@ -1127,8 +1174,8 @@ mod tests {
             .uri(uri)
             .header("authorization", authorization)
             .header("host", "example.amazonaws.com")
-            .header("x-amz-date", &x_amz_date)
-            .header("x-amz-content-sha256", body_hash_literal)
+            .header(X_AMZ_DATE_LOWER, &x_amz_date)
+            .header(X_AMZ_CONTENT_SHA256, body_hash_literal)
             .body(())
             .unwrap();
         let (parts, _) = request.into_parts();
@@ -1157,10 +1204,12 @@ mod tests {
     #[test_log::test(tokio::test)]
     #[cfg(feature = "streaming")]
     async fn test_sigv4_validate_streaming_request_missing_headers() {
+        use crate::auth::ISO8601_COMPACT_FORMAT;
+
         let mut get_signing_key_svc = service_for_signing_key_fn(get_signing_key);
         let region = TEST_REGION;
         let service = TEST_SERVICE;
-        let x_amz_date = TEST_TIMESTAMP.format("%Y%m%dT%H%M%SZ").to_string();
+        let x_amz_date = TEST_TIMESTAMP.format(ISO8601_COMPACT_FORMAT).to_string();
 
         // Deliberately omit x-amz-content-sha256 header
         let authorization = "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/2015-08-30/us-east-1/service/aws4_request, SignedHeaders=host;x-amz-date, Signature=deadbeef";
@@ -1170,7 +1219,7 @@ mod tests {
             .uri(uri)
             .header(AUTHORIZATION, authorization)
             .header(HOST, "example.amazonaws.com")
-            .header("x-amz-date", &x_amz_date)
+            .header(X_AMZ_DATE_LOWER, &x_amz_date)
             .body(())
             .unwrap();
         let (parts, _) = request.into_parts();

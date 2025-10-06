@@ -33,7 +33,7 @@ const AWS4_HMAC_SHA256: &str = "AWS4-HMAC-SHA256";
 const AWS4_REQUEST: &str = "aws4_request";
 
 /// Compact ISO8601 format used for the string to sign.
-const ISO8601_COMPACT_FORMAT: &str = "%Y%m%dT%H%M%SZ";
+pub(crate) const ISO8601_COMPACT_FORMAT: &str = "%Y%m%dT%H%M%SZ";
 
 /// Length of an ISO8601 date string in the UTC time zone.
 const ISO8601_UTC_LENGTH: usize = 16;
@@ -424,7 +424,6 @@ mod tests {
         chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc},
         log::LevelFilter,
         scratchstack_aws_principal::{Principal, User},
-        scratchstack_errors::ServiceError,
         std::{error::Error, fs::File, str::FromStr},
         tower::BoxError,
     };
