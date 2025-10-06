@@ -318,7 +318,7 @@ mod tests {
         let mut file = SpooledTempFile::new(50 * 1024 * 1024);
         let data = vec![42u8; 1024];
 
-        file.write_all(&data).await.unwrap();
+        file.write_all(&data).await.expect("Failed to write data");
         assert!(!file.is_rolled(), "Small file should stay in memory");
         assert!(!file.is_poisoned(), "File should not be poisoned");
 
