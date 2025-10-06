@@ -121,7 +121,6 @@
 #![warn(missing_docs)]
 #![deny(rustdoc::broken_intra_doc_links)]
 #![warn(rustdoc::missing_crate_level_docs)]
-#![cfg_attr(doc, feature(doc_cfg))]
 
 mod chronoutil;
 mod crypto;
@@ -129,7 +128,11 @@ mod error;
 mod signature;
 mod signing_key;
 
+#[cfg(feature = "streaming")]
+pub mod async_spooled_tempfile;
 pub mod auth;
+#[cfg(feature = "streaming")]
+pub mod buffered_body;
 pub mod canonical;
 
 pub use {

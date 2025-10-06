@@ -53,7 +53,6 @@ const SHA256_HEX_LENGTH: usize = SHA256_EMPTY.len();
 
 /// Low-level structure for performing AWS SigV4 authentication after a canonical request has been generated.
 #[derive(Builder, Clone, Default)]
-#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
 #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
 #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 #[builder(derive(Debug))]
@@ -79,7 +78,7 @@ pub struct SigV4Authenticator {
 
 impl SigV4Authenticator {
     /// Create a builder for `SigV4Authenticator`.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
@@ -88,7 +87,7 @@ impl SigV4Authenticator {
     }
 
     /// Retrieve the SHA-256 hash of the canonical request.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
@@ -97,7 +96,7 @@ impl SigV4Authenticator {
     }
 
     /// Retrieve the credential passed into the request, in the form of `keyid/date/region/service/aws4_request`.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
@@ -106,7 +105,7 @@ impl SigV4Authenticator {
     }
 
     /// Retrieve the optional session token.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
@@ -115,7 +114,7 @@ impl SigV4Authenticator {
     }
 
     /// Retrieve the signature passed into the request.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
@@ -124,7 +123,7 @@ impl SigV4Authenticator {
     }
 
     /// Retrieve the timestamp of the request.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
@@ -134,7 +133,7 @@ impl SigV4Authenticator {
 
     /// Verify the request parameters make sense for the region, service, and specified timestamp.
     /// This must be called successfully before calling [validate_signature][Self::validate_signature].
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     pub fn prevalidate(
@@ -235,7 +234,7 @@ impl SigV4Authenticator {
 
     /// Return the signing key (`kSigning` from the [AWS documentation](https://docs.aws.amazon.com/general/latest/gr/sigv4-calculate-signature.html))
     /// for the request.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     async fn get_signing_key<S, F>(
@@ -275,7 +274,7 @@ impl SigV4Authenticator {
     }
 
     /// Return the string to sign for the request.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     fn get_string_to_sign(&self) -> Vec<u8> {
@@ -299,7 +298,7 @@ impl SigV4Authenticator {
     }
 
     /// Validate the request signature.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     pub async fn validate_signature<S, F>(
