@@ -18,7 +18,7 @@ use {
     chrono::{offset::FixedOffset, DateTime, Utc},
     encoding::{all::UTF_8, label::encoding_from_whatwg_label, types::DecoderTrap},
     http::{
-        header::{HeaderMap, HeaderValue},
+        header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE, DATE},
         request::Parts,
         uri::Uri,
     },
@@ -37,9 +37,6 @@ use {
 /// Content-Type string for HTML forms
 const APPLICATION_X_WWW_FORM_URLENCODED: &str = "application/x-www-form-urlencoded";
 
-/// Header parameter for the authorization
-const AUTHORIZATION: &str = "authorization";
-
 /// Algorithm for AWS SigV4
 const AWS4_HMAC_SHA256: &str = "AWS4-HMAC-SHA256";
 
@@ -49,14 +46,8 @@ const AWS4_HMAC_SHA256_BYTES: &[u8] = b"AWS4-HMAC-SHA256";
 /// Content-Type parameter for specifying the character set
 const CHARSET: &str = "charset";
 
-/// Header field for the content type
-const CONTENT_TYPE: &str = "content-type";
-
 /// Signature field for the access key
 const CREDENTIAL: &[u8] = b"Credential";
-
-/// Header parameter for the date.
-const DATE: &str = "date";
 
 /// Uppercase hex digits.
 const HEX_DIGITS_UPPER: [u8; 16] =
@@ -123,7 +114,7 @@ const X_AMZ_CREDENTIAL: &str = "X-Amz-Credential";
 const X_AMZ_DATE: &str = "X-Amz-Date";
 
 /// Header for delivering the alternate date
-const X_AMZ_DATE_LOWER: &str = "x-amz-date";
+pub(crate) const X_AMZ_DATE_LOWER: &str = "x-amz-date";
 
 /// Query parameter for delivering the session token
 const X_AMZ_SECURITY_TOKEN: &str = "X-Amz-Security-Token";
@@ -437,7 +428,7 @@ impl CanonicalRequest {
     where
         S: SignedHeaderRequirements,
     {
-        let auth_header = self.headers().get(AUTHORIZATION);
+        let auth_header = self.headers().get(AUTHORIZATION.as_str());
         let sig_algs = self.query_parameters().get(X_AMZ_ALGORITHM);
 
         // Rule 5: Either the Authorization header or X-Amz-Algorithm query parameter must be present, not both.
@@ -579,7 +570,7 @@ impl CanonicalRequest {
         if let Some(date) = self.headers.get(X_AMZ_DATE_LOWER) {
             // Rule 6e: Use the first X-Amz-Date header (per rule 6a).
             timestamp_str = Some(latin1_to_string(&date[0]));
-        } else if let Some(date) = self.headers.get(DATE) {
+        } else if let Some(date) = self.headers.get(DATE.as_str()) {
             // Rule 6e: Use the first Date header (per rule 6a).
             timestamp_str = Some(latin1_to_string(&date[0]));
         } else {
@@ -1342,7 +1333,7 @@ mod tests {
         crate::{
             canonical::{
                 canonicalize_query_to_string, canonicalize_uri_path, normalize_uri_path_component,
-                query_string_to_normalized_map, unescape_uri_encoding, CanonicalRequest,
+                query_string_to_normalized_map, unescape_uri_encoding, CanonicalRequest, X_AMZ_DATE_LOWER,
             },
             SignatureError, SignatureOptions, NO_ADDITIONAL_SIGNED_HEADERS,
         },
@@ -1352,7 +1343,6 @@ mod tests {
             request::Request,
             uri::{PathAndQuery, Uri},
         },
-        scratchstack_errors::ServiceError,
         std::collections::HashMap,
     };
 
@@ -1520,7 +1510,7 @@ mod tests {
                 .uri(uri)
                 .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
                 .header("authorization", "Basic foobar")
-                .header("x-amz-date", "20150830T123600Z")
+                .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
                 .body(Bytes::new())
                 .unwrap();
             let (parts, body) = request.into_parts();
@@ -1560,7 +1550,7 @@ mod tests {
                 .uri(uri)
                 .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
                 .header("authorization", "Basic foobar")
-                .header("x-amz-date", "20150830T123600Z")
+                .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
                 .body(Bytes::new())
                 .unwrap();
             let (parts, body) = request.into_parts();
@@ -1592,7 +1582,7 @@ mod tests {
             .uri(uri)
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
             .header("authorization", "Basic foobar")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .body(Bytes::new())
             .unwrap();
         let (parts, body) = request.into_parts();
@@ -1628,7 +1618,7 @@ mod tests {
             .uri(uri)
             .header("content-type", "application/x-www-form-urlencoded; hello=world; charset=foobar")
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .body(Bytes::from_static(b"foo=ba\x80r"))
             .unwrap();
         let (parts, body) = request.into_parts();
@@ -1651,7 +1641,7 @@ mod tests {
             .uri(uri)
             .header("content-type", "application/x-www-form-urlencoded; charset=utf-8")
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .body(Bytes::from_static(b""))
             .unwrap();
         let (parts, body) = request.into_parts();
@@ -1669,7 +1659,7 @@ mod tests {
             .uri(uri)
             .header("content-type", "application/x-www-form-urlencoded")
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .body(Bytes::from(b"foo=bar\xc3\xbf".to_vec()))
             .unwrap();
         let (parts, body) = request.into_parts();
@@ -1684,7 +1674,7 @@ mod tests {
             .uri(uri)
             .header("content-type", "application/x-www-form-urlencoded; hello=world")
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .body(Bytes::from(b"foo=bar\xc3\xbf".to_vec()))
             .unwrap();
         let (parts, body) = request.into_parts();
@@ -1702,7 +1692,7 @@ mod tests {
             .uri(uri)
             .header("content-type", "application/x-www-form-urlencoded")
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .body(Bytes::from(b"foo=bar\xc3\xbf".to_vec()))
             .unwrap();
         let (parts, body) = request.into_parts();
@@ -1729,7 +1719,7 @@ mod tests {
             .uri(uri)
             .header("content-type", "application/x-www-form-urlencoded; charset=utf-8")
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .body(Bytes::from(b"foo=ba\x80r".to_vec()))
             .unwrap();
         let (parts, body) = request.into_parts();
@@ -1753,7 +1743,7 @@ mod tests {
             .uri(uri)
             .header("content-type", "application/x-www-form-urlencoded; charset")
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .body(Bytes::from(b"foo=bar".to_vec()))
             .unwrap();
         let (parts, body) = request.into_parts();
@@ -1771,7 +1761,7 @@ mod tests {
             .uri(uri)
             .header("content-type", "application/x-www-form-urlencoded; charset=utf-8")
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .body(Bytes::from(b"foo=bar%yy".to_vec()))
             .unwrap();
         let (parts, body) = request.into_parts();
@@ -1789,7 +1779,7 @@ mod tests {
             .uri(uri)
             .header("content-type", "application/x-www-form-urlencoded; charset=utf-8")
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .body(Bytes::from(b"foo%tt=bar".to_vec()))
             .unwrap();
         let (parts, body) = request.into_parts();
@@ -1807,7 +1797,7 @@ mod tests {
             .uri(uri)
             .header("content-type", "application/x-www-form-urlencoded; charset=utf-8")
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .body(Bytes::from(b"foo=bar%y".to_vec()))
             .unwrap();
         let (parts, body) = request.into_parts();
@@ -1857,7 +1847,7 @@ mod tests {
             let builder = Request::builder().method(Method::GET).uri(uri).header("authorization", auth_header);
 
             let builder = if i & 8 != 0 {
-                builder.header("x-amz-date", "20150830T123600Z")
+                builder.header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             } else {
                 error_messages
                     .push("Authorization header requires existence of either a 'X-Amz-Date' or a 'Date' header.");
@@ -1885,7 +1875,7 @@ mod tests {
         let request = Request::builder()
             .method(Method::GET)
             .uri(uri)
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeadersdate;host")
             .body(Bytes::new())
             .unwrap();
@@ -1964,8 +1954,8 @@ mod tests {
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678, Credential=ABCD, SignedHeaders=foo;bar;host, Signature=DEFG")
             .header("authorization", "AWS3 Credential=1234, SignedHeaders=date;host, Signature=5678, Credential=ABCD, SignedHeaders=foo;bar;host, Signature=DEFG")
             .header("host", "example.amazonaws.com")
-            .header("x-amz-date", "20150830T123600Z")
-            .header("x-amz-date", "20161231T235959Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20161231T235959Z")
             .header("x-amz-security-token", "Test1")
             .header("x-amz-security-token", "Test2")
             .body(Bytes::new())
@@ -2012,7 +2002,7 @@ mod tests {
         let request = Request::builder()
             .method(Method::GET)
             .uri(uri)
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .header("host", "example.amazonaws.com")
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=x-amz-date, Signature=5678")
             .body(Bytes::new())
@@ -2061,7 +2051,7 @@ mod tests {
         let request = Request::builder()
             .method(Method::GET)
             .uri(uri)
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .header("host", "example.amazonaws.com")
             .header(
                 "authorization",
@@ -2075,7 +2065,7 @@ mod tests {
         let (cr, _, _) =
             CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
         let a = cr.get_auth_parameters(&NO_ADDITIONAL_SIGNED_HEADERS).unwrap();
-        assert_eq!(a.signed_headers, vec!["a", "host", "x-amz-date"]);
+        assert_eq!(a.signed_headers, vec!["a", "host", X_AMZ_DATE_LOWER]);
         let cr_bytes = cr.canonical_request(&a.signed_headers);
         assert!(!cr_bytes.is_empty());
     }
@@ -2088,7 +2078,7 @@ mod tests {
             .method(Method::POST)
             .uri(uri)
             .header("content-type", "application/json")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .header("host", "example.amazonaws.com")
             .body(Bytes::from_static(b"{}"))
             .unwrap();
@@ -2110,7 +2100,7 @@ mod tests {
             .method(Method::GET)
             .uri(uri)
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=x-amz-date, Signature=5678")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .header("host", "example.amazonaws.com")
             .body(Bytes::new())
             .unwrap();
@@ -2133,7 +2123,7 @@ mod tests {
             .method(Method::GET)
             .uri(uri)
             .header("authorization", "AWS3-HMAC-SHA256 Credential=1234, SignedHeaders=x-amz-date, Signature=5678")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .header("host", "example.amazonaws.com")
             .body(Bytes::new())
             .unwrap();
@@ -2154,7 +2144,7 @@ mod tests {
         let request = Request::builder()
             .method(Method::GET)
             .uri(uri)
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .header("host", "example.amazonaws.com")
             .body(Bytes::new())
             .unwrap();
