@@ -27,13 +27,16 @@ use {
 };
 
 /// Algorithm for AWS SigV4
-const AWS4_HMAC_SHA256: &str = "AWS4-HMAC-SHA256";
+pub(crate) const AWS4_HMAC_SHA256: &str = "AWS4-HMAC-SHA256";
 
 /// String included at the end of the AWS SigV4 credential scope
-const AWS4_REQUEST: &str = "aws4_request";
+pub(crate) const AWS4_REQUEST: &str = "aws4_request";
 
 /// Compact ISO8601 format used for the string to sign.
 pub(crate) const ISO8601_COMPACT_FORMAT: &str = "%Y%m%dT%H%M%SZ";
+
+/// Short date format
+pub(crate) const ISO8601_DATE_FORMAT: &str = "%Y%m%d";
 
 /// Length of an ISO8601 date string in the UTC time zone.
 const ISO8601_UTC_LENGTH: usize = 16;
@@ -215,7 +218,7 @@ impl SigV4Authenticator {
             ));
         }
 
-        let expected_cscope_date = req_ts.format("%Y%m%d").to_string();
+        let expected_cscope_date = req_ts.format(ISO8601_DATE_FORMAT).to_string();
         if cscope_date != expected_cscope_date {
             trace!(
                 "prevalidate: credential date '{}' does not match expected date '{}'",

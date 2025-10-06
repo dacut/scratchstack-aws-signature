@@ -1,5 +1,6 @@
 use {
     crate::{
+        auth::ISO8601_DATE_FORMAT,
         crypto::{hmac_sha256, SHA256_OUTPUT_LEN},
         KeyLengthError,
     },
@@ -176,7 +177,7 @@ impl<const M: usize> FromStr for KSecretKey<M> {
 impl KSecretKey {
     /// Create a new `KDateKey` from this `KSecretKey` and a date.
     pub fn to_kdate(&self, date: NaiveDate) -> KDateKey {
-        let date = date.format("%Y%m%d").to_string();
+        let date = date.format(ISO8601_DATE_FORMAT).to_string();
         let date = date.as_bytes();
         let key = hmac_sha256(self.prefixed_key.as_slice(), date);
         let mut key_bytes = [0; SHA256_OUTPUT_LEN];
