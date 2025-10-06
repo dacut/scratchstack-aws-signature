@@ -478,7 +478,7 @@ mod tests {
         };
     }
 
-    const VALID_AUTH_HEADER: LazyLock<String> = LazyLock::new(|| {
+    static VALID_AUTH_HEADER: LazyLock<String> = LazyLock::new(|| {
         format!(
             "AWS4-HMAC-SHA256 \
     Credential=AKIDEXAMPLE/20150830/{TEST_REGION}/{TEST_SERVICE}/aws4_request, \
@@ -560,6 +560,7 @@ mod tests {
     async fn invalid_date() {
         let uri = Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap();
         let mut gsk_service = service_for_signing_key_fn(get_signing_key);
+
         let request = Request::builder()
             .method(Method::GET)
             .uri(uri)
