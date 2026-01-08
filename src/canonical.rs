@@ -58,6 +58,9 @@ const CREDENTIAL: &[u8] = b"Credential";
 /// Header parameter for the date.
 const DATE: &str = "date";
 
+/// Header for content hash
+const X_AMZ_CONTENT_SHA256: &str = "x-amz-content-sha256";
+
 /// Uppercase hex digits.
 const HEX_DIGITS_UPPER: [u8; 16] =
     [b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', b'A', b'B', b'C', b'D', b'E', b'F'];
@@ -119,6 +122,9 @@ const X_AMZ_ALGORITHM: &str = "X-Amz-Algorithm";
 /// Query parameter for delivering the access key
 const X_AMZ_CREDENTIAL: &str = "X-Amz-Credential";
 
+/// Query parameter for delivering the validity period
+const X_AMZ_EXPIRES: &str = "X-Amz-Expires";
+
 /// Query parameter for delivering the date
 const X_AMZ_DATE: &str = "X-Amz-Date";
 
@@ -136,6 +142,9 @@ const X_AMZ_SIGNATURE: &str = "X-Amz-Signature";
 
 /// Query parameter specifying the signed headers
 const X_AMZ_SIGNED_HEADERS: &str = "X-Amz-SignedHeaders";
+
+/// Token used for X-Amz-Content-Sha256 when payload is unsigned
+const UNSIGNED_PAYLOAD: &str = "UNSIGNED-PAYLOAD";
 
 lazy_static! {
     /// Multiple slash pattern for condensing URIs
@@ -193,8 +202,8 @@ struct CanonicalRequest {
     /// The encoding of header values is Latin 1 (ISO 8859-1), apart from a few oddities like Content-Disposition.
     headers: HashMap<String, Vec<Vec<u8>>>,
 
-    /// The SHA-256 hash of the body.
-    body_sha256: String,
+    /// The SHA-256 hash of the body. `None` indicates an unsigned payload.
+    body_sha256: Option<String>,
 }
 
 impl CanonicalRequest {
@@ -262,7 +271,18 @@ impl CanonicalRequest {
         }
 
         let headers = normalize_headers(&parts.headers);
-        let body_sha256 = sha256_hex(body.as_ref());
+        let is_presigned_url =
+            [X_AMZ_ALGORITHM, X_AMZ_CREDENTIAL, X_AMZ_DATE, X_AMZ_EXPIRES, X_AMZ_SIGNED_HEADERS, X_AMZ_SIGNATURE]
+                .into_iter()
+                .all(|p| query_parameters.contains_key(p));
+        let payload_is_unsigned = is_presigned_url
+            || query_parameters.get(X_AMZ_CONTENT_SHA256).and_then(|values| values.first()).map(String::as_str)
+                == Some(UNSIGNED_PAYLOAD);
+        let body_sha256 = if payload_is_unsigned {
+            None
+        } else {
+            Some(sha256_hex(body.as_ref()))
+        };
 
         Ok((
             CanonicalRequest {
@@ -320,8 +340,8 @@ impl CanonicalRequest {
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
-    fn body_sha256(&self) -> &str {
-        &self.body_sha256
+    fn body_sha256(&self) -> Option<&str> {
+        self.body_sha256.as_deref()
     }
 
     /// Get the canonical query string from the request.
@@ -365,7 +385,7 @@ impl CanonicalRequest {
         result.push(b'\n');
         result.extend(signed_headers.join(";").as_bytes());
         result.push(b'\n');
-        result.extend(self.body_sha256().as_bytes());
+        result.extend(self.body_sha256().as_deref().unwrap_or(UNSIGNED_PAYLOAD).as_bytes());
 
         trace!("Canonical request:\n{}", String::from_utf8_lossy(&result));
 
