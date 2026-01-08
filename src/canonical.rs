@@ -624,7 +624,7 @@ impl CanonicalRequest {
 
         // Rule 7c: Use the first value for each key.
         if let Some(credential) = self.query_parameters.get(X_AMZ_CREDENTIAL) {
-            builder.credential(credential[0].clone());
+            builder.credential(unescape_uri_encoding(&credential[0]));
         } else {
             missing_messages.push(MSG_QUERY_STRING_MUST_INCLUDE_CREDENTIAL);
         }
@@ -659,7 +659,7 @@ impl CanonicalRequest {
 
         // Get the session token if present.
         if let Some(token) = self.query_parameters.get(X_AMZ_SECURITY_TOKEN) {
-            builder.session_token(token[0].clone());
+            builder.session_token(unescape_uri_encoding(&token[0]));
         }
 
         let timestamp_str = timestamp_str.expect("date_str should be set")[0].clone();
