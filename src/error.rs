@@ -66,10 +66,10 @@ pub enum SignatureError {
     /// Invalid request method.
     InvalidRequestMethod(/* message */ String),
 
-    /// The request signature does not conform to AWS standards. Sample messages:  
-    /// `Authorization header requires 'Credential' parameter. Authorization=...`  
-    /// `Authorization header requires existence of either a 'X-Amz-Date' or a 'Date' header.`  
-    /// `Date must be in ISO-8601 'basic format'. Got '...'. See http://en.wikipedia.org/wiki/ISO_8601`  
+    /// The request signature does not conform to AWS standards. Sample messages:
+    /// `Authorization header requires 'Credential' parameter. Authorization=...`
+    /// `Authorization header requires existence of either a 'X-Amz-Date' or a 'Date' header.`
+    /// `Date must be in ISO-8601 'basic format'. Got '...'. See http://en.wikipedia.org/wiki/ISO_8601`
     /// `Unsupported AWS 'algorithm': 'AWS4-HMAC-SHA512'`
     IncompleteSignature(/* message */ String),
 
@@ -84,20 +84,20 @@ pub enum SignatureError {
     /// `Incomplete trailing escape % sequence`
     MalformedQueryString(/* message */ String),
 
-    /// The request must contain either a valid (registered) AWS access key ID or X.509 certificate. Sample messages:  
-    /// `Request is missing Authentication Token`  
+    /// The request must contain either a valid (registered) AWS access key ID or X.509 certificate. Sample messages:
+    /// `Request is missing Authentication Token`
     MissingAuthenticationToken(/* message */ String),
 
     /// Signature did not match the calculated signature value.
-    /// Example messages:  
-    /// `The request signature we calculated does not match the signature you provided. Check your AWS Secret Access Key and signing method. Consult the service documentation for details.`  
-    /// `Signature expired: 20210502T144040Z is now earlier than 20210502T173143Z (20210502T174643Z - 15 min.)`  
+    /// Example messages:
+    /// `The request signature we calculated does not match the signature you provided. Check your AWS Secret Access Key and signing method. Consult the service documentation for details.`
+    /// `Signature expired: 20210502T144040Z is now earlier than 20210502T173143Z (20210502T174643Z - 15 min.)`
     /// `Signature not yet current: 20210502T183640Z is still later than 20210502T175140Z (20210502T173640Z + 15 min.)`
     SignatureDoesNotMatch(Option</* message */ String>),
 }
 
 impl SignatureError {
-    fn error_code(&self) -> &'static str {
+    pub(crate) fn error_code(&self) -> &'static str {
         match self {
             Self::ExpiredToken(_) => ERR_CODE_EXPIRED_TOKEN,
             Self::IO(_) | Self::InternalServiceError(_) => ERR_CODE_INTERNAL_FAILURE,
@@ -113,7 +113,7 @@ impl SignatureError {
         }
     }
 
-    fn http_status(&self) -> StatusCode {
+    pub(crate) fn http_status(&self) -> StatusCode {
         match self {
             Self::IncompleteSignature(_)
             | Self::InvalidBodyEncoding(_)

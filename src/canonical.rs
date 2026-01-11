@@ -18,7 +18,7 @@ use {
     chrono::{offset::FixedOffset, DateTime, Utc},
     encoding::{all::UTF_8, label::encoding_from_whatwg_label, types::DecoderTrap},
     http::{
-        header::{HeaderMap, HeaderValue},
+        header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE, DATE},
         request::Parts,
         uri::Uri,
     },
@@ -37,9 +37,6 @@ use {
 /// Content-Type string for HTML forms
 const APPLICATION_X_WWW_FORM_URLENCODED: &str = "application/x-www-form-urlencoded";
 
-/// Header parameter for the authorization
-const AUTHORIZATION: &str = "authorization";
-
 /// Algorithm for AWS SigV4
 const AWS4_HMAC_SHA256: &str = "AWS4-HMAC-SHA256";
 
@@ -49,14 +46,8 @@ const AWS4_HMAC_SHA256_BYTES: &[u8] = b"AWS4-HMAC-SHA256";
 /// Content-Type parameter for specifying the character set
 const CHARSET: &str = "charset";
 
-/// Header field for the content type
-const CONTENT_TYPE: &str = "content-type";
-
 /// Signature field for the access key
 const CREDENTIAL: &[u8] = b"Credential";
-
-/// Header parameter for the date.
-const DATE: &str = "date";
 
 /// Uppercase hex digits.
 const HEX_DIGITS_UPPER: [u8; 16] =
@@ -120,10 +111,10 @@ const X_AMZ_ALGORITHM: &str = "X-Amz-Algorithm";
 const X_AMZ_CREDENTIAL: &str = "X-Amz-Credential";
 
 /// Query parameter for delivering the date
-const X_AMZ_DATE: &str = "X-Amz-Date";
+pub(crate) const X_AMZ_DATE: &str = "X-Amz-Date";
 
 /// Header for delivering the alternate date
-const X_AMZ_DATE_LOWER: &str = "x-amz-date";
+pub(crate) const X_AMZ_DATE_LOWER: &str = "x-amz-date";
 
 /// Query parameter for delivering the session token
 const X_AMZ_SECURITY_TOKEN: &str = "X-Amz-Security-Token";
@@ -149,7 +140,7 @@ lazy_static! {
 }
 
 /// Authentication parameters extracted from the header or query string.
-#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
 #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
 #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 #[derive(Debug)]
@@ -171,7 +162,7 @@ struct AuthParams {
 ///
 /// **The stability of this struct is not guaranteed.** The fields and methods are subject to
 /// change in minor/patch versions.
-#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
 #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
 #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 #[derive(Clone)]
@@ -199,7 +190,7 @@ struct CanonicalRequest {
 
 impl CanonicalRequest {
     /// Create a CanonicalRequest from an HTTP request [Parts] and a body of [Bytes].
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     fn from_request_parts(
@@ -278,7 +269,7 @@ impl CanonicalRequest {
     }
 
     /// Retrieve the HTTP request method.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
@@ -287,7 +278,7 @@ impl CanonicalRequest {
     }
 
     /// Retrieve the canonicalized URI path from the request.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
@@ -298,7 +289,7 @@ impl CanonicalRequest {
     /// Retrieve the query parameters from the request. Values are ordered as they appear in the URL, followed by any
     /// values in the request body if the request body is of type `application/x-www-form-urlencoded`. Values are
     /// normalized to be percent-encoded.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
@@ -307,7 +298,7 @@ impl CanonicalRequest {
     }
 
     /// Retrieve the headers from the request. Values are ordered as they appear in the HTTP request.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
@@ -316,7 +307,7 @@ impl CanonicalRequest {
     }
 
     /// Retrieve the SHA-256 hash of the request body.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
@@ -325,7 +316,7 @@ impl CanonicalRequest {
     }
 
     /// Get the canonical query string from the request.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     fn canonical_query_string(&self) -> String {
@@ -334,7 +325,7 @@ impl CanonicalRequest {
 
     /// Get the [canonical request to hash](https://docs.aws.amazon.com/general/latest/gr/sigv4-create-canonical-request.html)
     /// for the request.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     fn canonical_request(&self, signed_headers: &Vec<String>) -> Vec<u8> {
@@ -373,7 +364,7 @@ impl CanonicalRequest {
     }
 
     /// Get the SHA-256 hash of the [canonical request](https://docs.aws.amazon.com/general/latest/gr/sigv4-create-canonical-request.html).
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     fn canonical_request_sha256(&self, signed_headers: &Vec<String>) -> [u8; SHA256_OUTPUT_LEN] {
@@ -388,7 +379,7 @@ impl CanonicalRequest {
 
     /// Create a [SigV4Authenticator] for the request. This performs steps 1-8 from the AWS Auth Error Ordering
     /// workflow.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     fn get_authenticator<S>(&self, signed_header_requirements: &S) -> Result<SigV4Authenticator, SignatureError>
@@ -400,7 +391,7 @@ impl CanonicalRequest {
     }
 
     /// Create an authenticator based on the provided [`AuthParams`].
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     fn get_authenticator_from_auth_parameters(
@@ -430,14 +421,14 @@ impl CanonicalRequest {
 
     /// Create an [AuthParams] structure, either from the `Authorization` header or the query strings as appropriate.
     /// This performs step 5 and either performs steps 6a-6d or 7a-7d from the AWS Auth Error Ordering workflow.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     fn get_auth_parameters<S>(&self, signed_header_requirements: &S) -> Result<AuthParams, SignatureError>
     where
         S: SignedHeaderRequirements,
     {
-        let auth_header = self.headers().get(AUTHORIZATION);
+        let auth_header = self.headers().get(AUTHORIZATION.as_str());
         let sig_algs = self.query_parameters().get(X_AMZ_ALGORITHM);
 
         // Rule 5: Either the Authorization header or X-Amz-Algorithm query parameter must be present, not both.
@@ -501,7 +492,7 @@ impl CanonicalRequest {
 
     /// Create an [`AuthParams`] structure from the `Authorization` header. This performs steps 6a-6d of the AWS Auth
     /// Error Ordering workflow.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     fn get_auth_parameters_from_auth_header<'a>(&'a self, auth_header: &'a [u8]) -> Result<AuthParams, SignatureError> {
@@ -579,7 +570,7 @@ impl CanonicalRequest {
         if let Some(date) = self.headers.get(X_AMZ_DATE_LOWER) {
             // Rule 6e: Use the first X-Amz-Date header (per rule 6a).
             timestamp_str = Some(latin1_to_string(&date[0]));
-        } else if let Some(date) = self.headers.get(DATE) {
+        } else if let Some(date) = self.headers.get(DATE.as_str()) {
             // Rule 6e: Use the first Date header (per rule 6a).
             timestamp_str = Some(latin1_to_string(&date[0]));
         } else {
@@ -610,7 +601,7 @@ impl CanonicalRequest {
 
     /// Create an [`AuthParams`] structure from the query parameters. This performs steps 7a-7d of the AWS Auth
     /// Error Ordering workflow.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     fn get_auth_parameters_from_query_parameters(&self, query_alg: &str) -> Result<AuthParams, SignatureError> {
@@ -687,7 +678,6 @@ impl Debug for CanonicalRequest {
 
 /// The Content-Type header value, along with the character set (if specified).
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
 #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
 #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 struct ContentTypeCharset {
@@ -878,7 +868,7 @@ impl VecSignedHeaderRequirements {
 
 /// Indicates whether we are normalizing a URI path element or a query string element. This is used to create the
 /// correct error message.
-#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
 #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
 #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 enum UriElement {
@@ -890,7 +880,7 @@ enum UriElement {
 }
 
 /// Convert a [`HashMap`] of query parameters to a string for the canonical request.
-#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
 #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
 #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 pub fn canonicalize_query_to_string(query_parameters: &HashMap<String, Vec<String>>) -> String {
@@ -911,7 +901,7 @@ pub fn canonicalize_query_to_string(query_parameters: &HashMap<String, Vec<Strin
 
 /// Normalizes the specified URI path, removing redundant slashes and relative path components (unless performing S3
 /// canonicalization).
-#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
 #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
 #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 pub fn canonicalize_uri_path(uri_path: &str, s3: bool) -> Result<String, SignatureError> {
@@ -974,7 +964,7 @@ pub fn canonicalize_uri_path(uri_path: &str, s3: bool) -> Result<String, Signatu
 }
 
 /// Formats HTTP headers in a HashMap suitable for debugging.
-#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
 #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
 #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 fn debug_headers(headers: &HashMap<String, Vec<Vec<u8>>>) -> String {
@@ -999,7 +989,7 @@ fn debug_headers(headers: &HashMap<String, Vec<Vec<u8>>>) -> String {
 }
 
 /// Get the content type and character set used in the body
-#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
 #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
 #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 fn get_content_type_and_charset(headers: &HeaderMap<HeaderValue>) -> Option<ContentTypeCharset> {
@@ -1034,7 +1024,7 @@ fn get_content_type_and_charset(headers: &HeaderMap<HeaderValue>) -> Option<Cont
 
 /// Indicates whether the specified byte is RFC3986 unreserved -- i.e., can be represented without being
 /// percent-encoded, e.g. '?' -> '%3F'.
-#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
 #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
 #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 #[inline(always)]
@@ -1043,7 +1033,7 @@ pub fn is_rfc3986_unreserved(c: u8) -> bool {
 }
 
 /// Convert a Latin-1 slice of bytes to a UTF-8 string.
-#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
 #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
 #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 pub fn latin1_to_string(bytes: &[u8]) -> String {
@@ -1055,7 +1045,7 @@ pub fn latin1_to_string(bytes: &[u8]) -> String {
 }
 
 /// Returns a sorted dictionary containing the header names and their values.
-#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
 #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
 #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 pub fn normalize_headers(headers: &HeaderMap<HeaderValue>) -> HashMap<String, Vec<Vec<u8>>> {
@@ -1070,7 +1060,7 @@ pub fn normalize_headers(headers: &HeaderMap<HeaderValue>) -> HashMap<String, Ve
 }
 
 /// Normalizes a header value by trimming whitespace and converting multiple spaces to a single space.
-#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
 #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
 #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 pub fn normalize_header_value(value: &[u8]) -> Vec<u8> {
@@ -1102,7 +1092,7 @@ pub fn normalize_header_value(value: &[u8]) -> Vec<u8> {
 }
 
 /// Normalize a single element (key or value from key=value) of a query string.
-#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
 #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
 #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 pub fn normalize_query_string_element(element: &str) -> Result<String, SignatureError> {
@@ -1110,7 +1100,7 @@ pub fn normalize_query_string_element(element: &str) -> Result<String, Signature
 }
 
 /// Normalizes a path element of a URI.
-#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
 #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
 #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 pub fn normalize_uri_path_component(path: &str) -> Result<String, SignatureError> {
@@ -1125,7 +1115,7 @@ pub fn normalize_uri_path_component(path: &str) -> Result<String, SignatureError
 ///   `%7E`) are converted to normal characters.
 ///
 /// If a percent encoding is incomplete, an error is returned.
-#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
 #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
 #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 fn normalize_uri_element(uri_el: &str, uri_el_type: UriElement) -> Result<String, SignatureError> {
@@ -1199,7 +1189,7 @@ fn normalize_uri_element(uri_el: &str, uri_el_type: UriElement) -> Result<String
 ///
 /// The order of the values matches the order that they appeared in the query string -- this is important for SigV4
 /// validation.
-#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
 #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
 #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 pub fn query_string_to_normalized_map(query_string: &str) -> Result<HashMap<String, Vec<String>>, SignatureError> {
@@ -1247,7 +1237,7 @@ pub fn query_string_to_normalized_map(query_string: &str) -> Result<HashMap<Stri
 ///
 /// This is copied from the Rust standard library source until the
 /// [`byte_slice_trim_ascii` feature](https://github.com/rust-lang/rust/issues/94035) is stabilized.
-#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
 #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
 #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 pub const fn trim_ascii_start(bytes: &[u8]) -> &[u8] {
@@ -1270,7 +1260,7 @@ pub const fn trim_ascii_start(bytes: &[u8]) -> &[u8] {
 ///
 /// This is copied from the Rust standard library source until the
 /// [`byte_slice_trim_ascii` feature](https://github.com/rust-lang/rust/issues/94035) is stabilized.
-#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
 #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
 #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 pub const fn trim_ascii_end(bytes: &[u8]) -> &[u8] {
@@ -1293,7 +1283,7 @@ pub const fn trim_ascii_end(bytes: &[u8]) -> &[u8] {
 ///
 /// This is copied from the Rust standard library source until the
 /// [`byte_slice_trim_ascii` feature](https://github.com/rust-lang/rust/issues/94035) is stabilized.
-#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
 #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
 #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 pub const fn trim_ascii(bytes: &[u8]) -> &[u8] {
@@ -1301,7 +1291,7 @@ pub const fn trim_ascii(bytes: &[u8]) -> &[u8] {
 }
 
 /// Convert a byte to uppercase hex representation.
-#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
 #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
 #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 #[inline(always)]
@@ -1313,7 +1303,6 @@ pub const fn u8_to_upper_hex(b: u8) -> [u8; 2] {
 /// Unescapes a URI percent-encoded string.
 ///
 /// This function panics if the input string contains invalid percent encodings.
-#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
 #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
 #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 pub fn unescape_uri_encoding(s: &str) -> String {
@@ -1344,7 +1333,7 @@ mod tests {
         crate::{
             canonical::{
                 canonicalize_query_to_string, canonicalize_uri_path, normalize_uri_path_component,
-                query_string_to_normalized_map, unescape_uri_encoding, CanonicalRequest,
+                query_string_to_normalized_map, unescape_uri_encoding, CanonicalRequest, X_AMZ_DATE_LOWER,
             },
             SignatureError, SignatureOptions, NO_ADDITIONAL_SIGNED_HEADERS,
         },
@@ -1354,7 +1343,6 @@ mod tests {
             request::Request,
             uri::{PathAndQuery, Uri},
         },
-        scratchstack_errors::ServiceError,
         std::collections::HashMap,
     };
 
@@ -1522,7 +1510,7 @@ mod tests {
                 .uri(uri)
                 .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
                 .header("authorization", "Basic foobar")
-                .header("x-amz-date", "20150830T123600Z")
+                .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
                 .body(Bytes::new())
                 .unwrap();
             let (parts, body) = request.into_parts();
@@ -1562,7 +1550,7 @@ mod tests {
                 .uri(uri)
                 .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
                 .header("authorization", "Basic foobar")
-                .header("x-amz-date", "20150830T123600Z")
+                .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
                 .body(Bytes::new())
                 .unwrap();
             let (parts, body) = request.into_parts();
@@ -1594,7 +1582,7 @@ mod tests {
             .uri(uri)
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
             .header("authorization", "Basic foobar")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .body(Bytes::new())
             .unwrap();
         let (parts, body) = request.into_parts();
@@ -1630,7 +1618,7 @@ mod tests {
             .uri(uri)
             .header("content-type", "application/x-www-form-urlencoded; hello=world; charset=foobar")
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .body(Bytes::from_static(b"foo=ba\x80r"))
             .unwrap();
         let (parts, body) = request.into_parts();
@@ -1653,7 +1641,7 @@ mod tests {
             .uri(uri)
             .header("content-type", "application/x-www-form-urlencoded; charset=utf-8")
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .body(Bytes::from_static(b""))
             .unwrap();
         let (parts, body) = request.into_parts();
@@ -1671,7 +1659,7 @@ mod tests {
             .uri(uri)
             .header("content-type", "application/x-www-form-urlencoded")
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .body(Bytes::from(b"foo=bar\xc3\xbf".to_vec()))
             .unwrap();
         let (parts, body) = request.into_parts();
@@ -1686,7 +1674,7 @@ mod tests {
             .uri(uri)
             .header("content-type", "application/x-www-form-urlencoded; hello=world")
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .body(Bytes::from(b"foo=bar\xc3\xbf".to_vec()))
             .unwrap();
         let (parts, body) = request.into_parts();
@@ -1704,7 +1692,7 @@ mod tests {
             .uri(uri)
             .header("content-type", "application/x-www-form-urlencoded")
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .body(Bytes::from(b"foo=bar\xc3\xbf".to_vec()))
             .unwrap();
         let (parts, body) = request.into_parts();
@@ -1731,7 +1719,7 @@ mod tests {
             .uri(uri)
             .header("content-type", "application/x-www-form-urlencoded; charset=utf-8")
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .body(Bytes::from(b"foo=ba\x80r".to_vec()))
             .unwrap();
         let (parts, body) = request.into_parts();
@@ -1755,7 +1743,7 @@ mod tests {
             .uri(uri)
             .header("content-type", "application/x-www-form-urlencoded; charset")
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .body(Bytes::from(b"foo=bar".to_vec()))
             .unwrap();
         let (parts, body) = request.into_parts();
@@ -1773,7 +1761,7 @@ mod tests {
             .uri(uri)
             .header("content-type", "application/x-www-form-urlencoded; charset=utf-8")
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .body(Bytes::from(b"foo=bar%yy".to_vec()))
             .unwrap();
         let (parts, body) = request.into_parts();
@@ -1791,7 +1779,7 @@ mod tests {
             .uri(uri)
             .header("content-type", "application/x-www-form-urlencoded; charset=utf-8")
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .body(Bytes::from(b"foo%tt=bar".to_vec()))
             .unwrap();
         let (parts, body) = request.into_parts();
@@ -1809,7 +1797,7 @@ mod tests {
             .uri(uri)
             .header("content-type", "application/x-www-form-urlencoded; charset=utf-8")
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .body(Bytes::from(b"foo=bar%y".to_vec()))
             .unwrap();
         let (parts, body) = request.into_parts();
@@ -1859,7 +1847,7 @@ mod tests {
             let builder = Request::builder().method(Method::GET).uri(uri).header("authorization", auth_header);
 
             let builder = if i & 8 != 0 {
-                builder.header("x-amz-date", "20150830T123600Z")
+                builder.header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             } else {
                 error_messages
                     .push("Authorization header requires existence of either a 'X-Amz-Date' or a 'Date' header.");
@@ -1887,7 +1875,7 @@ mod tests {
         let request = Request::builder()
             .method(Method::GET)
             .uri(uri)
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeadersdate;host")
             .body(Bytes::new())
             .unwrap();
@@ -1966,8 +1954,8 @@ mod tests {
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678, Credential=ABCD, SignedHeaders=foo;bar;host, Signature=DEFG")
             .header("authorization", "AWS3 Credential=1234, SignedHeaders=date;host, Signature=5678, Credential=ABCD, SignedHeaders=foo;bar;host, Signature=DEFG")
             .header("host", "example.amazonaws.com")
-            .header("x-amz-date", "20150830T123600Z")
-            .header("x-amz-date", "20161231T235959Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20161231T235959Z")
             .header("x-amz-security-token", "Test1")
             .header("x-amz-security-token", "Test2")
             .body(Bytes::new())
@@ -2014,7 +2002,7 @@ mod tests {
         let request = Request::builder()
             .method(Method::GET)
             .uri(uri)
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .header("host", "example.amazonaws.com")
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=x-amz-date, Signature=5678")
             .body(Bytes::new())
@@ -2063,7 +2051,7 @@ mod tests {
         let request = Request::builder()
             .method(Method::GET)
             .uri(uri)
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .header("host", "example.amazonaws.com")
             .header(
                 "authorization",
@@ -2077,7 +2065,7 @@ mod tests {
         let (cr, _, _) =
             CanonicalRequest::from_request_parts(parts, body, SignatureOptions::url_encode_form()).unwrap();
         let a = cr.get_auth_parameters(&NO_ADDITIONAL_SIGNED_HEADERS).unwrap();
-        assert_eq!(a.signed_headers, vec!["a", "host", "x-amz-date"]);
+        assert_eq!(a.signed_headers, vec!["a", "host", X_AMZ_DATE_LOWER]);
         let cr_bytes = cr.canonical_request(&a.signed_headers);
         assert!(!cr_bytes.is_empty());
     }
@@ -2090,7 +2078,7 @@ mod tests {
             .method(Method::POST)
             .uri(uri)
             .header("content-type", "application/json")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .header("host", "example.amazonaws.com")
             .body(Bytes::from_static(b"{}"))
             .unwrap();
@@ -2112,7 +2100,7 @@ mod tests {
             .method(Method::GET)
             .uri(uri)
             .header("authorization", "AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=x-amz-date, Signature=5678")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .header("host", "example.amazonaws.com")
             .body(Bytes::new())
             .unwrap();
@@ -2135,7 +2123,7 @@ mod tests {
             .method(Method::GET)
             .uri(uri)
             .header("authorization", "AWS3-HMAC-SHA256 Credential=1234, SignedHeaders=x-amz-date, Signature=5678")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .header("host", "example.amazonaws.com")
             .body(Bytes::new())
             .unwrap();
@@ -2156,7 +2144,7 @@ mod tests {
         let request = Request::builder()
             .method(Method::GET)
             .uri(uri)
-            .header("x-amz-date", "20150830T123600Z")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .header("host", "example.amazonaws.com")
             .body(Bytes::new())
             .unwrap();

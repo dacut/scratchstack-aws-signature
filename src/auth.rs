@@ -27,13 +27,16 @@ use {
 };
 
 /// Algorithm for AWS SigV4
-const AWS4_HMAC_SHA256: &str = "AWS4-HMAC-SHA256";
+pub(crate) const AWS4_HMAC_SHA256: &str = "AWS4-HMAC-SHA256";
 
 /// String included at the end of the AWS SigV4 credential scope
-const AWS4_REQUEST: &str = "aws4_request";
+pub(crate) const AWS4_REQUEST: &str = "aws4_request";
 
 /// Compact ISO8601 format used for the string to sign.
-const ISO8601_COMPACT_FORMAT: &str = "%Y%m%dT%H%M%SZ";
+pub(crate) const ISO8601_COMPACT_FORMAT: &str = "%Y%m%dT%H%M%SZ";
+
+/// Short date format
+pub(crate) const ISO8601_DATE_FORMAT: &str = "%Y%m%d";
 
 /// Length of an ISO8601 date string in the UTC time zone.
 const ISO8601_UTC_LENGTH: usize = 16;
@@ -53,7 +56,6 @@ const SHA256_HEX_LENGTH: usize = SHA256_EMPTY.len();
 
 /// Low-level structure for performing AWS SigV4 authentication after a canonical request has been generated.
 #[derive(Builder, Clone, Default)]
-#[cfg_attr(doc, doc(cfg(feature = "unstable")))]
 #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
 #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 #[builder(derive(Debug))]
@@ -79,7 +81,7 @@ pub struct SigV4Authenticator {
 
 impl SigV4Authenticator {
     /// Create a builder for `SigV4Authenticator`.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
@@ -88,7 +90,7 @@ impl SigV4Authenticator {
     }
 
     /// Retrieve the SHA-256 hash of the canonical request.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
@@ -97,7 +99,7 @@ impl SigV4Authenticator {
     }
 
     /// Retrieve the credential passed into the request, in the form of `keyid/date/region/service/aws4_request`.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
@@ -106,7 +108,7 @@ impl SigV4Authenticator {
     }
 
     /// Retrieve the optional session token.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
@@ -115,7 +117,7 @@ impl SigV4Authenticator {
     }
 
     /// Retrieve the signature passed into the request.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
@@ -124,7 +126,7 @@ impl SigV4Authenticator {
     }
 
     /// Retrieve the timestamp of the request.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
@@ -134,7 +136,7 @@ impl SigV4Authenticator {
 
     /// Verify the request parameters make sense for the region, service, and specified timestamp.
     /// This must be called successfully before calling [validate_signature][Self::validate_signature].
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     pub fn prevalidate(
@@ -216,7 +218,7 @@ impl SigV4Authenticator {
             ));
         }
 
-        let expected_cscope_date = req_ts.format("%Y%m%d").to_string();
+        let expected_cscope_date = req_ts.format(ISO8601_DATE_FORMAT).to_string();
         if cscope_date != expected_cscope_date {
             trace!(
                 "prevalidate: credential date '{}' does not match expected date '{}'",
@@ -235,7 +237,7 @@ impl SigV4Authenticator {
 
     /// Return the signing key (`kSigning` from the [AWS documentation](https://docs.aws.amazon.com/general/latest/gr/sigv4-calculate-signature.html))
     /// for the request.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     async fn get_signing_key<S, F>(
@@ -275,7 +277,7 @@ impl SigV4Authenticator {
     }
 
     /// Return the string to sign for the request.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     fn get_string_to_sign(&self) -> Vec<u8> {
@@ -299,7 +301,7 @@ impl SigV4Authenticator {
     }
 
     /// Validate the request signature.
-    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     pub async fn validate_signature<S, F>(
@@ -419,13 +421,13 @@ mod tests {
         super::duration_to_string,
         crate::{
             auth::{SigV4Authenticator, SigV4AuthenticatorBuilder, SigV4AuthenticatorResponse},
+            aws4::TEST_REGION,
             crypto::SHA256_OUTPUT_LEN,
             service_for_signing_key_fn, GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, SignatureError,
         },
         chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc},
         log::LevelFilter,
         scratchstack_aws_principal::{Principal, User},
-        scratchstack_errors::ServiceError,
         std::{error::Error, fs::File, str::FromStr},
         tower::BoxError,
     };
@@ -437,11 +439,11 @@ mod tests {
     #[test]
     fn test_derived() {
         init();
-        let epoch = DateTime::<Utc>::from_timestamp(0, 0).unwrap();
+        let epoch = DateTime::<Utc>::from_timestamp(0, 0).expect("failed to create epoch DateTime");
         let test_time = DateTime::<Utc>::from_naive_utc_and_offset(
             NaiveDateTime::new(
-                NaiveDate::from_ymd_opt(2015, 8, 30).unwrap(),
-                NaiveTime::from_hms_opt(12, 36, 0).unwrap(),
+                NaiveDate::from_ymd_opt(2015, 8, 30).expect("failed to create NaiveDate 2015-08-30"),
+                NaiveTime::from_hms_opt(12, 36, 0).expect("failed to create NaiveTime 12:36:00"),
             ),
             Utc,
         );
@@ -466,7 +468,7 @@ mod tests {
             .signature("1234".to_string())
             .request_timestamp(test_time)
             .build()
-            .unwrap();
+            .expect("failed to build SigV4Authenticator");
 
         assert_eq!(
             auth2.canonical_request_sha256().as_slice(),
@@ -510,12 +512,18 @@ mod tests {
 
         match request.access_key() {
             "AKIDEXAMPLE" => {
-                let principal = Principal::from(vec![User::new("aws", "123456789012", "/", "test").unwrap().into()]);
-                let k_secret = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY").unwrap();
+                let principal = Principal::from(vec![User::new("aws", "123456789012", "/", "test")
+                    .expect("failed to create test User")
+                    .into()]);
+                let k_secret = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY")
+                    .expect("failed to parse KSecretKey from string");
                 let k_signing = k_secret.to_ksigning(request.request_date(), request.region(), request.service());
 
-                let response =
-                    GetSigningKeyResponse::builder().principal(principal).signing_key(k_signing).build().unwrap();
+                let response = GetSigningKeyResponse::builder()
+                    .principal(principal)
+                    .signing_key(k_signing)
+                    .build()
+                    .expect("failed to build GetSigningKeyResponse");
                 Ok(response)
             }
             _ => Err(Box::new(SignatureError::InvalidClientTokenId(
@@ -532,22 +540,22 @@ mod tests {
         let creq_sha256: [u8; SHA256_OUTPUT_LEN] = [0; SHA256_OUTPUT_LEN];
         let test_timestamp = DateTime::<Utc>::from_naive_utc_and_offset(
             NaiveDateTime::new(
-                NaiveDate::from_ymd_opt(2015, 8, 30).unwrap(),
-                NaiveTime::from_hms_opt(12, 36, 0).unwrap(),
+                NaiveDate::from_ymd_opt(2015, 8, 30).expect("failed to create NaiveDate 2015-08-30"),
+                NaiveTime::from_hms_opt(12, 36, 0).expect("failed to create NaiveTime 12:36:00"),
             ),
             Utc,
         );
         let outdated_timestamp = DateTime::<Utc>::from_naive_utc_and_offset(
             NaiveDateTime::new(
-                NaiveDate::from_ymd_opt(2015, 8, 30).unwrap(),
-                NaiveTime::from_hms_opt(12, 20, 59).unwrap(),
+                NaiveDate::from_ymd_opt(2015, 8, 30).expect("failed to create NaiveDate 2015-08-30"),
+                NaiveTime::from_hms_opt(12, 20, 59).expect("failed to create NaiveTime 12:20:59"),
             ),
             Utc,
         );
         let future_timestamp = DateTime::<Utc>::from_naive_utc_and_offset(
             NaiveDateTime::new(
-                NaiveDate::from_ymd_opt(2015, 8, 30).unwrap(),
-                NaiveTime::from_hms_opt(12, 51, 1).unwrap(),
+                NaiveDate::from_ymd_opt(2015, 8, 30).expect("failed to create NaiveDate 2015-08-30"),
+                NaiveTime::from_hms_opt(12, 51, 1).expect("failed to create NaiveTime 12:51:01"),
             ),
             Utc,
         );
@@ -561,16 +569,16 @@ mod tests {
             .signature("invalid".to_string())
             .request_timestamp(outdated_timestamp)
             .build()
-            .unwrap();
+            .expect("failed to build SigV4Authenticator");
 
         let e = auth
-            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .validate_signature(TEST_REGION, "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
             .await
             .unwrap_err();
 
         if let SignatureError::SignatureDoesNotMatch(ref msg) = e {
             assert_eq!(
-                msg.as_ref().unwrap(),
+                msg.as_ref().expect("expected SignatureDoesNotMatch message present"),
                 "Signature expired: 20150830T122059Z is now earlier than 20150830T122100Z (20150830T123600Z - 15 min.)"
             );
             assert_eq!(e.error_code(), "SignatureDoesNotMatch");
@@ -586,16 +594,16 @@ mod tests {
             .signature("invalid".to_string())
             .request_timestamp(future_timestamp)
             .build()
-            .unwrap();
+            .expect("failed to build SigV4Authenticator");
 
         let e = auth
-            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .validate_signature(TEST_REGION, "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
             .await
             .unwrap_err();
 
         if let SignatureError::SignatureDoesNotMatch(ref msg) = e {
             assert_eq!(
-                msg.as_ref().unwrap(),
+                msg.as_ref().expect("expected SignatureDoesNotMatch message present"),
                 "Signature not yet current: 20150830T125101Z is still later than 20150830T125100Z (20150830T123600Z + 15 min.)"
             );
             assert_eq!(e.error_code(), "SignatureDoesNotMatch");
@@ -611,10 +619,10 @@ mod tests {
             .signature("invalid".to_string())
             .request_timestamp(test_timestamp)
             .build()
-            .unwrap();
+            .expect("failed to build SigV4Authenticator");
 
         let e = auth
-            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .validate_signature(TEST_REGION, "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
             .await
             .unwrap_err();
 
@@ -636,10 +644,10 @@ mod tests {
             .signature("invalid".to_string())
             .request_timestamp(test_timestamp)
             .build()
-            .unwrap();
+            .expect("failed to build SigV4Authenticator");
 
         let e = auth
-            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .validate_signature(TEST_REGION, "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
             .await
             .unwrap_err();
 
@@ -661,10 +669,10 @@ mod tests {
             .signature("invalid".to_string())
             .request_timestamp(test_timestamp)
             .build()
-            .unwrap();
+            .expect("failed to build SigV4Authenticator");
 
         let e = auth
-            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .validate_signature(TEST_REGION, "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
             .await
             .unwrap_err();
 
@@ -683,10 +691,10 @@ mod tests {
             .signature("invalid".to_string())
             .request_timestamp(test_timestamp)
             .build()
-            .unwrap();
+            .expect("failed to build SigV4Authenticator");
 
         let e = auth
-            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .validate_signature(TEST_REGION, "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
             .await
             .unwrap_err();
 
@@ -705,10 +713,10 @@ mod tests {
             .signature("invalid".to_string())
             .request_timestamp(test_timestamp)
             .build()
-            .unwrap();
+            .expect("failed to build SigV4Authenticator");
 
         let e = auth
-            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .validate_signature(TEST_REGION, "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
             .await
             .unwrap_err();
 
@@ -728,10 +736,10 @@ mod tests {
             .signature("invalid".to_string())
             .request_timestamp(test_timestamp)
             .build()
-            .unwrap();
+            .expect("failed to build SigV4Authenticator");
 
         let e = auth
-            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .validate_signature(TEST_REGION, "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
             .await
             .unwrap_err();
 
@@ -757,10 +765,10 @@ mod tests {
             .signature("invalid".to_string())
             .request_timestamp(test_timestamp)
             .build()
-            .unwrap();
+            .expect("failed to build SigV4Authenticator");
 
         let e = auth
-            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .validate_signature(TEST_REGION, "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
             .await
             .unwrap_err();
 
@@ -779,10 +787,10 @@ mod tests {
             .signature("invalid".to_string())
             .request_timestamp(test_timestamp)
             .build()
-            .unwrap();
+            .expect("failed to build SigV4Authenticator");
 
         let e = auth
-            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .validate_signature(TEST_REGION, "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
             .await
             .unwrap_err();
 
@@ -801,10 +809,10 @@ mod tests {
             .signature("88bf1ccb1e3e4df7bb2ed6d89bcd8558d6770845007e1a5c392ac9edce0d5deb".to_string())
             .request_timestamp(test_timestamp)
             .build()
-            .unwrap();
+            .expect("failed to build SigV4Authenticator");
 
         let _ = auth
-            .validate_signature("us-east-1", "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
+            .validate_signature(TEST_REGION, "example", test_timestamp, mismatch, &mut get_signing_key_svc.clone())
             .await
             .unwrap();
     }
@@ -820,7 +828,8 @@ mod tests {
 
     #[test_log::test]
     fn test_response_builder() {
-        let response = SigV4AuthenticatorResponse::builder().build().unwrap();
+        let response =
+            SigV4AuthenticatorResponse::builder().build().expect("failed to build SigV4AuthenticatorResponse");
         assert!(response.principal().is_empty());
         assert!(response.session_data().is_empty());
 

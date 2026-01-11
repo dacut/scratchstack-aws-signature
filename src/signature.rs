@@ -1,3 +1,5 @@
+#[cfg(feature = "streaming")]
+use http::header::AUTHORIZATION;
 use {
     crate::{
         auth::SigV4AuthenticatorResponse, canonical::CanonicalRequest, GetSigningKeyRequest, GetSigningKeyResponse,
@@ -10,6 +12,25 @@ use {
     std::future::Future,
     tower::{BoxError, Service},
 };
+
+#[cfg(feature = "streaming")]
+use crate::{
+    auth::{AWS4_HMAC_SHA256, AWS4_REQUEST, ISO8601_COMPACT_FORMAT, ISO8601_DATE_FORMAT},
+    SignatureError,
+};
+#[cfg(feature = "streaming")]
+use chrono::NaiveDateTime;
+#[cfg(feature = "streaming")]
+use hmac::{Hmac, Mac};
+#[cfg(feature = "streaming")]
+use log::debug;
+#[cfg(feature = "streaming")]
+use sha2::Sha256;
+#[cfg(feature = "streaming")]
+use tower::ServiceExt;
+
+/// The `x-amz-content-sha256` header name.
+pub const X_AMZ_CONTENT_SHA256: &str = "x-amz-content-sha256";
 
 /// Options that can be used to configure the signature service.
 #[derive(Clone, Copy, Debug, Default)]
@@ -112,6 +133,164 @@ where
     Ok((parts, body, sigv4_response))
 }
 
+/// Validate a AWS SigV4 streaming request.
+///
+/// This takes in an HTTP [`Parts`] along with other service-specific paramters. If the
+/// validation is successful (i.e. the request is properly signed with a known access key), this
+/// returns:
+/// * The request headers (as HTTP [`Parts`]).
+/// * The request body (as a [`Bytes`] object, which is empty if no body was provided).
+/// * The [response from the authenticator][SigV4AuthenticatorResponse], which contains the
+///   principal and other session data.
+///
+/// # Parameters
+/// * `parts` - The HTTP [`Parts`] to validate.
+/// * `region` - The AWS region in which the request is being made.
+/// * `service` - The AWS service to which the request is being made.
+/// * `get_signing_key` - A service that can provide the signing key for the request.
+/// * `server_timestamp` - The timestamp of the server when the request was received. Usually this
+///   is the current time, `Utc::now()`.
+/// * `required_headers` - The headers that are required to be signed in the request in addition to
+///   the default SigV4 headers. If none, use
+///   [`NO_ADDITIONAL_SIGNED_HEADERS`][crate::NO_ADDITIONAL_SIGNED_HEADERS].
+///
+///     ^ todo!
+///
+/// * `options` - [`SignatureOptions`]` that affect the behavior of the signature validation. For
+///   most services, use `SignatureOptions::default()`.
+///
+/// # Errors
+/// This function returns a [`SignatureError`][crate::SignatureError] if the HTTP request is
+/// malformed or the request was not properly signed. The validation follows the
+/// [AWS Auth Error Ordering](https://github.com/dacut/scratchstack-aws-signature/blob/main/docs/AWS%20Auth%20Error%20Ordering.pdf)
+/// document.
+#[cfg(feature = "streaming")]
+pub async fn sigv4_validate_streaming_request<G, F, S>(
+    parts: Parts,
+    region: &str,
+    service: &str,
+    get_signing_key: &mut G,
+    server_timestamp: DateTime<Utc>,
+    _required_headers: &S,
+    options: SignatureOptions,
+) -> Result<(Parts, Bytes, SigV4AuthenticatorResponse), BoxError>
+where
+    G: Service<GetSigningKeyRequest, Response = GetSigningKeyResponse, Error = BoxError, Future = F> + Send,
+    F: Future<Output = Result<GetSigningKeyResponse, BoxError>> + Send,
+    S: SignedHeaderRequirements,
+{
+    // we pass in an empty body because we don't need it for streaming signature validation
+
+    use crate::{
+        auth::{ISO8601_COMPACT_FORMAT, ISO8601_DATE_FORMAT},
+        canonical::X_AMZ_DATE_LOWER,
+    };
+
+    let (canonical_request, parts, _) = CanonicalRequest::from_request_parts(parts, Bytes::new(), options)?;
+
+    // Get Authorization header
+    let auth_header = parts
+        .headers
+        .get(AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .ok_or_else(|| SignatureError::MissingAuthenticationToken("Missing Authorization header".to_string()))?;
+
+    // Parse Authorization header
+    let (access_key_id, date_str, signed_headers, provided_signature) = parse_authorization_header(auth_header)?;
+
+    let date = chrono::NaiveDate::parse_from_str(&date_str, ISO8601_DATE_FORMAT).map_err(|e| {
+        SignatureError::IncompleteSignature(format!("Invalid date in Credential: error={} input={}", e, date_str))
+    })?;
+
+    // Get secret key from credential store
+    let signing_key: GetSigningKeyResponse = get_signing_key
+        .oneshot(
+            GetSigningKeyRequest::builder()
+            .access_key(&access_key_id)
+            // .session_token(self.session_token().map(|x| x.to_string()))
+            .request_date(date)
+            .region(region)
+            .service(service)
+            .build()
+            .map_err(|e| SignatureError::InternalServiceError(Box::new(std::io::Error::other(format!("Invalid GetSigningKeyRequest: {}", e)))) )?
+        )
+        .await?;
+
+    debug!("Verifying streaming signature access_key_id={} signed_headers={:?}", &access_key_id, &signed_headers);
+
+    // Get x-amz-content-sha256 header value (literal string to use in canonical request)
+    let body_hash =
+        parts.headers.get(X_AMZ_CONTENT_SHA256).and_then(|h| h.to_str().ok()).ok_or_else(|| {
+            SignatureError::MissingAuthenticationToken("Missing x-amz-content-sha256 header".to_string())
+        })?;
+
+    // Get timestamp from x-amz-date header
+    let header_timestamp_str = parts
+        .headers
+        .get(X_AMZ_DATE_LOWER)
+        .and_then(|h| h.to_str().ok())
+        .ok_or_else(|| SignatureError::MissingAuthenticationToken("Missing x-amz-date header".to_string()))?;
+
+    let header_timestamp =
+        NaiveDateTime::parse_from_str(header_timestamp_str, ISO8601_COMPACT_FORMAT).map_err(|e| {
+            SignatureError::IncompleteSignature(format!(
+                "Invalid x-amz-date format: error={} input={}",
+                e, header_timestamp_str
+            ))
+        })?;
+
+    let header_timestamp: DateTime<Utc> = DateTime::from_naive_utc_and_offset(header_timestamp, Utc);
+
+    if server_timestamp - header_timestamp > Duration::minutes(ALLOWED_MISMATCH_MINUTES) {
+        use crate::auth::ISO8601_COMPACT_FORMAT;
+
+        return Err(Box::new(SignatureError::SignatureDoesNotMatch(Some(format!(
+            "Signature expired: {} is now earlier than {} ({} - {} min.)",
+            header_timestamp.format(ISO8601_COMPACT_FORMAT),
+            (server_timestamp - Duration::minutes(ALLOWED_MISMATCH_MINUTES)).format(ISO8601_COMPACT_FORMAT),
+            server_timestamp.format(ISO8601_COMPACT_FORMAT),
+            ALLOWED_MISMATCH_MINUTES
+        )))));
+    }
+
+    // Build canonical request using literal body hash
+    let canonical_request_str = build_canonical_request(&canonical_request, &parts, &signed_headers, body_hash);
+
+    // Compute SHA256 of canonical request
+    let canonical_request_hash = {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(canonical_request_str.as_bytes());
+        format!("{:x}", hasher.finalize())
+    };
+
+    // Compute string to sign
+    let string_to_sign = compute_string_to_sign(&header_timestamp, region, &canonical_request_hash);
+    debug!("String to sign:\n{}", string_to_sign);
+
+    // Compute expected signature
+    let expected_signature = {
+        type HmacSha256 = Hmac<Sha256>;
+
+        let mut mac = HmacSha256::new_from_slice(signing_key.signing_key().as_ref())
+            .map_err(|e| SignatureError::MissingAuthenticationToken(format!("HMAC error: {}", e)))?;
+        mac.update(string_to_sign.as_bytes());
+        format!("{:x}", mac.finalize().into_bytes())
+    };
+
+    debug!("Comparing signatures expected={} provided={}", expected_signature, provided_signature);
+
+    // Compare signatures
+    if expected_signature != provided_signature {
+        return Err(Box::new(SignatureError::MissingAuthenticationToken(format!(
+            "Signature mismatch: expected '{}', got '{}'",
+            expected_signature, provided_signature
+        ))));
+    }
+
+    Ok((parts, Bytes::new(), signing_key.into()))
+}
+
 /// A trait for converting various body types into a [`Bytes`] object.
 ///
 /// This requires reading the entire body into memory.
@@ -150,30 +329,122 @@ impl IntoRequestBytes for Bytes {
     }
 }
 
+/// Compute string to sign
+#[cfg(feature = "streaming")]
+fn compute_string_to_sign(timestamp: &DateTime<Utc>, region: &str, canonical_request_hash: &str) -> String {
+    let credential_scope = format!("{}/{}/s3/{}", timestamp.format(ISO8601_DATE_FORMAT), region, AWS4_REQUEST);
+
+    format!(
+        "{}\n{}\n{}\n{}",
+        AWS4_HMAC_SHA256,
+        timestamp.format(ISO8601_COMPACT_FORMAT),
+        credential_scope,
+        canonical_request_hash
+    )
+}
+
+/// Parse AWS Authorization header to extract components
+/// Format: AWS4-HMAC-SHA256 Credential=ACCESS_KEY/DATE/REGION/SERVICE/aws4_request, SignedHeaders=..., Signature=...
+#[cfg(feature = "streaming")]
+fn parse_authorization_header(auth_header: &str) -> Result<(String, String, Vec<String>, String), SignatureError> {
+    // Extract credential
+    let credential = auth_header.split("Credential=").nth(1).and_then(|s| s.split(',').next()).ok_or_else(|| {
+        SignatureError::MissingAuthenticationToken("Missing Credential in Authorization header".to_string())
+    })?;
+
+    let parts: Vec<&str> = credential.split('/').collect();
+    if parts.len() != 5 {
+        return Err(SignatureError::MissingAuthenticationToken("Invalid Credential format".to_string()));
+    }
+    let access_key = parts[0].to_string();
+    let date = parts[1].to_string();
+
+    // Extract signed headers
+    let signed_headers_str =
+        auth_header.split("SignedHeaders=").nth(1).and_then(|s| s.split(',').next()).ok_or_else(|| {
+            SignatureError::MissingAuthenticationToken("Missing SignedHeaders in Authorization header".to_string())
+        })?;
+    let signed_headers: Vec<String> = signed_headers_str.split(';').map(|s| s.to_string()).collect();
+
+    // Extract signature
+    let signature = auth_header
+        .split("Signature=")
+        .nth(1)
+        .ok_or_else(|| {
+            SignatureError::MissingAuthenticationToken("Missing Signature in Authorization header".to_string())
+        })?
+        .trim()
+        .to_string();
+
+    Ok((access_key, date, signed_headers, signature))
+}
+
+fn build_canonical_request(
+    canonical_request: &CanonicalRequest,
+    parts: &http::request::Parts,
+    signed_headers: &[String],
+    body_hash: &str,
+) -> String {
+    let mut canonical = String::new();
+
+    // Method
+    canonical.push_str(canonical_request.request_method());
+    canonical.push('\n');
+
+    // Canonical URI (S3-specific: don't double-encode)
+    canonical.push_str(parts.uri.path());
+    canonical.push('\n');
+
+    // Canonical query string (must be sorted by parameter name)
+    if let Some(query) = parts.uri.query() {
+        let mut params: Vec<&str> = query.split('&').collect();
+        params.sort_unstable();
+        canonical.push_str(&params.join("&"));
+    }
+    canonical.push('\n');
+
+    // Canonical headers (only signed headers, sorted)
+    for header_name in signed_headers {
+        if let Some(header_value) = parts.headers.get(header_name) {
+            canonical.push_str(header_name);
+            canonical.push(':');
+            if let Ok(value_str) = header_value.to_str() {
+                canonical.push_str(value_str.trim());
+            }
+            canonical.push('\n');
+        }
+    }
+    canonical.push('\n');
+
+    // Signed headers list (must match what client sent in Authorization header)
+    canonical.push_str(&signed_headers.join(";"));
+    canonical.push('\n');
+
+    // Body hash (literal value from x-amz-content-sha256)
+    canonical.push_str(body_hash);
+
+    debug!("Canonical request for streaming:\n{}", canonical);
+    canonical
+}
+
 #[cfg(test)]
 mod tests {
-    use {
-        crate::{
-            auth::SigV4AuthenticatorResponse, service_for_signing_key_fn, sigv4_validate_request, GetSigningKeyRequest,
-            GetSigningKeyResponse, KSecretKey, SignatureError, SignatureOptions, SignedHeaderRequirements,
-            VecSignedHeaderRequirements, NO_ADDITIONAL_SIGNED_HEADERS,
-        },
-        bytes::Bytes,
-        chrono::{DateTime, NaiveDate, Utc},
-        http::{
-            method::Method,
-            request::{Parts, Request},
-            uri::{PathAndQuery, Uri},
-        },
-        lazy_static::lazy_static,
-        scratchstack_aws_principal::{Principal, User},
-        scratchstack_errors::ServiceError,
-        std::{borrow::Cow, str::FromStr},
-        tower::BoxError,
-    };
+    use super::*;
+    use crate::aws4::{TEST_REGION, TEST_SERVICE};
+    use crate::{auth::ISO8601_COMPACT_FORMAT, canonical::X_AMZ_DATE};
+    use hmac::{Hmac, Mac};
+    use sha2::{Digest, Sha256};
+    use std::sync::LazyLock;
+    use std::{borrow::Cow, str::FromStr};
 
-    const TEST_REGION: &str = "us-east-1";
-    const TEST_SERVICE: &str = "service";
+    use crate::{
+        canonical::X_AMZ_DATE_LOWER, service_for_signing_key_fn, KSecretKey, VecSignedHeaderRequirements,
+        NO_ADDITIONAL_SIGNED_HEADERS,
+    };
+    use chrono::NaiveDate;
+    use http::{header::HOST, uri::PathAndQuery, Method, Uri};
+    use lazy_static::lazy_static;
+    use scratchstack_aws_principal::{Principal, User};
 
     lazy_static! {
         static ref TEST_TIMESTAMP: DateTime<Utc> = DateTime::from_naive_utc_and_offset(
@@ -207,10 +478,14 @@ mod tests {
         };
     }
 
-    const VALID_AUTH_HEADER: &str = "AWS4-HMAC-SHA256 \
-    Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, \
+    static VALID_AUTH_HEADER: LazyLock<String> = LazyLock::new(|| {
+        format!(
+            "AWS4-HMAC-SHA256 \
+    Credential=AKIDEXAMPLE/20150830/{TEST_REGION}/{TEST_SERVICE}/aws4_request, \
     SignedHeaders=host;x-amz-date, \
-    Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea";
+    Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea"
+        )
+    });
 
     async fn get_signing_key(req: GetSigningKeyRequest) -> Result<GetSigningKeyResponse, BoxError> {
         let k_secret = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY").unwrap();
@@ -225,9 +500,9 @@ mod tests {
         let request = Request::builder()
             .method(Method::GET)
             .uri(uri)
-            .header("authorization", auth_str)
-            .header("host", "example.amazonaws.com")
-            .header("x-amz-date", "20150830T123600Z")
+            .header(AUTHORIZATION, auth_str)
+            .header(HOST, "example.amazonaws.com")
+            .header(X_AMZ_DATE_LOWER, "20150830T123600Z")
             .body(())
             .unwrap();
         let mut get_signing_key_svc = service_for_signing_key_fn(get_signing_key);
@@ -258,8 +533,8 @@ mod tests {
         let request = Request::builder()
             .method(Method::GET)
             .uri(uri)
-            .header("authorization", VALID_AUTH_HEADER)
-            .header("host", "localhost")
+            .header(AUTHORIZATION, VALID_AUTH_HEADER.as_str())
+            .header(HOST, "localhost")
             .body(())
             .unwrap();
         let e = expect_err!(
@@ -285,10 +560,11 @@ mod tests {
     async fn invalid_date() {
         let uri = Uri::builder().path_and_query(PathAndQuery::from_static("/")).build().unwrap();
         let mut gsk_service = service_for_signing_key_fn(get_signing_key);
+
         let request = Request::builder()
             .method(Method::GET)
             .uri(uri)
-            .header("authorization", VALID_AUTH_HEADER)
+            .header(AUTHORIZATION, VALID_AUTH_HEADER.as_str())
             .header("date", "zzzzzzzzz")
             .body(())
             .unwrap();
@@ -341,7 +617,7 @@ mod tests {
 
             if i > 1 {
                 builder = builder.header(
-                    "authorization",
+                    AUTHORIZATION,
                     match i {
                         2 => "AWS5-HMAC-SHA256 FooBar, BazBurp",
                         3 => "AWS4-HMAC-SHA256 FooBar, BazBurp",
@@ -365,10 +641,10 @@ mod tests {
 
             match i {
                 0..=7 => (),
-                8..=12 => builder = builder.header("x-amz-date", "2015/08/30T12/36/00Z"),
-                13 => builder = builder.header("x-amz-date", "20150830T122059Z"),
-                14 => builder = builder.header("x-amz-date", "20150830T125101Z"),
-                _ => builder = builder.header("x-amz-date", "20150830T122100Z"),
+                8..=12 => builder = builder.header(X_AMZ_DATE_LOWER, "2015/08/30T12/36/00Z"),
+                13 => builder = builder.header(X_AMZ_DATE_LOWER, "20150830T122059Z"),
+                14 => builder = builder.header(X_AMZ_DATE_LOWER, "20150830T125101Z"),
+                _ => builder = builder.header(X_AMZ_DATE_LOWER, "20150830T122100Z"),
             }
 
             let request = builder.body(()).unwrap();
@@ -532,10 +808,10 @@ mod tests {
 
             match i {
                 0..=7 => (),
-                8..=12 => builder = builder.header("x-amz-date", "2015/08/30T12/36/00Z"),
-                13 => builder = builder.header("x-amz-date", "20150830T122059Z"),
-                14 => builder = builder.header("x-amz-date", "20150830T125101Z"),
-                _ => builder = builder.header("x-amz-date", "20150830T122100Z"),
+                8..=12 => builder = builder.header(X_AMZ_DATE_LOWER, "2015/08/30T12/36/00Z"),
+                13 => builder = builder.header(X_AMZ_DATE_LOWER, "20150830T122059Z"),
+                14 => builder = builder.header(X_AMZ_DATE_LOWER, "20150830T125101Z"),
+                _ => builder = builder.header(X_AMZ_DATE_LOWER, "20150830T122100Z"),
             }
 
             let body = Bytes::from_static(b"{}");
@@ -728,8 +1004,8 @@ mod tests {
 
         assert!(sigv4_validate_request(
             req,
-            "us-east-1",
-            "service",
+            TEST_REGION,
+            TEST_SERVICE,
             &mut get_signing_key_svc,
             *TEST_TIMESTAMP,
             &NO_ADDITIONAL_SIGNED_HEADERS,
@@ -742,16 +1018,16 @@ mod tests {
         let req = Request::builder()
             .method(Method::GET)
             .uri("/a/path/../to//something") // Becomes /a/to/something.
-            .header("Host", "example.amazonaws.com")
-            .header("X-Amz-Date", "20150830T123600Z")
-            .header("Authorization", "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, Signature=b475de2c96e7bfdfe03bd784d948218730ef62f48ac8bb9f2922af9a44f8657c, SignedHeaders=host;x-amz-date")
+            .header(HOST, "example.amazonaws.com")
+            .header(X_AMZ_DATE, "20150830T123600Z")
+            .header(AUTHORIZATION, "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, Signature=b475de2c96e7bfdfe03bd784d948218730ef62f48ac8bb9f2922af9a44f8657c, SignedHeaders=host;x-amz-date")
             .body(())
             .unwrap();
 
         assert!(sigv4_validate_request(
             req,
-            "us-east-1",
-            "service",
+            TEST_REGION,
+            TEST_SERVICE,
             &mut get_signing_key_svc,
             *TEST_TIMESTAMP,
             &NO_ADDITIONAL_SIGNED_HEADERS,
@@ -759,5 +1035,231 @@ mod tests {
         )
         .await
         .is_ok());
+    }
+
+    #[test_log::test(tokio::test)]
+    #[cfg(feature = "streaming")]
+    async fn test_sigv4_validate_streaming_request_success() {
+        use crate::auth::ISO8601_COMPACT_FORMAT;
+
+        // Arrange
+        let mut get_signing_key_svc = service_for_signing_key_fn(get_signing_key);
+        let region = TEST_REGION;
+        let service = TEST_SERVICE;
+
+        // This mirrors the secret used in get_signing_key()
+        let k_secret = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY").unwrap();
+        let signing_key = k_secret.to_ksigning(TEST_TIMESTAMP.date_naive(), region, service);
+
+        // Define headers required for streaming validation
+        let method = Method::GET;
+        let path = "/test-object"; // simple path, no query
+        let x_amz_date = TEST_TIMESTAMP.format(ISO8601_COMPACT_FORMAT).to_string();
+        // For streaming chunked uploads the body hash is often the literal string "STREAMING-AWS4-HMAC-SHA256-PAYLOAD"
+        // but our implementation just uses whatever the client sets in x-amz-content-sha256. Use a simple constant.
+        let body_hash_literal = "UNSIGNED-PAYLOAD"; // keep small & deterministic
+
+        // Build canonical request exactly as validator does (including signed headers)
+        let (parts, body) = Request::builder()
+            .method(method.clone())
+            .uri(path)
+            .header(HOST, "example.amazonaws.com")
+            .header(X_AMZ_DATE_LOWER, &x_amz_date)
+            .header(X_AMZ_CONTENT_SHA256, body_hash_literal)
+            .body(Bytes::new())
+            .unwrap()
+            .into_parts();
+
+        let (cr, parts, _body) =
+            CanonicalRequest::from_request_parts(parts, body, SignatureOptions::default()).expect("failed to get cr");
+        let signed_headers = vec!["host".to_string(), "x-amz-date".to_string()];
+        let canonical_request_str = build_canonical_request(&cr, &parts, &signed_headers, body_hash_literal);
+
+        // Hash canonical request
+        let canonical_request_hash = {
+            let mut hasher = Sha256::new();
+            hasher.update(canonical_request_str.as_bytes());
+            format!("{:x}", hasher.finalize())
+        };
+
+        // Build string to sign (uses compute_string_to_sign logic: date/region/s3/aws4_request)
+        let credential_scope = format!("{}/{}/s3/aws4_request", TEST_TIMESTAMP.format(ISO8601_DATE_FORMAT), region);
+        let string_to_sign =
+            format!("AWS4-HMAC-SHA256\n{}\n{}\n{}", x_amz_date, credential_scope, canonical_request_hash);
+
+        // Compute signature
+        type HmacSha256 = Hmac<Sha256>;
+        let mut mac = HmacSha256::new_from_slice(signing_key.as_ref()).unwrap();
+        mac.update(string_to_sign.as_bytes());
+        let signature = format!("{:x}", mac.finalize().into_bytes());
+
+        // Authorization header: SignedHeaders needs host;x-amz-date for parity with validator
+        let authorization = format!(
+            "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/{}/{}/service/aws4_request, SignedHeaders=host;x-amz-date, Signature={}",
+            TEST_TIMESTAMP.format(ISO8601_DATE_FORMAT), region, signature
+        );
+
+        // Build request
+        let uri = Uri::builder().path_and_query(PathAndQuery::from_static(path)).build().unwrap();
+        let request = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header(AUTHORIZATION, authorization)
+            .header(HOST, "example.amazonaws.com")
+            .header(X_AMZ_DATE_LOWER, &x_amz_date)
+            .header(X_AMZ_CONTENT_SHA256, body_hash_literal)
+            .body(())
+            .unwrap();
+        let (parts, _) = request.into_parts();
+
+        // Act (now passing Parts directly)
+        let result = super::sigv4_validate_streaming_request(
+            parts,
+            region,
+            service,
+            &mut get_signing_key_svc,
+            *TEST_TIMESTAMP,
+            &NO_ADDITIONAL_SIGNED_HEADERS,
+            SignatureOptions::default(),
+        )
+        .await;
+        assert!(result.is_ok(), "expected streaming request to validate successfully");
+        let (_parts, body, authz) = result.unwrap();
+        assert!(body.is_empty(), "expected empty body");
+        // Sanity check that principal set is non-empty
+        assert!(!authz.principal().is_empty(), "expected a principal in authenticator response");
+    }
+
+    #[test_log::test(tokio::test)]
+    #[cfg(feature = "streaming")]
+    async fn test_sigv4_validate_streaming_request_bad_signature() {
+        use hmac::{Hmac, Mac};
+        use sha2::{Digest, Sha256};
+
+        use crate::auth::ISO8601_COMPACT_FORMAT;
+
+        let mut get_signing_key_svc = service_for_signing_key_fn(get_signing_key);
+        let region = TEST_REGION;
+        let service = TEST_SERVICE;
+
+        // Prepare canonical pieces (same as success test) but we will intentionally corrupt the signature later.
+        let method = Method::GET;
+        let path = "/bad-sig";
+        let x_amz_date = TEST_TIMESTAMP.format(ISO8601_COMPACT_FORMAT).to_string();
+        let body_hash_literal = "UNSIGNED-PAYLOAD";
+        // Build canonical request the same way as validator
+        let (parts, body) = Request::builder()
+            .method(method.clone())
+            .uri(path)
+            .header(HOST, "example.amazonaws.com")
+            .header(X_AMZ_DATE_LOWER, &x_amz_date)
+            .header(X_AMZ_CONTENT_SHA256, body_hash_literal)
+            .body(Bytes::new())
+            .unwrap()
+            .into_parts();
+        let (cr, parts, _body) =
+            CanonicalRequest::from_request_parts(parts, body, SignatureOptions::default()).expect("failed to get cr");
+        let signed_headers = vec!["host".to_string(), "x-amz-date".to_string()];
+        let canonical_request_str = build_canonical_request(&cr, &parts, &signed_headers, body_hash_literal);
+        let canonical_request_hash = {
+            let mut hasher = Sha256::new();
+            hasher.update(canonical_request_str.as_bytes());
+            format!("{:x}", hasher.finalize())
+        };
+        let credential_scope = format!("{}/{}/s3/aws4_request", TEST_TIMESTAMP.format(ISO8601_DATE_FORMAT), region);
+        let string_to_sign =
+            format!("AWS4-HMAC-SHA256\n{}\n{}\n{}", x_amz_date, credential_scope, canonical_request_hash);
+
+        // Compute real signature then corrupt it
+        type HmacSha256 = Hmac<Sha256>;
+        let k_secret = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY").unwrap();
+        let signing_key = k_secret.to_ksigning(TEST_TIMESTAMP.date_naive(), region, service);
+        let mut mac = HmacSha256::new_from_slice(signing_key.as_ref()).unwrap();
+        mac.update(string_to_sign.as_bytes());
+        let mut signature = format!("{:x}", mac.finalize().into_bytes());
+        // Corrupt last hex digit safely (flip between a and b)
+        let last = signature.pop().unwrap();
+        signature.push(if last == 'a' {
+            'b'
+        } else {
+            'a'
+        });
+
+        // Use correct date format (YYYYMMDD) expected by parser
+        let credential_date = TEST_TIMESTAMP.format(ISO8601_DATE_FORMAT);
+        let authorization = format!("AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/{}/{}/service/aws4_request, SignedHeaders=host;x-amz-date, Signature={}", credential_date, region, signature);
+
+        let uri = Uri::builder().path_and_query(PathAndQuery::from_static(path)).build().unwrap();
+        let request = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("authorization", authorization)
+            .header("host", "example.amazonaws.com")
+            .header(X_AMZ_DATE_LOWER, &x_amz_date)
+            .header(X_AMZ_CONTENT_SHA256, body_hash_literal)
+            .body(())
+            .unwrap();
+        let (parts, _) = request.into_parts();
+        let result = super::sigv4_validate_streaming_request(
+            parts,
+            region,
+            service,
+            &mut get_signing_key_svc,
+            *TEST_TIMESTAMP,
+            &NO_ADDITIONAL_SIGNED_HEADERS,
+            SignatureOptions::default(),
+        )
+        .await;
+
+        assert!(result.is_err(), "expected signature mismatch error");
+        let e = result.unwrap_err();
+        let e = e.downcast_ref::<SignatureError>().expect("expected SignatureError");
+        match e {
+            SignatureError::MissingAuthenticationToken(msg) => {
+                assert!(msg.contains("Signature mismatch"), "unexpected message: {}", msg);
+            }
+            other => panic!("unexpected error variant: {:?}", other),
+        }
+    }
+
+    #[test_log::test(tokio::test)]
+    #[cfg(feature = "streaming")]
+    async fn test_sigv4_validate_streaming_request_missing_headers() {
+        let mut get_signing_key_svc = service_for_signing_key_fn(get_signing_key);
+
+        let x_amz_date = TEST_TIMESTAMP.format(ISO8601_COMPACT_FORMAT).to_string();
+
+        // Deliberately omit x-amz-content-sha256 header
+        let authorization = format!("{AWS4_HMAC_SHA256} Credential=AKIDEXAMPLE/{}/{TEST_REGION}/{TEST_SERVICE}/{AWS4_REQUEST}, SignedHeaders=host;{X_AMZ_DATE_LOWER}, Signature=deadbeef", TEST_TIMESTAMP.format(ISO8601_DATE_FORMAT));
+        let uri = Uri::builder().path_and_query(PathAndQuery::from_static("/missing-hdr")).build().unwrap();
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri(uri)
+            .header(AUTHORIZATION, authorization)
+            .header(HOST, "example.amazonaws.com")
+            .header(X_AMZ_DATE_LOWER, &x_amz_date)
+            .body(())
+            .unwrap();
+        let (parts, _) = request.into_parts();
+        let result = super::sigv4_validate_streaming_request(
+            parts,
+            TEST_REGION,
+            TEST_SERVICE,
+            &mut get_signing_key_svc,
+            *TEST_TIMESTAMP,
+            &NO_ADDITIONAL_SIGNED_HEADERS,
+            SignatureOptions::default(),
+        )
+        .await;
+
+        assert!(result.is_err(), "expected missing header error");
+        let e = result.unwrap_err();
+        let e = e.downcast_ref::<SignatureError>().expect("expected SignatureError");
+        match e {
+            SignatureError::MissingAuthenticationToken(msg) => {
+                assert!(msg.contains("Missing x-amz-content-sha256 header"), "unexpected message: {}", msg);
+            }
+            other => panic!("unexpected error variant: {:?}", other),
+        }
     }
 }
