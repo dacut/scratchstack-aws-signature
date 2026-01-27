@@ -91,8 +91,8 @@ struct CanonicalRequest {
     /// The encoding of header values is Latin 1 (ISO 8859-1), apart from a few oddities like Content-Disposition.
     headers: HashMap<String, Vec<Vec<u8>>>,
 
-    /// The SHA-256 hash of the body. `None` indicates an unsigned payload.
-    body_sha256: Option<String>,
+    /// The SHA-256 hash of the body. If the payload is unsigned, this should be the "UNSIGNED-PAYLOAD" string.
+    body_sha256: String,
 }
 
 impl CanonicalRequest {
@@ -174,9 +174,9 @@ impl CanonicalRequest {
             || query_parameters.get(QP_X_AMZ_CONTENT_SHA256).and_then(|values| values.first()).map(String::as_str)
                 == Some(UNSIGNED_PAYLOAD);
         let body_sha256 = if payload_is_unsigned {
-            None
+            UNSIGNED_PAYLOAD.to_string()
         } else {
-            Some(sha256_hex(body.as_ref()))
+            sha256_hex(body.as_ref())
         };
 
         Ok((
@@ -235,8 +235,8 @@ impl CanonicalRequest {
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
     #[inline(always)]
-    fn body_sha256(&self) -> Option<&str> {
-        self.body_sha256.as_deref()
+    fn body_sha256(&self) -> &str {
+        &self.body_sha256
     }
 
     /// Get the canonical query string from the request.
@@ -280,7 +280,7 @@ impl CanonicalRequest {
         result.push(b'\n');
         result.extend(signed_headers.join(";").as_bytes());
         result.push(b'\n');
-        result.extend(self.body_sha256().as_deref().unwrap_or(UNSIGNED_PAYLOAD).as_bytes());
+        result.extend(self.body_sha256().as_bytes());
 
         trace!("Canonical request:\n{}", String::from_utf8_lossy(&result));
 
@@ -1529,7 +1529,7 @@ mod tests {
             cr.headers().get("authorization").unwrap()[0],
             b"AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678"
         );
-        assert_eq!(cr.body_sha256(), Some("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"));
+        assert_eq!(cr.body_sha256(), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
 
         let params = cr.get_auth_parameters(&NO_ADDITIONAL_SIGNED_HEADERS).unwrap();
         // Ensure we can debug print the auth parameters.
