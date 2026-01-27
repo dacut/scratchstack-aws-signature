@@ -79,12 +79,14 @@ pub(crate) const HDR_CONTENT_TYPE: &str = "content-type";
 pub(crate) const HDR_DATE: &str = "date";
 
 /// Header for `x-amz-content-sha256`
+#[allow(dead_code)] // TODO: remove when streaming payloads are supported
 pub(crate) const HDR_X_AMZ_CONTENT_SHA256: &str = "x-amz-content-sha256";
 
 /// Header for delivering the alternate date
 pub(crate) const HDR_X_AMZ_DATE: &str = "x-amz-date";
 
 /// Header for the decoded content length of a streamed S3 payload
+#[allow(dead_code)] // TODO: remove when streaming payloads are supported
 pub(crate) const HDR_X_AMZ_DECODED_CONTENT_LENGTH: &str = "x-amz-decoded-content-length";
 
 /// Header for delivering the session token
