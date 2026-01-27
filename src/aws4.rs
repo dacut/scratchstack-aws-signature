@@ -1,7 +1,7 @@
 use {
     crate::{
-        canonical::CanonicalRequest, service_for_signing_key_fn, sigv4_validate_request, GetSigningKeyRequest,
-        GetSigningKeyResponse, KSecretKey, SignatureOptions, NO_ADDITIONAL_SIGNED_HEADERS,
+        canonical::CanonicalRequest, constants::*, service_for_signing_key_fn, sigv4_validate_request,
+        GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, SignatureOptions, NO_ADDITIONAL_SIGNED_HEADERS,
     },
     bytes::{Bytes, BytesMut},
     chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc},
@@ -23,9 +23,6 @@ use {
     },
     tower::BoxError,
 };
-
-const TEST_REGION: &str = "us-east-1";
-const TEST_SERVICE: &str = "service";
 
 #[test_log::test(tokio::test)]
 async fn get_header_key_duplicate_get_header_key_duplicate() {

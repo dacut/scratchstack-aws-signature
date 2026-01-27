@@ -1,7 +1,7 @@
 use {
     crate::{
-        auth::SigV4AuthenticatorResponse, canonical::CanonicalRequest, GetSigningKeyRequest, GetSigningKeyResponse,
-        SignedHeaderRequirements,
+        auth::SigV4AuthenticatorResponse, canonical::CanonicalRequest, constants::*, GetSigningKeyRequest,
+        GetSigningKeyResponse, SignedHeaderRequirements,
     },
     bytes::Bytes,
     chrono::{DateTime, Duration, Utc},
@@ -46,9 +46,6 @@ impl SignatureOptions {
         url_encode_form: false,
     };
 }
-
-/// Default allowed timestamp mismatch in minutes.
-const ALLOWED_MISMATCH_MINUTES: i64 = 15;
 
 /// Validate an AWS SigV4 request.
 ///
@@ -154,9 +151,9 @@ impl IntoRequestBytes for Bytes {
 mod tests {
     use {
         crate::{
-            auth::SigV4AuthenticatorResponse, service_for_signing_key_fn, sigv4_validate_request, GetSigningKeyRequest,
-            GetSigningKeyResponse, KSecretKey, SignatureError, SignatureOptions, SignedHeaderRequirements,
-            VecSignedHeaderRequirements, NO_ADDITIONAL_SIGNED_HEADERS,
+            auth::SigV4AuthenticatorResponse, constants::*, service_for_signing_key_fn, sigv4_validate_request,
+            GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, SignatureError, SignatureOptions,
+            SignedHeaderRequirements, VecSignedHeaderRequirements, NO_ADDITIONAL_SIGNED_HEADERS,
         },
         bytes::Bytes,
         chrono::{DateTime, NaiveDate, Utc},
@@ -171,9 +168,6 @@ mod tests {
         std::{borrow::Cow, str::FromStr},
         tower::BoxError,
     };
-
-    const TEST_REGION: &str = "us-east-1";
-    const TEST_SERVICE: &str = "service";
 
     lazy_static! {
         static ref TEST_TIMESTAMP: DateTime<Utc> = DateTime::from_naive_utc_and_offset(
