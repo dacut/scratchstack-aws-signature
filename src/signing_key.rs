@@ -1,8 +1,5 @@
 use {
-    crate::{
-        crypto::{hmac_sha256, SHA256_OUTPUT_LEN},
-        KeyLengthError,
-    },
+    crate::{constants::*, crypto::hmac_sha256, KeyLengthError},
     chrono::NaiveDate,
     derive_builder::Builder,
     scratchstack_aws_principal::{Principal, SessionData},
@@ -13,12 +10,6 @@ use {
     },
     tower::{service_fn, util::ServiceFn, BoxError},
 };
-
-/// String included at the end of the AWS SigV4 credential scope
-const AWS4_REQUEST: &str = "aws4_request";
-
-/// The default length of an AWS secret key, including the "AWS4" prefix.
-pub(crate) static KSECRETKEY_LENGTH: usize = 44;
 
 /// A raw AWS secret key (`kSecret`).
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -398,7 +389,7 @@ where
 #[cfg(test)]
 mod tests {
     use {
-        crate::{GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, KSECRETKEY_LENGTH},
+        crate::{constants::*, GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey},
         chrono::NaiveDate,
         scratchstack_aws_principal::{AssumedRole, Principal},
         std::str::FromStr,

@@ -11,7 +11,8 @@ use {
     crate::{
         auth::{SigV4Authenticator, SigV4AuthenticatorBuilder},
         chronoutil::ParseISO8601,
-        crypto::{sha256, sha256_hex, SHA256_OUTPUT_LEN},
+        constants::*,
+        crypto::{sha256, sha256_hex},
         SignatureError, SignatureOptions,
     },
     bytes::Bytes,
@@ -33,118 +34,6 @@ use {
         str::from_utf8,
     },
 };
-
-/// Content-Type string for HTML forms
-const APPLICATION_X_WWW_FORM_URLENCODED: &str = "application/x-www-form-urlencoded";
-
-/// Header parameter for the authorization
-const AUTHORIZATION: &str = "authorization";
-
-/// Algorithm for AWS SigV4
-const AWS4_HMAC_SHA256: &str = "AWS4-HMAC-SHA256";
-
-/// Algorithm for AWS SigV4 (bytes)
-const AWS4_HMAC_SHA256_BYTES: &[u8] = b"AWS4-HMAC-SHA256";
-
-/// Content-Type parameter for specifying the character set
-const CHARSET: &str = "charset";
-
-/// Header field for the content type
-const CONTENT_TYPE: &str = "content-type";
-
-/// Signature field for the access key
-const CREDENTIAL: &[u8] = b"Credential";
-
-/// Header parameter for the date.
-const DATE: &str = "date";
-
-/// Header for content hash
-const X_AMZ_CONTENT_SHA256: &str = "x-amz-content-sha256";
-
-/// Uppercase hex digits.
-const HEX_DIGITS_UPPER: [u8; 16] =
-    [b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7', b'8', b'9', b'A', b'B', b'C', b'D', b'E', b'F'];
-
-/// Error message: `"Authorization header requires 'Credential' parameter."`
-const MSG_AUTH_HEADER_REQ_CREDENTIAL: &str = "Authorization header requires 'Credential' parameter.";
-
-/// Error message: `"Authorization header requires existence of either a 'X-Amz-Date' or a 'Date' header."`
-const MSG_AUTH_HEADER_REQ_DATE: &str =
-    "Authorization header requires existence of either a 'X-Amz-Date' or a 'Date' header.";
-
-/// Error message: `"Authorization header requires 'Signature' parameter."`
-const MSG_AUTH_HEADER_REQ_SIGNATURE: &str = "Authorization header requires 'Signature' parameter.";
-
-/// Error message: `"Authorization header requires 'SignedHeaders' parameter."`
-const MSG_AUTH_HEADER_REQ_SIGNED_HEADERS: &str = "Authorization header requires 'SignedHeaders' parameter.";
-
-/// Error message: `"'Host' or ':authority' must be a 'SignedHeader' in the AWS Authorization."`
-const MSG_HOST_AUTHORITY_MUST_BE_SIGNED: &str =
-    "'Host' or ':authority' must be a 'SignedHeader' in the AWS Authorization.";
-
-/// Error message: `"Illegal hex character in escape % pattern: %"`
-const MSG_ILLEGAL_HEX_CHAR: &str = "Illegal hex character in escape % pattern: %";
-
-/// Error message: `"Incomplete trailing escape % sequence"`
-const MSG_INCOMPLETE_TRAILING_ESCAPE: &str = "Incomplete trailing escape % sequence";
-
-/// Error message: `"AWS query-string parameters must include 'X-Amz-Credential'"`
-const MSG_QUERY_STRING_MUST_INCLUDE_CREDENTIAL: &str = "AWS query-string parameters must include 'X-Amz-Credential'.";
-
-/// Error message: `"AWS query-string parameters must include 'X-Amz-Sigature'"`
-const MSG_QUERY_STRING_MUST_INCLUDE_SIGNATURE: &str = "AWS query-string parameters must include 'X-Amz-Signature'.";
-
-/// Error message: `"AWS query-string parameters must include 'X-Amz-SignedHeaders'"`
-const MSG_QUERY_STRING_MUST_INCLUDE_SIGNED_HEADERS: &str =
-    "AWS query-string parameters must include 'X-Amz-SignedHeaders'.";
-
-/// Error message: `"AWS query-string parameters must include 'X-Amz-Date'"`
-const MSG_QUERY_STRING_MUST_INCLUDE_DATE: &str = "AWS query-string parameters must include 'X-Amz-Date'.";
-
-/// Error message: `"Re-examine the query-string parameters."`
-const MSG_REEXAMINE_QUERY_STRING_PARAMS: &str = "Re-examine the query-string parameters.";
-
-/// Error message: `"Request is missing Authentication Token"`
-const MSG_REQUEST_MISSING_AUTH_TOKEN: &str = "Request is missing Authentication Token";
-
-/// Error message: `"Unsupported AWS 'algorithm': "`
-const MSG_UNSUPPORTED_ALGORITHM: &str = "Unsupported AWS 'algorithm': ";
-
-/// Signature field for the signature itself
-const SIGNATURE: &[u8] = b"Signature";
-
-/// Authorization header parameter specifying the signed headers
-const SIGNED_HEADERS: &[u8] = b"SignedHeaders";
-
-/// Query parameter for the signature algorithm
-const X_AMZ_ALGORITHM: &str = "X-Amz-Algorithm";
-
-/// Query parameter for delivering the access key
-const X_AMZ_CREDENTIAL: &str = "X-Amz-Credential";
-
-/// Query parameter for delivering the validity period
-const X_AMZ_EXPIRES: &str = "X-Amz-Expires";
-
-/// Query parameter for delivering the date
-const X_AMZ_DATE: &str = "X-Amz-Date";
-
-/// Header for delivering the alternate date
-const X_AMZ_DATE_LOWER: &str = "x-amz-date";
-
-/// Query parameter for delivering the session token
-const X_AMZ_SECURITY_TOKEN: &str = "X-Amz-Security-Token";
-
-/// Header for delivering the session token
-const X_AMZ_SECURITY_TOKEN_LOWER: &str = "x-amz-security-token";
-
-/// Query parameter for delivering the signature
-const X_AMZ_SIGNATURE: &str = "X-Amz-Signature";
-
-/// Query parameter specifying the signed headers
-const X_AMZ_SIGNED_HEADERS: &str = "X-Amz-SignedHeaders";
-
-/// Token used for X-Amz-Content-Sha256 when payload is unsigned
-const UNSIGNED_PAYLOAD: &str = "UNSIGNED-PAYLOAD";
 
 lazy_static! {
     /// Multiple slash pattern for condensing URIs
@@ -271,12 +160,18 @@ impl CanonicalRequest {
         }
 
         let headers = normalize_headers(&parts.headers);
-        let is_presigned_url =
-            [X_AMZ_ALGORITHM, X_AMZ_CREDENTIAL, X_AMZ_DATE, X_AMZ_EXPIRES, X_AMZ_SIGNED_HEADERS, X_AMZ_SIGNATURE]
-                .into_iter()
-                .all(|p| query_parameters.contains_key(p));
+        let is_presigned_url = [
+            QP_X_AMZ_ALGORITHM,
+            QP_X_AMZ_CREDENTIAL,
+            QP_X_AMZ_DATE,
+            QP_X_AMZ_EXPIRES,
+            QP_X_AMZ_SIGNED_HEADERS,
+            QP_X_AMZ_SIGNATURE,
+        ]
+        .into_iter()
+        .all(|p| query_parameters.contains_key(p));
         let payload_is_unsigned = is_presigned_url
-            || query_parameters.get(X_AMZ_CONTENT_SHA256).and_then(|values| values.first()).map(String::as_str)
+            || query_parameters.get(QP_X_AMZ_CONTENT_SHA256).and_then(|values| values.first()).map(String::as_str)
                 == Some(UNSIGNED_PAYLOAD);
         let body_sha256 = if payload_is_unsigned {
             None
@@ -457,8 +352,8 @@ impl CanonicalRequest {
     where
         S: SignedHeaderRequirements,
     {
-        let auth_header = self.headers().get(AUTHORIZATION);
-        let sig_algs = self.query_parameters().get(X_AMZ_ALGORITHM);
+        let auth_header = self.headers().get(HDR_AUTHORIZATION);
+        let sig_algs = self.query_parameters().get(QP_X_AMZ_ALGORITHM);
 
         // Rule 5: Either the Authorization header or X-Amz-Algorithm query parameter must be present, not both.
         let params = match (auth_header, sig_algs) {
@@ -596,10 +491,10 @@ impl CanonicalRequest {
 
         let mut timestamp_str = None;
 
-        if let Some(date) = self.headers.get(X_AMZ_DATE_LOWER) {
+        if let Some(date) = self.headers.get(HDR_X_AMZ_DATE) {
             // Rule 6e: Use the first X-Amz-Date header (per rule 6a).
             timestamp_str = Some(latin1_to_string(&date[0]));
-        } else if let Some(date) = self.headers.get(DATE) {
+        } else if let Some(date) = self.headers.get(HDR_DATE) {
             // Rule 6e: Use the first Date header (per rule 6a).
             timestamp_str = Some(latin1_to_string(&date[0]));
         } else {
@@ -615,7 +510,7 @@ impl CanonicalRequest {
         }
 
         // Get the session token if present.
-        if let Some(token) = self.headers.get(X_AMZ_SECURITY_TOKEN_LOWER) {
+        if let Some(token) = self.headers.get(HDR_X_AMZ_SECURITY_TOKEN) {
             builder.session_token(latin1_to_string(&token[0]));
         }
 
@@ -643,19 +538,19 @@ impl CanonicalRequest {
         let mut builder = SigV4Authenticator::builder();
 
         // Rule 7c: Use the first value for each key.
-        if let Some(credential) = self.query_parameters.get(X_AMZ_CREDENTIAL) {
+        if let Some(credential) = self.query_parameters.get(QP_X_AMZ_CREDENTIAL) {
             builder.credential(unescape_uri_encoding(&credential[0]));
         } else {
             missing_messages.push(MSG_QUERY_STRING_MUST_INCLUDE_CREDENTIAL);
         }
 
-        if let Some(signature) = self.query_parameters.get(X_AMZ_SIGNATURE) {
+        if let Some(signature) = self.query_parameters.get(QP_X_AMZ_SIGNATURE) {
             builder.signature(signature[0].clone());
         } else {
             missing_messages.push(MSG_QUERY_STRING_MUST_INCLUDE_SIGNATURE);
         }
 
-        let mut signed_headers = if let Some(signed_headers) = self.query_parameters.get(X_AMZ_SIGNED_HEADERS) {
+        let mut signed_headers = if let Some(signed_headers) = self.query_parameters.get(QP_X_AMZ_SIGNED_HEADERS) {
             let unescaped_signed_headers = unescape_uri_encoding(&signed_headers[0]);
             unescaped_signed_headers.split(';').map(|s| s.to_string()).collect::<Vec<String>>()
         } else {
@@ -664,7 +559,7 @@ impl CanonicalRequest {
         };
         signed_headers.sort();
 
-        let timestamp_str = self.query_parameters.get(X_AMZ_DATE);
+        let timestamp_str = self.query_parameters.get(QP_X_AMZ_DATE);
         if timestamp_str.is_none() {
             missing_messages.push(MSG_QUERY_STRING_MUST_INCLUDE_DATE);
         }
@@ -678,7 +573,7 @@ impl CanonicalRequest {
         }
 
         // Get the session token if present.
-        if let Some(token) = self.query_parameters.get(X_AMZ_SECURITY_TOKEN) {
+        if let Some(token) = self.query_parameters.get(QP_X_AMZ_SECURITY_TOKEN) {
             builder.session_token(unescape_uri_encoding(&token[0]));
         }
 
@@ -918,7 +813,7 @@ pub fn canonicalize_query_to_string(query_parameters: &HashMap<String, Vec<Strin
 
     for (key, values) in query_parameters.iter() {
         // Don't include the signature itself.
-        if key != X_AMZ_SIGNATURE {
+        if key != QP_X_AMZ_SIGNATURE {
             for value in values.iter() {
                 results.push(format!("{}={}", key, value));
             }
@@ -1023,7 +918,7 @@ fn debug_headers(headers: &HashMap<String, Vec<Vec<u8>>>) -> String {
 #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
 #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
 fn get_content_type_and_charset(headers: &HeaderMap<HeaderValue>) -> Option<ContentTypeCharset> {
-    let content_type_opts = match headers.get(CONTENT_TYPE) {
+    let content_type_opts = match headers.get(HDR_CONTENT_TYPE) {
         Some(value) => value.as_ref(),
         None => return None,
     };
@@ -1634,7 +1529,7 @@ mod tests {
             cr.headers().get("authorization").unwrap()[0],
             b"AWS4-HMAC-SHA256 Credential=1234, SignedHeaders=date;host, Signature=5678"
         );
-        assert_eq!(cr.body_sha256(), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        assert_eq!(cr.body_sha256(), Some("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"));
 
         let params = cr.get_auth_parameters(&NO_ADDITIONAL_SIGNED_HEADERS).unwrap();
         // Ensure we can debug print the auth parameters.

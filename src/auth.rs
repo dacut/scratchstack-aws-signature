@@ -9,10 +9,7 @@
 //! testing purposes only.
 
 use {
-    crate::{
-        crypto::{hmac_sha256, SHA256_OUTPUT_LEN},
-        GetSigningKeyRequest, GetSigningKeyResponse, SignatureError,
-    },
+    crate::{constants::*, crypto::hmac_sha256, GetSigningKeyRequest, GetSigningKeyResponse, SignatureError},
     chrono::{DateTime, Duration, Utc},
     derive_builder::Builder,
     log::{debug, trace},
@@ -25,31 +22,6 @@ use {
     subtle::ConstantTimeEq,
     tower::{BoxError, Service, ServiceExt},
 };
-
-/// Algorithm for AWS SigV4
-const AWS4_HMAC_SHA256: &str = "AWS4-HMAC-SHA256";
-
-/// String included at the end of the AWS SigV4 credential scope
-const AWS4_REQUEST: &str = "aws4_request";
-
-/// Compact ISO8601 format used for the string to sign.
-const ISO8601_COMPACT_FORMAT: &str = "%Y%m%dT%H%M%SZ";
-
-/// Length of an ISO8601 date string in the UTC time zone.
-const ISO8601_UTC_LENGTH: usize = 16;
-
-/// Error message: `"Credential must have exactly 5 slash-delimited elements, e.g. keyid/date/region/service/term,"`
-const MSG_CREDENTIAL_MUST_HAVE_FIVE_PARTS: &str =
-    "Credential must have exactly 5 slash-delimited elements, e.g. keyid/date/region/service/term,";
-
-/// Error message: `"The request signature we calculated does not match the signature you provided. Check your AWS Secret Access Key and signing method. Consult the service documentation for details."`
-const MSG_REQUEST_SIGNATURE_MISMATCH: &str = "The request signature we calculated does not match the signature you provided. Check your AWS Secret Access Key and signing method. Consult the service documentation for details.";
-
-/// SHA-256 of an empty string.
-const SHA256_EMPTY: &str = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-
-/// Length of a SHA-256 hex string.
-const SHA256_HEX_LENGTH: usize = SHA256_EMPTY.len();
 
 /// Low-level structure for performing AWS SigV4 authentication after a canonical request has been generated.
 #[derive(Builder, Clone, Default)]
@@ -216,7 +188,7 @@ impl SigV4Authenticator {
             ));
         }
 
-        let expected_cscope_date = req_ts.format("%Y%m%d").to_string();
+        let expected_cscope_date = req_ts.format(ISO8601_DATE_FORMAT).to_string();
         if cscope_date != expected_cscope_date {
             trace!(
                 "prevalidate: credential date '{}' does not match expected date '{}'",
@@ -419,7 +391,7 @@ mod tests {
         super::duration_to_string,
         crate::{
             auth::{SigV4Authenticator, SigV4AuthenticatorBuilder, SigV4AuthenticatorResponse},
-            crypto::SHA256_OUTPUT_LEN,
+            constants::*,
             service_for_signing_key_fn, GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, SignatureError,
         },
         chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, Utc},

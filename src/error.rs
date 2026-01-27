@@ -1,4 +1,5 @@
 use {
+    crate::constants::*,
     http::status::StatusCode,
     scratchstack_errors::ServiceError,
     std::{
@@ -7,39 +8,6 @@ use {
         io::Error as IOError,
     },
 };
-
-/// Error code: ExpiredToken
-const ERR_CODE_EXPIRED_TOKEN: &str = "ExpiredToken";
-
-/// Error code: InternalFailure
-const ERR_CODE_INTERNAL_FAILURE: &str = "InternalFailure";
-
-/// Error code: InvalidContentType (non-AWS standard)
-const ERR_CODE_INVALID_CONTENT_TYPE: &str = "InvalidContentType";
-
-/// Error code: InvalidBodyEncoding
-const ERR_CODE_INVALID_BODY_ENCODING: &str = "InvalidBodyEncoding";
-
-/// Error code: InvalidClientTokenId
-const ERR_CODE_INVALID_CLIENT_TOKEN_ID: &str = "InvalidClientTokenId";
-
-/// Error code: IncompleteSignature
-const ERR_CODE_INCOMPLETE_SIGNATURE: &str = "IncompleteSignature";
-
-/// Error code: InvalidRequestMethod (non-AWS standard)
-const ERR_CODE_INVALID_REQUEST_METHOD: &str = "InvalidRequestMethod";
-
-/// Error code: InvalidURIPath
-const ERR_CODE_INVALID_URI_PATH: &str = "InvalidURIPath";
-
-/// Error code: MalformedQueryString
-const ERR_CODE_MALFORMED_QUERY_STRING: &str = "MalformedQueryString";
-
-/// Error code: MissingAuthenticationToken
-const ERR_CODE_MISSING_AUTHENTICATION_TOKEN: &str = "MissingAuthenticationToken";
-
-/// Error code: SignatureDoesNotMatch
-const ERR_CODE_SIGNATURE_DOES_NOT_MATCH: &str = "SignatureDoesNotMatch";
 
 /// Error returned when an attempt at validating an AWS SigV4 signature fails.
 #[derive(Debug)]
@@ -198,8 +166,8 @@ pub enum KeyLengthError {
 impl Display for KeyLengthError {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
-            KeyLengthError::TooLong => f.write_str("Key too long"),
-            KeyLengthError::TooShort => f.write_str("Key too short"),
+            KeyLengthError::TooLong => f.write_str(ERR_MSG_KEY_TOO_LONG),
+            KeyLengthError::TooShort => f.write_str(ERR_MSG_KEY_TOO_SHORT),
         }
     }
 }
