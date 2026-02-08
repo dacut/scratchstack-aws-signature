@@ -12,13 +12,26 @@ use {
 };
 
 /// Options that can be used to configure the signature service.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct SignatureOptions {
     /// Canonicalize requests according to S3 rules.
     pub s3: bool,
 
     /// Fold `application/x-www-form-urlencoded` bodies into the query string.
     pub url_encode_form: bool,
+
+    /// The allowed mismatch between the request timestamp and the server timestamp.
+    pub allowed_mismatch: Duration,
+}
+
+impl Default for SignatureOptions {
+    fn default() -> Self {
+        Self {
+            s3: false,
+            url_encode_form: false,
+            allowed_mismatch: Duration::minutes(ALLOWED_MISMATCH_MINUTES),
+        }
+    }
 }
 
 impl SignatureOptions {
@@ -34,6 +47,7 @@ impl SignatureOptions {
         Self {
             s3: false,
             url_encode_form: true,
+            allowed_mismatch: Duration::minutes(ALLOWED_MISMATCH_MINUTES),
         }
     }
 
@@ -44,12 +58,13 @@ impl SignatureOptions {
     pub const S3: Self = Self {
         s3: true,
         url_encode_form: false,
+        allowed_mismatch: Duration::minutes(ALLOWED_MISMATCH_MINUTES),
     };
 }
 
 /// Validate an AWS SigV4 request.
 ///
-/// This takes in an HTTP [`Request`] along with other service-specific paramters. If the
+/// This takes in an HTTP [`Request`] along with other service-specific parameters. If the
 /// validation is successful (i.e. the request is properly signed with a known access key), this
 /// returns:
 /// * The request headers (as HTTP [`Parts`]).
@@ -93,20 +108,83 @@ where
     let (parts, body) = request.into_parts();
     let body = body.into_request_bytes().await?;
     let (canonical_request, parts, body) = CanonicalRequest::from_request_parts(parts, body, options)?;
-    trace!("Created canonical request: {:?}", canonical_request);
+    trace!("Created canonical request: {canonical_request:?}");
     let auth = canonical_request.get_authenticator(required_headers)?;
-    trace!("Created authenticator: {:?}", auth);
-    let sigv4_response = auth
-        .validate_signature(
-            region,
-            service,
-            server_timestamp,
-            Duration::minutes(ALLOWED_MISMATCH_MINUTES),
-            get_signing_key,
-        )
-        .await?;
+    trace!("Created authenticator: {auth:?}");
+    let sigv4_response =
+        auth.validate_signature(region, service, server_timestamp, options.allowed_mismatch, get_signing_key).await?;
 
     Ok((parts, body, sigv4_response))
+}
+
+/// Validate AWS SigV4 S3-style request headers with a body hash. This is used when the request
+/// body has not been sent yet (e.g. to respond to a request with an `Expect: 100-Continue` header).
+///
+/// This takes in a reference to an HTTP [`Request`] and a body hash along with other
+/// authentication service-specific parameters. If the validation is successful (i.e. the request
+/// is properly signed with a known access key), this returns:
+/// * The [response from the authenticator][SigV4AuthenticatorResponse], which contains the
+///   principal and other session data.
+/// * The [signing key][crate::KSigningKey] used to sign the request. This may be needed for later
+///   signature validation of `aws-chunked` body chunks.
+///
+/// # Parameters
+/// * `request` - The HTTP [`Request`] to validate.
+/// * `body_hash` - The hash of the request body. For S3 PutObject requests, this is the
+///   `x-amz-content-sha256` header value, which may have special non-SHA-256 values like
+///   `UNSIGNED-PAYLOAD`.
+/// * `region` - The AWS region in which the request is being made.
+/// * `service` - The AWS service to which the request is being made.
+/// * `get_signing_key` - A service that can provide the signing key for the request.
+/// * `server_timestamp` - The timestamp of the server when the request was received. Usually this
+///   is the current time, `Utc::now()`.
+/// * `required_headers` - The headers that are required to be signed in the request in addition to
+///   the default SigV4 headers. If none, use
+///   [`NO_ADDITIONAL_SIGNED_HEADERS`][crate::NO_ADDITIONAL_SIGNED_HEADERS].
+/// * `options` - [`SignatureOptions`]` that affect the behavior of the signature validation. For
+///   most services, use `SignatureOptions::default()`.
+///
+/// # Errors
+/// This function returns a [`SignatureError`][crate::SignatureError] if the HTTP request is
+/// malformed or the request was not properly signed. The validation follows the
+/// [AWS Auth Error Ordering](https://github.com/dacut/scratchstack-aws-signature/blob/main/docs/AWS%20Auth%20Error%20Ordering.pdf)
+/// document.
+#[allow(clippy::too_many_arguments)]
+pub async fn sigv4_validate_streaming_headers<B, G, F, S>(
+    request: &Request<B>,
+    body_hash: &str,
+    region: &str,
+    service: &str,
+    get_signing_key: &mut G,
+    server_timestamp: DateTime<Utc>,
+    required_headers: &S,
+    options: SignatureOptions,
+) -> Result<GetSigningKeyResponse, BoxError>
+where
+    G: Service<GetSigningKeyRequest, Response = GetSigningKeyResponse, Error = BoxError, Future = F> + Send,
+    F: Future<Output = Result<GetSigningKeyResponse, BoxError>> + Send,
+    S: SignedHeaderRequirements,
+{
+    let canonical_request = CanonicalRequest::from_request_and_body_hash(request, body_hash, options)?;
+    trace!("Created canonical request: {canonical_request:?}");
+    let auth = canonical_request.get_authenticator(required_headers)?;
+    trace!("Created authenticator: {auth:?}");
+
+    // Obtain the signing key for the request.
+    let gsk_response = auth.get_signing_key(region, service, get_signing_key).await?;
+
+    // This will validate the signature; on success, this returns nothing.
+    auth.validate_signature_with_key(
+        region,
+        service,
+        server_timestamp,
+        options.allowed_mismatch,
+        gsk_response.signing_key(),
+    )?;
+
+    // The response from the get_signing_key call contains the principal and session
+    // information, along with the key needed to validate parts of the body.
+    Ok(gsk_response)
 }
 
 #[cfg(test)]
@@ -114,11 +192,11 @@ mod tests {
     use {
         crate::{
             auth::SigV4AuthenticatorResponse, constants::*, service_for_signing_key_fn, sigv4_validate_request,
-            GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, SignatureError, SignatureOptions,
-            SignedHeaderRequirements, VecSignedHeaderRequirements, NO_ADDITIONAL_SIGNED_HEADERS,
+            sigv4_validate_streaming_headers, GetSigningKeyRequest, GetSigningKeyResponse, KSecretKey, SignatureError,
+            SignatureOptions, SignedHeaderRequirements, VecSignedHeaderRequirements, NO_ADDITIONAL_SIGNED_HEADERS,
         },
         bytes::Bytes,
-        chrono::{DateTime, NaiveDate, Utc},
+        chrono::{DateTime, Duration, NaiveDate, Utc},
         http::{
             method::Method,
             request::{Parts, Request},
@@ -127,7 +205,7 @@ mod tests {
         lazy_static::lazy_static,
         scratchstack_aws_principal::{Principal, User},
         scratchstack_errors::ServiceError,
-        std::{borrow::Cow, str::FromStr},
+        std::{borrow::Cow, future::Future, str::FromStr},
         tower::BoxError,
     };
 
@@ -167,6 +245,24 @@ mod tests {
     Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, \
     SignedHeaders=host;x-amz-date, \
     Signature=c9d5ea9f3f72853aea855b47ea873832890dbdd183b4468f858259531a5138ea";
+
+    fn make_get_signing_key_fn(
+        secret_key: &str,
+    ) -> impl Fn(
+        GetSigningKeyRequest,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<GetSigningKeyResponse, BoxError>> + Send>> {
+        let secret_key = secret_key.to_string();
+        move |req: GetSigningKeyRequest| {
+            let secret_key = secret_key.clone();
+            Box::pin(async move {
+                let k_secret = KSecretKey::from_str(secret_key.as_str()).unwrap();
+                let k_signing = k_secret.to_ksigning(req.request_date(), req.region(), req.service());
+
+                let principal = Principal::from(vec![User::new("aws", "123456789012", "/", "test").unwrap().into()]);
+                Ok(GetSigningKeyResponse::builder().principal(principal).signing_key(k_signing).build().unwrap())
+            })
+        }
+    }
 
     async fn get_signing_key(req: GetSigningKeyRequest) -> Result<GetSigningKeyResponse, BoxError> {
         let k_secret = KSecretKey::from_str("wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY").unwrap();
@@ -665,7 +761,7 @@ mod tests {
         assert!(opt1.s3);
         assert!(!opt1.url_encode_form);
 
-        assert_eq!(format!("{:?}", opt1), "SignatureOptions { s3: true, url_encode_form: false }");
+        assert_eq!(format!("{:?}", opt1), "SignatureOptions { s3: true, url_encode_form: false, allowed_mismatch: TimeDelta { secs: 900, nanos: 0 } }");
     }
 
     #[test_log::test(tokio::test)]
@@ -697,7 +793,7 @@ mod tests {
         // S3 request.
         let req = Request::builder()
             .method(Method::GET)
-            .uri("/a/path/../to//something") // Becomes /a/to/something.
+            .uri("/a/path/../to//something") // Remains as /a/path/../to//something
             .header("Host", "example.amazonaws.com")
             .header("X-Amz-Date", "20150830T123600Z")
             .header("Authorization", "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20150830/us-east-1/service/aws4_request, Signature=b475de2c96e7bfdfe03bd784d948218730ef62f48ac8bb9f2922af9a44f8657c, SignedHeaders=host;x-amz-date")
@@ -715,5 +811,59 @@ mod tests {
         )
         .await
         .is_ok());
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn test_validate_streaming_headers() {
+        // Taken from https://docs.aws.amazon.com/AmazonS3/latest/API/sigv4-streaming.html
+        let req = Request::builder()
+            .method(Method::PUT)
+            .uri("https://s3.amazonaws.com/examplebucket/chunkObject.txt")
+            .header("Host", "s3.amazonaws.com")
+            .header("x-amz-date", "20130524T000000Z")
+            .header("x-amz-storage-class", "REDUCED_REDUNDANCY")
+            .header("x-amz-content-sha256", "STREAMING-AWS4-HMAC-SHA256-PAYLOAD")
+            .header("Content-Encoding", "aws-chunked")
+            .header("x-amz-decoded-content-length", "66560")
+            .header("Content-Length", "66824")
+            .header("Authorization", "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20130524/us-east-1/s3/aws4_request,SignedHeaders=content-encoding;content-length;host;x-amz-content-sha256;x-amz-date;x-amz-decoded-content-length;x-amz-storage-class,Signature=4f232c4386841ef735655705268965c44a0e4690baa4adea153f7db9fa80a0a9")
+            .body(Bytes::new())
+            .unwrap();
+
+        let timestamp = DateTime::from_naive_utc_and_offset(
+            NaiveDate::from_ymd_opt(2013, 5, 24)
+                .expect("Failed to convert 2013-05-24 to a NaiveDate")
+                .and_hms_opt(0, 0, 0)
+                .expect("Failed to convert 2013-05-24T00:00:00 to a NaiveDateTime"),
+            Utc,
+        );
+
+        let mut signature_options = SignatureOptions::S3;
+        signature_options.allowed_mismatch = Duration::MAX;
+
+        // This S3 example secret key is subtly different than the standard example signing key;
+        // The + is replaced with a second /.
+        let mut get_signing_key_svc =
+            service_for_signing_key_fn(make_get_signing_key_fn("wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"));
+        let mut required_headers = VecSignedHeaderRequirements::default();
+        required_headers.add_always_present("content-encoding");
+        required_headers.add_always_present("content-length");
+        required_headers.add_always_present("host");
+        required_headers.add_always_present("x-amz-content-sha256");
+        required_headers.add_always_present("x-amz-date");
+        required_headers.add_always_present("x-amz-decoded-content-length");
+        required_headers.add_always_present("x-amz-storage-class");
+        sigv4_validate_streaming_headers(
+            &req,
+            "STREAMING-AWS4-HMAC-SHA256-PAYLOAD",
+            "us-east-1",
+            "s3",
+            &mut get_signing_key_svc,
+            timestamp,
+            &required_headers,
+            signature_options,
+        )
+        .await
+        .expect("Failed to validate streaming headers");
     }
 }

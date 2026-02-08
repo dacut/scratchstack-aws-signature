@@ -248,7 +248,7 @@ impl KServiceKey {
 
 /// A request for a signing key of a given kind for the specified request.
 ///
-/// GetSigningKeyRequest structs are immutable. Use [GetSigningKeyRequestBuilder] to programmatically construct a
+/// GetSigningKeyRequest structs are immutable. Use [`GetSigningKeyRequestBuilder`] to programmatically construct a
 /// request.
 #[derive(Builder, Clone, Debug)]
 #[non_exhaustive]

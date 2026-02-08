@@ -1,5 +1,4 @@
 //! HTTP request body handling utilities.
-
 use {bytes::Bytes, std::future::Future, tower::BoxError};
 
 /// A trait for converting various body types into a [`Bytes`] object.

@@ -13,6 +13,9 @@ use {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum SignatureError {
+    /// The request contains a query parameter that duplicates a header value.
+    DuplicateHeaderAndQueryParameter(/* message */ String),
+
     /// The security token included with the request is expired.
     ExpiredToken(/* message */ String),
 
@@ -45,8 +48,13 @@ pub enum SignatureError {
     /// URI path (`foo/bar`), or a URI path that attempts to navigate above the root (`/x/../../../y`).
     InvalidURIPath(/* message */ String),
 
-    /// A query parameter was malformed -- the value could not be decoded as UTF-8, or the parameter was empty and
-    /// this is not allowed (e.g. a signature parameter), or the parameter could not be parsed (e.g., the `X-Amz-Date`
+    /// A header was malformed -- the value could not be decoded as ASCII; the header was empty and this is not
+    /// allowed (e.g. an `authorization` header); or the header could not be parsed (e.g., the `x-amz-date` header
+    /// is not a valid date).
+    MalformedHeader(/* message */ String),
+
+    /// A query parameter was malformed -- the value could not be decoded as UTF-8; the parameter was empty and
+    /// this is not allowed (e.g. a signature parameter); or the parameter could not be parsed (e.g., the `X-Amz-Date`
     /// parameter is not a valid date).
     ///
     /// `Incomplete trailing escape % sequence`
@@ -55,6 +63,9 @@ pub enum SignatureError {
     /// The request must contain either a valid (registered) AWS access key ID or X.509 certificate. Sample messages:  
     /// `Request is missing Authentication Token`  
     MissingAuthenticationToken(/* message */ String),
+
+    /// The request is missing a required header.
+    MissingRequiredHeader(/* message */ String),
 
     /// Signature did not match the calculated signature value.
     /// Example messages:  
@@ -67,6 +78,7 @@ pub enum SignatureError {
 impl SignatureError {
     fn error_code(&self) -> &'static str {
         match self {
+            Self::DuplicateHeaderAndQueryParameter(_) => ERR_CODE_DUPLICATE_HEADER_AND_QUERY_PARAMETER,
             Self::ExpiredToken(_) => ERR_CODE_EXPIRED_TOKEN,
             Self::IO(_) | Self::InternalServiceError(_) => ERR_CODE_INTERNAL_FAILURE,
             Self::InvalidBodyEncoding(_) => ERR_CODE_INVALID_BODY_ENCODING,
@@ -75,20 +87,25 @@ impl SignatureError {
             Self::InvalidRequestMethod(_) => ERR_CODE_INVALID_REQUEST_METHOD,
             Self::IncompleteSignature(_) => ERR_CODE_INCOMPLETE_SIGNATURE,
             Self::InvalidURIPath(_) => ERR_CODE_INVALID_URI_PATH,
+            Self::MalformedHeader(_) => ERR_CODE_MALFORMED_HEADER,
             Self::MalformedQueryString(_) => ERR_CODE_MALFORMED_QUERY_STRING,
             Self::MissingAuthenticationToken(_) => ERR_CODE_MISSING_AUTHENTICATION_TOKEN,
+            Self::MissingRequiredHeader(_) => ERR_CODE_MISSING_REQUIRED_HEADER,
             Self::SignatureDoesNotMatch(_) => ERR_CODE_SIGNATURE_DOES_NOT_MATCH,
         }
     }
 
     fn http_status(&self) -> StatusCode {
         match self {
-            Self::IncompleteSignature(_)
+            Self::DuplicateHeaderAndQueryParameter(_)
+            | Self::IncompleteSignature(_)
             | Self::InvalidBodyEncoding(_)
             | Self::InvalidRequestMethod(_)
             | Self::InvalidURIPath(_)
+            | Self::MalformedHeader(_)
             | Self::MalformedQueryString(_)
-            | Self::MissingAuthenticationToken(_) => StatusCode::BAD_REQUEST,
+            | Self::MissingAuthenticationToken(_)
+            | Self::MissingRequiredHeader(_) => StatusCode::BAD_REQUEST,
             Self::IO(_) | Self::InternalServiceError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             _ => StatusCode::FORBIDDEN,
         }
@@ -108,6 +125,7 @@ impl ServiceError for SignatureError {
 impl Display for SignatureError {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         match self {
+            Self::DuplicateHeaderAndQueryParameter(msg) => f.write_str(msg),
             Self::ExpiredToken(msg) => f.write_str(msg),
             Self::IO(ref e) => Display::fmt(e, f),
             Self::InternalServiceError(ref e) => Display::fmt(e, f),
@@ -117,8 +135,10 @@ impl Display for SignatureError {
             Self::InvalidRequestMethod(msg) => f.write_str(msg),
             Self::IncompleteSignature(msg) => f.write_str(msg),
             Self::InvalidURIPath(msg) => f.write_str(msg),
+            Self::MalformedHeader(msg) => f.write_str(msg),
             Self::MalformedQueryString(msg) => f.write_str(msg),
             Self::MissingAuthenticationToken(msg) => f.write_str(msg),
+            Self::MissingRequiredHeader(msg) => f.write_str(msg),
             Self::SignatureDoesNotMatch(msg) => {
                 if let Some(msg) = msg {
                     f.write_str(msg)

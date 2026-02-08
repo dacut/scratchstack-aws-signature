@@ -9,7 +9,9 @@
 //! testing purposes only.
 
 use {
-    crate::{constants::*, crypto::hmac_sha256, GetSigningKeyRequest, GetSigningKeyResponse, SignatureError},
+    crate::{
+        constants::*, crypto::hmac_sha256, GetSigningKeyRequest, GetSigningKeyResponse, KSigningKey, SignatureError,
+    },
     chrono::{DateTime, Duration, Utc},
     derive_builder::Builder,
     log::{debug, trace},
@@ -299,6 +301,33 @@ impl SigV4Authenticator {
             Err(SignatureError::SignatureDoesNotMatch(Some(MSG_REQUEST_SIGNATURE_MISMATCH.to_string())))
         } else {
             Ok(response.into())
+        }
+    }
+
+    /// Validate the request signature against the given signing key response.
+    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+    #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+    #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
+    pub fn validate_signature_with_key(
+        &self,
+        region: &str,
+        service: &str,
+        server_timestamp: DateTime<Utc>,
+        allowed_mismatch: Duration,
+        signing_key: &KSigningKey,
+    ) -> Result<(), SignatureError> {
+        self.prevalidate(region, service, server_timestamp, allowed_mismatch)?;
+        let string_to_sign = self.get_string_to_sign();
+        trace!("String to sign:\n{}", String::from_utf8_lossy(string_to_sign.as_ref()));
+        let expected_signature = hex::encode(hmac_sha256(signing_key.as_ref(), string_to_sign.as_ref()));
+        let expected_signature_bytes = expected_signature.as_bytes();
+        let signature_bytes = self.signature().as_bytes();
+        let is_equal: bool = signature_bytes.ct_eq(expected_signature_bytes).into();
+        if !is_equal {
+            trace!("Signature mismatch: expected '{}', got '{}'", expected_signature, self.signature());
+            Err(SignatureError::SignatureDoesNotMatch(Some(MSG_REQUEST_SIGNATURE_MISMATCH.to_string())))
+        } else {
+            Ok(())
         }
     }
 }
