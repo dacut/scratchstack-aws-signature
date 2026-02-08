@@ -20,7 +20,7 @@ use {
     encoding::{all::UTF_8, label::encoding_from_whatwg_label, types::DecoderTrap},
     http::{
         header::{HeaderMap, HeaderValue},
-        request::Parts,
+        request::{Parts, Request},
         uri::Uri,
     },
     lazy_static::lazy_static,
@@ -96,7 +96,10 @@ struct CanonicalRequest {
 }
 
 impl CanonicalRequest {
-    /// Create a CanonicalRequest from an HTTP request [Parts] and a body of [Bytes].
+    /// Create a CanonicalRequest from an HTTP request [`Parts`] and a body of [`Bytes`].
+    ///
+    /// This function consumes the `parts` and `body` arguments, canonicalizes them, and returns
+    /// the canonicalized versions.
     #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
     #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
     #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
@@ -172,9 +175,9 @@ impl CanonicalRequest {
         .all(|p| query_parameters.contains_key(p));
         let payload_is_unsigned = is_presigned_url
             || query_parameters.get(QP_X_AMZ_CONTENT_SHA256).and_then(|values| values.first()).map(String::as_str)
-                == Some(UNSIGNED_PAYLOAD);
+                == Some(XACS_UNSIGNED_PAYLOAD);
         let body_sha256 = if payload_is_unsigned {
-            UNSIGNED_PAYLOAD.to_string()
+            XACS_UNSIGNED_PAYLOAD.to_string()
         } else {
             sha256_hex(body.as_ref())
         };
@@ -190,6 +193,41 @@ impl CanonicalRequest {
             parts,
             body,
         ))
+    }
+
+    /// Create a CanonicalRequest from an HTTP request and a SHA-256 body hash specified as a
+    /// hexadecimal string (or an S3 variant such as `UNSIGNED-PAYLOAD`).
+    ///
+    /// This version does not allow `options.url_encode_form` to be set since the body is not
+    /// processed. If this is set, a [`SignatureError::InternalServiceError`] will be returned.
+    #[cfg_attr(doc, doc(cfg(feature = "unstable")))]
+    #[cfg_attr(any(doc, feature = "unstable"), qualifiers(pub))]
+    #[cfg_attr(not(any(doc, feature = "unstable")), qualifiers(pub(crate)))]
+    fn from_request_and_body_hash<B>(
+        request: &Request<B>,
+        body_hash: &str,
+        options: SignatureOptions,
+    ) -> Result<Self, SignatureError> {
+        if options.url_encode_form {
+            return Err(SignatureError::InternalServiceError(MSG_INTERNAL_SERVICE_ERROR.into()));
+        }
+        let canonical_path = canonicalize_uri_path(request.uri().path(), options.s3)?;
+        let query_parameters = query_string_to_normalized_map(request.uri().query().unwrap_or(""))?;
+        let headers = normalize_headers(request.headers());
+
+        let mut sanitized_path = canonical_path.clone();
+        if !query_parameters.is_empty() {
+            sanitized_path.push('?');
+            sanitized_path.push_str(&canonicalize_query_to_string(&query_parameters));
+        }
+
+        Ok(CanonicalRequest {
+            request_method: request.method().to_string(),
+            canonical_path,
+            query_parameters,
+            headers,
+            body_sha256: body_hash.to_string(),
+        })
     }
 
     /// Retrieve the HTTP request method.
@@ -626,7 +664,7 @@ pub trait SignedHeaderRequirements {
     fn prefixes(&self) -> &[Cow<'_, str>];
 }
 
-/// Static implementation of [SignedHeaderRequirements] that uses slices of string slices.
+/// Static implementation of [`SignedHeaderRequirements`] that uses slices of string slices.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SliceSignedHeaderRequirements<'a, 'b, 'c> {
     /// Headers that must always be present in SignedHeaders.
