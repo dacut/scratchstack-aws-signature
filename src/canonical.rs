@@ -171,8 +171,8 @@ impl CanonicalRequest {
         .into_iter()
         .all(|p| query_parameters.contains_key(p));
         let payload_is_unsigned = is_presigned_url
-            || query_parameters.get(QP_X_AMZ_CONTENT_SHA256).and_then(|values| values.first()).map(String::as_str)
-                == Some(UNSIGNED_PAYLOAD);
+            || headers.get(HDR_X_AMZ_CONTENT_SHA256).and_then(|values| values.first()).map(|v| v.as_slice())
+                == Some(UNSIGNED_PAYLOAD.as_bytes());
         let body_sha256 = if payload_is_unsigned {
             UNSIGNED_PAYLOAD.to_string()
         } else {

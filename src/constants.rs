@@ -168,9 +168,6 @@ pub(crate) const QP_X_AMZ_ALGORITHM: &str = "X-Amz-Algorithm";
 /// Query parameter for delivering the access key
 pub(crate) const QP_X_AMZ_CREDENTIAL: &str = "X-Amz-Credential";
 
-/// Query parameter for the SHA-256 of the payload
-pub(crate) const QP_X_AMZ_CONTENT_SHA256: &str = "X-Amz-Content-Sha256";
-
 /// Query parameter for delivering the date
 pub(crate) const QP_X_AMZ_DATE: &str = "X-Amz-Date";
 
