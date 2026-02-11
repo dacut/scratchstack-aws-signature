@@ -16,7 +16,6 @@ name = "scratchstack_aws_signature"
 
 [features]
 default = []
-streaming = [ "tokio" ]
 unstable = []
 
 [dependencies]
