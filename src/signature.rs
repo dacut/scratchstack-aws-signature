@@ -856,7 +856,7 @@ mod tests {
         assert!(opt1.s3);
         assert!(!opt1.url_encode_form);
 
-        assert_eq!(format!("{:?}", opt1), "SignatureOptions { s3: true, url_encode_form: false, allowed_mismatch: TimeDelta { secs: 900, nanos: 0 } }");
+        assert_eq!(opt1.allowed_mismatch, Duration::seconds(900));
     }
 
     #[test_log::test(tokio::test)]
