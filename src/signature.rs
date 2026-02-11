@@ -72,7 +72,7 @@ impl SignatureOptions {
 /// State for ongoing signature validation in streamed requests.
 ///
 /// This is returned during the initial validation of the request headers by [`sigv4_validate_streaming_headers`],
-/// and is later passed into the validation of each body chunk by [`sigv4_validate_streaming_chunk`].
+/// and is used to validate chunks via [`StreamingSignatureState::sigv4_validate_streaming_chunk`].
 #[derive(Clone, Debug)]
 pub struct StreamingSignatureState {
     /// The principal and session information from the authenticator response.
