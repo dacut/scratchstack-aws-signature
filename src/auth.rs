@@ -38,17 +38,17 @@ pub struct SigV4Authenticator {
     /// The credential passed into the request, in the form of `keyid/date/region/service/aws4_request`.
     /// The date must reflect that of the request timestamp in `YYYYMMDD` format, not the server's
     /// date. Timestamp validation is performed separately.
-    credential: String,
+    pub(crate) credential: String,
 
     /// The optional session token.
     #[builder(setter(into, strip_option), default)]
     session_token: Option<String>,
 
     /// The signature passed into the request.
-    signature: String,
+    pub(crate) signature: String,
 
     /// The timestamp of the request, from either `X-Amz-Date` query string/header or the `Date` header.
-    request_timestamp: DateTime<Utc>,
+    pub(crate) request_timestamp: DateTime<Utc>,
 }
 
 impl SigV4Authenticator {

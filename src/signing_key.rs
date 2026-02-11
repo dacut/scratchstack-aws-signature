@@ -326,7 +326,7 @@ pub struct GetSigningKeyResponse {
     pub(crate) session_data: SessionData,
 
     /// The signing key.
-    signing_key: KSigningKey,
+    pub(crate) signing_key: KSigningKey,
 }
 
 impl GetSigningKeyResponse {
