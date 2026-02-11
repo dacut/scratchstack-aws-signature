@@ -123,6 +123,7 @@
 #![warn(rustdoc::missing_crate_level_docs)]
 #![cfg_attr(doc, feature(doc_cfg))]
 
+mod body;
 mod chronoutil;
 pub(crate) mod constants;
 mod crypto;
@@ -134,7 +135,8 @@ pub mod auth;
 pub mod canonical;
 
 pub use {
-    error::*, scratchstack_aws_principal as principal, scratchstack_errors as errors, signature::*, signing_key::*,
+    body::*, error::*, scratchstack_aws_principal as principal, scratchstack_errors as errors, signature::*,
+    signing_key::*,
 };
 
 #[doc(inline)]
