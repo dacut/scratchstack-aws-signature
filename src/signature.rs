@@ -1,13 +1,15 @@
 use {
     crate::{
         auth::SigV4AuthenticatorResponse, body::IntoRequestBytes, canonical::CanonicalRequest, constants::*,
-        GetSigningKeyRequest, GetSigningKeyResponse, SignedHeaderRequirements,
+        crypto::hmac_sha256, GetSigningKeyRequest, GetSigningKeyResponse, KSigningKey, SignatureError,
+        SignedHeaderRequirements,
     },
     bytes::Bytes,
     chrono::{DateTime, Duration, Utc},
     http::request::{Parts, Request},
     log::trace,
     std::future::Future,
+    subtle::ConstantTimeEq,
     tower::{BoxError, Service},
 };
 
@@ -21,6 +23,11 @@ pub struct SignatureOptions {
     pub url_encode_form: bool,
 
     /// The allowed mismatch between the request timestamp and the server timestamp.
+    /// This defaults to 15 minutes (the default used by AWS).
+    ///
+    /// This is exposed to allow testing of static requests with a fixed timestamp and signature,
+    /// and to test for clock skew in real requests. In production, this should typically be left
+    /// at the default value.
     pub allowed_mismatch: Duration,
 }
 
@@ -60,6 +67,32 @@ impl SignatureOptions {
         url_encode_form: false,
         allowed_mismatch: Duration::minutes(ALLOWED_MISMATCH_MINUTES),
     };
+}
+
+/// State for ongoing signature validation in streamed requests.
+///
+/// This is returned during the initial validation of the request headers by [`sigv4_validate_streaming_headers`],
+/// and is later passed into the validation of each body chunk by [`sigv4_validate_streaming_chunk`].
+#[derive(Clone, Debug)]
+pub struct StreamingSignatureState {
+    /// The principal and session information from the authenticator response.
+    pub auth_response: SigV4AuthenticatorResponse,
+
+    /// The algorithm string used to sign the request.
+    algorithm: String,
+
+    /// The signing key for the request.
+    signing_key: KSigningKey,
+
+    /// The authentication scope, in the form of `date/region/service/aws4_request`.
+    scope: String,
+
+    /// The timestamp of the request.
+    request_timestamp: String,
+
+    /// The previous signature in the chain. The initial value is the signature of the headers, and each chunk is
+    /// signed with a signature that includes the previous signature.
+    prev_signature: String,
 }
 
 /// Validate an AWS SigV4 request.
@@ -153,13 +186,14 @@ where
 pub async fn sigv4_validate_streaming_headers<B, G, F, S>(
     request: &Request<B>,
     body_hash: &str,
+    algorithm: impl Into<String>,
     region: &str,
     service: &str,
     get_signing_key: &mut G,
     server_timestamp: DateTime<Utc>,
     required_headers: &S,
     options: SignatureOptions,
-) -> Result<GetSigningKeyResponse, BoxError>
+) -> Result<StreamingSignatureState, BoxError>
 where
     G: Service<GetSigningKeyRequest, Response = GetSigningKeyResponse, Error = BoxError, Future = F> + Send,
     F: Future<Output = Result<GetSigningKeyResponse, BoxError>> + Send,
@@ -182,9 +216,70 @@ where
         gsk_response.signing_key(),
     )?;
 
-    // The response from the get_signing_key call contains the principal and session
-    // information, along with the key needed to validate parts of the body.
-    Ok(gsk_response)
+    let auth_response = SigV4AuthenticatorResponse::builder()
+        .principal(gsk_response.principal)
+        .session_data(gsk_response.session_data)
+        .build()
+        .unwrap();
+
+    let mut credential_parts = auth.credential.splitn(2, '/');
+    let Some(_keyid) = credential_parts.next() else {
+        // This should have been validated in the authenticator; fail if it's an empty string.
+        panic!("Credential must have at least one slash-delimited element, the key ID. Got '{}'", auth.credential);
+    };
+
+    let Some(scope) = credential_parts.next() else {
+        // Again, this should have been validated in the authenticator; fail if it's an empty string.
+        panic!(
+            "Credential must have at least two slash-delimited elements, the key ID and scope. Got '{}'",
+            auth.credential
+        );
+    };
+
+    let response = StreamingSignatureState {
+        auth_response,
+        algorithm: algorithm.into(),
+        signing_key: gsk_response.signing_key,
+        scope: scope.to_string(),
+        request_timestamp: auth.request_timestamp.format(ISO8601_COMPACT_FORMAT).to_string(),
+        prev_signature: auth.signature,
+    };
+
+    Ok(response)
+}
+
+impl StreamingSignatureState {
+    /// Validate AWS SigV4 streaming chunk.
+    ///
+    /// # Errors
+    /// This function returns a [`SignatureError`][crate::SignatureError] if the HTTP request is
+    /// malformed or the request was not properly signed. The validation follows the
+    /// [AWS Auth Error Ordering](https://github.com/dacut/scratchstack-aws-signature/blob/main/docs/AWS%20Auth%20Error%20Ordering.pdf)
+    /// document.
+    pub fn sigv4_validate_streaming_chunk(
+        &mut self,
+        chunk_hash: &str,
+        chunk_signature: impl Into<String>,
+    ) -> Result<(), SignatureError> {
+        let chunk_signature = chunk_signature.into();
+        let string_to_sign = format!(
+            "{}\n{}\n{}\n{}\n{}\n{}",
+            self.algorithm, self.request_timestamp, self.scope, self.prev_signature, SHA256_EMPTY, chunk_hash
+        );
+
+        let expected_signature = hex::encode(hmac_sha256(self.signing_key.as_ref(), &string_to_sign.as_bytes()));
+        let expected_signature_bytes = expected_signature.as_bytes();
+        let chunk_signature_bytes = chunk_signature.as_bytes();
+        let is_equal: bool = chunk_signature_bytes.ct_eq(expected_signature_bytes).into();
+        if !is_equal {
+            trace!("Chunk signature mismatch: expected '{}', got '{}'", expected_signature, chunk_signature);
+            self.prev_signature = chunk_signature;
+            Err(SignatureError::SignatureDoesNotMatch(Some(MSG_REQUEST_SIGNATURE_MISMATCH.to_string())))
+        } else {
+            self.prev_signature = chunk_signature;
+            Ok(())
+        }
+    }
 }
 
 #[cfg(test)]
@@ -853,9 +948,10 @@ mod tests {
         required_headers.add_always_present("x-amz-date");
         required_headers.add_always_present("x-amz-decoded-content-length");
         required_headers.add_always_present("x-amz-storage-class");
-        sigv4_validate_streaming_headers(
+        let mut sig_state = sigv4_validate_streaming_headers(
             &req,
             "STREAMING-AWS4-HMAC-SHA256-PAYLOAD",
+            "AWS4-HMAC-SHA256-PAYLOAD",
             "us-east-1",
             "s3",
             &mut get_signing_key_svc,
@@ -865,5 +961,29 @@ mod tests {
         )
         .await
         .expect("Failed to validate streaming headers");
+
+        // Check the first chunk.
+        sig_state
+            .sigv4_validate_streaming_chunk(
+                "bf718b6f653bebc184e1479f1935b8da974d701b893afcf49e701f3e2f9f9c5a",
+                "ad80c730a21e5b8d04586a2213dd63b9a0e99e0e2307b0ade35a65485a288648",
+            )
+            .expect("Failed to validate first chunk");
+
+        // Check the second chunk.
+        sig_state
+            .sigv4_validate_streaming_chunk(
+                "2edc986847e209b4016e141a6dc8716d3207350f416969382d431539bf292e4a",
+                "0055627c9e194cb4542bae2aa5492e3c1575bbb81b612b7d234b86a503ef5497",
+            )
+            .expect("Failed to validate second chunk");
+
+        // Check the terminating chunk.
+        sig_state
+            .sigv4_validate_streaming_chunk(
+                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "b6c6ea8a5354eaf15b3cb7646744f4275b71ea724fed81ceb9323e279d449df9",
+            )
+            .expect("Failed to validate terminating chunk");
     }
 }
