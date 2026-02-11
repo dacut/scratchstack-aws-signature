@@ -215,12 +215,6 @@ impl CanonicalRequest {
         let query_parameters = query_string_to_normalized_map(request.uri().query().unwrap_or(""))?;
         let headers = normalize_headers(request.headers());
 
-        let mut sanitized_path = canonical_path.clone();
-        if !query_parameters.is_empty() {
-            sanitized_path.push('?');
-            sanitized_path.push_str(&canonicalize_query_to_string(&query_parameters));
-        }
-
         Ok(CanonicalRequest {
             request_method: request.method().to_string(),
             canonical_path,
