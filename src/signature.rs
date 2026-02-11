@@ -267,7 +267,7 @@ impl StreamingSignatureState {
             self.algorithm, self.request_timestamp, self.scope, self.prev_signature, SHA256_EMPTY, chunk_hash
         );
 
-        let expected_signature = hex::encode(hmac_sha256(self.signing_key.as_ref(), &string_to_sign.as_bytes()));
+        let expected_signature = hex::encode(hmac_sha256(self.signing_key.as_ref(), string_to_sign.as_bytes()));
         let expected_signature_bytes = expected_signature.as_bytes();
         let chunk_signature_bytes = chunk_signature.as_bytes();
         let is_equal: bool = chunk_signature_bytes.ct_eq(expected_signature_bytes).into();
