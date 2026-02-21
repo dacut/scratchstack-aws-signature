@@ -174,8 +174,8 @@ impl CanonicalRequest {
         .into_iter()
         .all(|p| query_parameters.contains_key(p));
         let payload_is_unsigned = is_presigned_url
-            || query_parameters.get(QP_X_AMZ_CONTENT_SHA256).and_then(|values| values.first()).map(String::as_str)
-                == Some(XACS_UNSIGNED_PAYLOAD);
+            || headers.get(HDR_X_AMZ_CONTENT_SHA256).and_then(|values| values.first()).map(|v| v.as_slice())
+                == Some(XACS_UNSIGNED_PAYLOAD.as_bytes());
         let body_sha256 = if payload_is_unsigned {
             XACS_UNSIGNED_PAYLOAD.to_string()
         } else {
@@ -1293,6 +1293,7 @@ mod tests {
                 canonicalize_query_to_string, canonicalize_uri_path, normalize_uri_path_component,
                 query_string_to_normalized_map, unescape_uri_encoding, CanonicalRequest,
             },
+            constants::*,
             SignatureError, SignatureOptions, NO_ADDITIONAL_SIGNED_HEADERS,
         },
         bytes::Bytes,
@@ -2118,6 +2119,21 @@ mod tests {
         } else {
             panic!("Unexpected error: {:?}", e);
         }
+    }
+
+    #[test_log::test]
+    fn test_presigned_url_good() {
+        let uri = Uri::builder().path_and_query(PathAndQuery::from_static("/?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=1234&X-Amz-Date=20150830T123600Z&X-Amz-Expires=86400&X-Amz-SignedHeaders=host&X-Amz-Signature=5678&X-Amz-SecurityToken=Foo")).build().unwrap();
+        let request = Request::builder()
+            .method(Method::PUT)
+            .uri(uri)
+            .header("host", "example.amazonaws.com")
+            .body(Bytes::new())
+            .unwrap();
+        let (cr, _, _) =
+            CanonicalRequest::from_request_parts(request.into_parts().0, Bytes::new(), SignatureOptions::default())
+                .unwrap();
+        assert_eq!(cr.body_sha256, XACS_UNSIGNED_PAYLOAD);
     }
 
     #[test_log::test]
