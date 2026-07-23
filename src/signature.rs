@@ -1009,4 +1009,49 @@ mod tests {
         .await
         .is_ok());
     }
+
+    #[test_log::test(tokio::test)]
+    async fn test_non_presigned_unsigned_payload() {
+        // A genuine request captured from the real `mc` (MinIO client) binary, which sends
+        // `X-Amz-Content-Sha256: UNSIGNED-PAYLOAD` on an ordinary, non-presigned request for its
+        // internal GetBucketLocation lookup whenever the endpoint is HTTPS and no region has been
+        // configured. Captured by running, against a local HTTPS endpoint using the credentials
+        // below:
+        //
+        //     mc alias set testtarget https://<endpoint> AKIDEXAMPLE \
+        //         wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY --api S3v4
+        //     mc --insecure rm testtarget/test-bucket/test-object
+        let mut get_signing_key_svc = service_for_signing_key_fn(get_signing_key);
+        let req = Request::builder()
+            .method(Method::GET)
+            .uri("https://127.0.0.1:8899/test-bucket/?location=")
+            .header(http::header::HOST, "127.0.0.1:8899")
+            .header("X-Amz-Date", "20260723T150030Z")
+            .header("X-Amz-Content-Sha256", "UNSIGNED-PAYLOAD")
+            .header(
+                "Authorization",
+                "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20260723/us-east-1/s3/aws4_request, \
+                 SignedHeaders=host;x-amz-content-sha256;x-amz-date, \
+                 Signature=ab3b5ccbe6939e619822bc16d22754aa4c86134179dac47ddf3f11da9ef7eeab",
+            )
+            .body(Bytes::new())
+            .unwrap();
+
+        let request_timestamp = DateTime::from_naive_utc_and_offset(
+            NaiveDate::from_ymd_opt(2026, 7, 23).unwrap().and_hms_opt(15, 0, 30).unwrap(),
+            Utc,
+        );
+
+        assert!(sigv4_validate_request(
+            req,
+            "us-east-1",
+            "s3",
+            &mut get_signing_key_svc,
+            request_timestamp,
+            &NO_ADDITIONAL_SIGNED_HEADERS,
+            SignatureOptions::S3,
+        )
+        .await
+        .is_ok());
+    }
 }
